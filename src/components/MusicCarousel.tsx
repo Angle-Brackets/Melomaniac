@@ -11,16 +11,18 @@ const MusicCarousel = () => {
     const [selectedItem, setSelectedItem] = useState(0);
 
     return (
-        <div className="container">
+        <div className="container relative overflow-hidden">
             <Swiper
                 effect={"coverflow"}
                 centeredSlides={true}
                 slidesPerView="auto"  // Automatically adjust based on slide width
                 coverflowEffect={{
-                    rotate: 0,
+                    rotate: 15,
                     stretch: 0,
+                    scale: 0.90,
                     depth: 100,
-                    modifier: 2.5
+                    slideShadows: true,
+                    modifier: 1
                 }}
                 onSlideChange={(swiper) => setSelectedItem(swiper.activeIndex)}
                 modules={[EffectCoverflow]}
@@ -49,7 +51,6 @@ const MusicCarousel = () => {
                     <MusicCard />
                 </SwiperSlide>
             </Swiper>
-            <p>Selected Slide: {selectedItem}</p>
         </div>
     );
 }
