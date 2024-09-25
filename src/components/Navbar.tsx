@@ -6,7 +6,7 @@ const Navbar = () => {
         <div className="navbar backdrop-blur-3xl opacity-90 bg-neutral sticky top-0 z-50">
             <div className="flex-none">
                 <label className="btn btn-circle btn-ghost swap swap-rotate">
-                    <input type="checkbox" />
+                    <input type="checkbox" defaultValue={"true"}/>
                     <FaBars className="text-2xl swap-on" />
                     <FaTimes className="text-2xl swap-off" />
                 </label>

@@ -1,4 +1,5 @@
 import { FaPlayCircle, FaPauseCircle, FaFastForward, FaFastBackward, FaRegHeart, FaHeart, FaPlus} from "react-icons/fa";
+import { FaShuffle } from "react-icons/fa6";
 
 const MusicControls = () => {
     return (
@@ -9,13 +10,15 @@ const MusicControls = () => {
                     <FaFastBackward/>
                 </button>
 
-                <button className="btn btn-circle btn-ghost text-3xl">
-                    <label className="swap">
-                        <input type="checkbox"/>
-                        <FaHeart className="swap-on fill-current"/>
-                        <FaRegHeart className="swap-off fill-current"/>
-                    </label>
-                </button>
+                <div className="tooltip" data-tip="Toggle Shuffle">
+                    <button className="btn btn-circle btn-ghost text-3xl">
+                        <label className="swap">
+                            <input type="checkbox"/>
+                            <FaShuffle className="swap-on fill-cyan-200"/>
+                            <FaShuffle className="swap-off fill-current"/>
+                        </label>
+                    </button>
+                </div>
 
                 <button className="btn btn-circle btn-ghost text-3xl">
                     <label className="swap swap-rotate">
