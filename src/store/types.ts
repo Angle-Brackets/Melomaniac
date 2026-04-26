@@ -15,6 +15,8 @@ export enum RepeatMode {
 
 // All fields use snake_case to match the Rust TrackRecord serde output directly.
 // artwork_hash is a BLAKE3 hash of the artwork blob in CAS, not a URL or path.
+// mime_type is the IANA media type (e.g. "audio/mpeg") needed by iOS/Android because
+// CAS blob paths have no file extension. Null for pre-migration rows.
 export type TrackRecord = {
   hash:         string
   title:        string
@@ -23,6 +25,7 @@ export type TrackRecord = {
   artwork_hash: string | null
   duration_ms:  number
   favorited:    boolean
+  mime_type:    string | null
 }
 
 // BranchRecord mirrors the Rust BranchRecord. head_commit is null for an empty branch.

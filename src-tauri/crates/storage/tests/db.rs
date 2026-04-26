@@ -16,6 +16,7 @@ fn track(hash: &str) -> TrackRecord {
         artwork_hash: None,
         duration_ms:  180_000,
         favorited:    false,
+        mime_type:    None,
     }
 }
 

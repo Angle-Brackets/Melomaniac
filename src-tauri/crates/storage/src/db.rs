@@ -15,6 +15,10 @@ pub struct TrackRecord {
     pub artwork_hash: Option<String>,
     pub duration_ms:  i64,   // sqlx maps INTEGER → i64; cast at the command boundary if needed
     pub favorited:    bool,
+    /// IANA media type of the audio blob (e.g. `"audio/mpeg"`, `"audio/flac"`).
+    /// NULL for pre-migration rows. Passed to iOS/Android as a format hint because
+    /// CAS blob paths have no file extension.
+    pub mime_type:    Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -76,12 +80,12 @@ impl Database {
         // OR IGNORE: idempotent — re-ingesting a file with the same hash is a no-op
         sqlx::query(
             "INSERT OR IGNORE INTO tracks
-             (hash, title, artist, album, artwork_hash, duration_ms, favorited)
-             VALUES (?, ?, ?, ?, ?, ?, ?)"
+             (hash, title, artist, album, artwork_hash, duration_ms, favorited, mime_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&r.hash).bind(&r.title).bind(&r.artist)
         .bind(&r.album).bind(&r.artwork_hash)
-        .bind(r.duration_ms).bind(r.favorited)
+        .bind(r.duration_ms).bind(r.favorited).bind(&r.mime_type)
         .execute(&self.pool).await?;
         Ok(())
     }

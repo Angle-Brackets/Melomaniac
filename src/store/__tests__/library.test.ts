@@ -15,7 +15,7 @@ function makeStore() {
 }
 
 function track(hash: string, favorited = false): TrackRecord {
-  return { hash, title: 'T', artist: 'A', album: null, artwork_hash: null, duration_ms: 1000, favorited }
+  return { hash, title: 'T', artist: 'A', album: null, artwork_hash: null, duration_ms: 1000, favorited, mime_type: null }
 }
 
 let store: ReturnType<typeof makeStore>

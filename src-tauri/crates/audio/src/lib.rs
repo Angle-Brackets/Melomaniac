@@ -53,6 +53,11 @@ pub struct TrackMetadata {
     /// Absolute path to artwork image for lockscreen display.
     pub artwork_path: Option<PathBuf>,
     pub duration_ms: Option<u64>,
+    /// IANA media type of the audio blob (e.g. `"audio/mpeg"`, `"audio/flac"`).
+    /// Passed to iOS as `AVAudioPlayer(contentsOf:fileTypeHint:)` and to Android as
+    /// `MediaItem.Builder().setMimeType(...)`. NULL-safe: platforms fall back to
+    /// magic-byte detection when absent.
+    pub mime_type: Option<String>,
 }
 
 /// Events emitted by a running [`AudioBridge`] back to the Tauri layer.

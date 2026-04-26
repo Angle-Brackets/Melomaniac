@@ -70,6 +70,7 @@ fn track_metadata_roundtrip() {
         album:        Some("Test Album".into()),
         artwork_path: None,
         duration_ms:  Some(180_000),
+        mime_type:    Some("audio/mpeg".into()),
     };
 
     let json   = serde_json::to_string(&meta).unwrap();
@@ -90,6 +91,7 @@ fn track_metadata_optional_fields_absent_in_json() {
         album:        None,
         artwork_path: None,
         duration_ms:  None,
+        mime_type:    None,
     };
     let json = serde_json::to_string(&meta).unwrap();
     // serde defaults Option → null, not missing, so just check the required fields are present
@@ -148,7 +150,7 @@ fn bridge_load_missing_file_errors() {
     let bridge = DesktopBridge::new(tx).expect("failed to open audio device");
     let meta = TrackMetadata {
         title: "X".into(), artist: "Y".into(),
-        album: None, artwork_path: None, duration_ms: None,
+        album: None, artwork_path: None, duration_ms: None, mime_type: None,
     };
     let err = bridge
         .load(&AudioSource::File("/nonexistent/path.mp3".into()), meta)
