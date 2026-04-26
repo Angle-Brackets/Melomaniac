@@ -28,7 +28,7 @@
 - [ ] Verify background audio persistence when app is minimised on Android
 - [ ] Implement lockscreen controls (play, pause, skip) on iOS
 - [ ] Implement lockscreen controls (play, pause, skip) on Android
-- [ ] Expose `play`, `pause`, `seek`, `stop` Tauri commands to frontend
+- [x] Expose `play`, `pause`, `seek`, `stop`, `audio_load`, `audio_set_volume`, `audio_position` Tauri commands to frontend
 
 ### yt-dlp Ingestion Wrapper
 - [ ] Implement `std::process::Command` wrapper around `yt-dlp` binary
@@ -58,13 +58,18 @@
 - [ ] Document self-hosting setup in README
 
 ### React Frontend Scaffolding
-- [ ] Set up Zustand store with slices for queue, playback state, and library
+- [x] Set up Zustand store with slices for queue, playback state, library, and playlist (`src/store/`)
+  - `playbackSlice` — `isPlaying`, `loadedTrackHash`, `duration_ms`, `volume`; `position_ms` intentionally excluded (lives in `useRef` for rAF loop)
+  - `queueSlice` — `queueTracks`, `currentIndex`, `ShuffleMode` (`Off`/`Random`/`Smart`), `RepeatMode` (`None`/`One`/`All`), `shuffledQueue` lookahead (default 20), `shuffleHistory` dedup; `Smart` uses Fisher-Yates permutation, `Random` samples with history dedup
+  - `librarySlice` — `TrackMeta[]` with `favorited: boolean`; `toggleFavorite` uses optimistic update with rollback; stubs `library_get_all` / `library_set_favorite` Tauri commands
+  - `playlistSlice` — `playlists: PlaylistMeta[]`, `currentCommitHash`; no-op until CAS/Commit layer is built
 - [ ] Implement `requestAnimationFrame` progress bar loop via `useRef` (no React re-renders)
 - [ ] Implement virtualized tracklist with `tanstack/react-virtual` (target: 10,000+ tracks)
 - [ ] Build player controls UI (play, pause, seek, skip, volume)
 - [ ] Build library view wired to SQLite metadata via Tauri invoke
 - [ ] Build basic playlist view rendering Tree manifest tracks
-- [ ] Wire frontend playback controls to native audio bridge Tauri commands
+- [x] Verify end-to-end audio playback on Linux (`tests/audio/test.mp3` hardcoded in `App.tsx` useEffect — confirmed working, **remove before real wiring**)
+- [ ] Wire `MusicControls` buttons to audio invoke commands (play, pause, seek, volume)
 - [ ] Wire yt-dlp ingest UI (URL input → download → library refresh)
 
 ---

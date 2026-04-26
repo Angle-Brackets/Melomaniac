@@ -53,7 +53,7 @@ All P0 tasks must be complete before starting P1.
 - Dockerized with `Dockerfile` + `docker-compose.yml`
 
 **React Frontend**
-- Zustand store: `queue`, `playback`, and `library` slices
+- Zustand store implemented at `src/store/` — see store slice summary in Architectural Constraints
 - Progress bar via `requestAnimationFrame` + `useRef` — **no React state re-renders** for the seek position
 - Virtualized tracklist with `tanstack/react-virtual` (must handle 10,000+ tracks)
 - Wire all controls to native audio bridge Tauri commands
@@ -82,6 +82,10 @@ All P0 tasks must be complete before starting P1.
 | CAS writes | Always BLAKE3-hash first, check for existing blob, skip write if duplicate. |
 | Sync conflicts | Use Automerge CRDTs for playlist divergence. Do not implement custom merge logic. |
 | Telemetry | Store only in local SQLite. No network calls for analytics. |
+| Tauri dev CWD | The Tauri binary runs with `src-tauri/` as its working directory in dev mode. File paths passed from the frontend must be relative to `src-tauri/` (e.g. `"../tests/audio/test.mp3"` to reach the project root) or absolute. This will not be an issue once `audio_load` resolves hashes via CAS. |
+| TypeScript enums | Use `enum` with string values (e.g. `Off = 'Off'`), not `const enum`. Vite's `isolatedModules` mode breaks `const enum` across files. String values also survive JSON round-trips without a lookup table. |
+| Zustand store | All global state lives in `src/store/`. Slices: `playbackSlice`, `queueSlice`, `librarySlice`, `playlistSlice`. Import via `useStore` from `src/store/index.ts`. If a slice needs to read another slice's state, widen its `StateCreator` generic to `StoreState` and use `import type { StoreState } from './index'` to avoid a circular runtime dependency. |
+| Shuffle queue | Both `ShuffleMode.Random` and `ShuffleMode.Smart` pre-generate `lookahead` (default 20) upcoming hashes into `shuffledQueue` so the UI always has tracks to display. `Smart` uses a full Fisher-Yates permutation (no repeats per cycle); `Random` samples with `shuffleHistory` dedup. Never pick the next track lazily — always maintain the lookahead window. |
 
 ---
 
@@ -117,8 +121,8 @@ SQLite tables:
 | Styling | Tailwind CSS + DaisyUI |
 | Icons | react-icons |
 | Carousel | Swiper (coverflow effect) |
-| State | Zustand |
-| Virtual list | tanstack/react-virtual |
+| State | Zustand 5 (`src/store/` — 4 slices wired) |
+| Virtual list | tanstack/react-virtual (not yet installed) |
 | Rust audio | tauri-plugin-native-audio, tauri-plugin-media |
 | Rust hashing | blake3 |
 | Rust DB | sqlx or rusqlite (SQLite) |
