@@ -27,11 +27,11 @@ const MusicCarousel = () => {
                 onSlideChange={(swiper) => setSelectedItem(swiper.activeIndex)}
                 modules={[EffectCoverflow]}
             >
-                <SwiperSlide className="!w-80"> 
+                <SwiperSlide className="!w-80">
                     <MusicCard />
                 </SwiperSlide>
 
-                <SwiperSlide className="!w-80">  
+                <SwiperSlide className="!w-80">
                     <MusicCard />
                 </SwiperSlide>
 
