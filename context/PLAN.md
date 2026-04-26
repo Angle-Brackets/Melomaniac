@@ -7,8 +7,11 @@
 ## P0 — Core Engine (MVP)
 
 ### Tauri v2 Workspace
-- [ ] Initialise Tauri v2 project with Vite + React + TypeScript frontend
-- [ ] Configure workspace for iOS and Android compilation targets
+- [x] Initialise Tauri v2 project with Vite + React + TypeScript frontend
+- [x] Upgrade all Tauri packages from RC to stable v2 (tauri 2.10.3, tauri-build 2.5.6, tauri-plugin-shell 2.3.5, @tauri-apps/cli/api 2.10.1)
+- [x] Upgrade frontend toolchain (Vite 5→6, @vitejs/plugin-react 4→5, Swiper 11→12, 0 audit vulnerabilities)
+- [x] Gitignore generated targets: `src-tauri/gen/apple`, `src-tauri/gen/android`, `src-tauri/gen/schemas`, `src-tauri/target`
+- [ ] Configure workspace for iOS and Android compilation targets (requires Xcode — in progress)
 - [ ] Verify a "Hello World" build runs on Desktop, iOS simulator, and Android emulator
 - [ ] Set up project directory structure (`.melomaniac/objects/`, `src/`, `src-tauri/`)
 

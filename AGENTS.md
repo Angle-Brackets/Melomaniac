@@ -2,6 +2,15 @@
 
 Guidance for AI agents developing Melomaniac. Read `CLAUDE.md` first for commands and current architecture, then use this file for roadmap context and implementation rules.
 
+## Agent Workflow Rule
+
+After successfully completing any task, **always update `context/PLAN.md`**:
+- Mark finished items with `[x]`
+- Add new items for any work done that wasn't already listed
+- Update wording if the approach differed from the original description
+
+Do not update PLAN.md for partial or failed work — only on verified completion.
+
 ---
 
 ## What This App Is
