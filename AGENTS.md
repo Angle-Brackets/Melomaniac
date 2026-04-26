@@ -32,7 +32,7 @@ All P0 tasks must be complete before starting P1.
 
 **Native Audio Bridge** (highest risk — tackle first within P0)
 - Integrate `tauri-plugin-native-audio` and `tauri-plugin-media`
-- AVPlayer bridge for iOS background audio; ExoPlayer/Media3 for Android
+- AVPlayer bridge for iOS background audio (currently using a placeholder `IosBridge` stub to allow compilation); ExoPlayer/Media3 for Android
 - Lockscreen controls (play, pause, skip) on both platforms
 - Expose `play`, `pause`, `seek`, `stop` as Tauri commands
 

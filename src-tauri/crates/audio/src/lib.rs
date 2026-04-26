@@ -3,6 +3,9 @@ use std::path::PathBuf;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod desktop;
 
+#[cfg(target_os = "ios")]
+pub mod ios;
+
 // ── Uninhabited marker ────────────────────────────────────────────────────────
 //
 // `sealed::Unimplemented` has no variants, so no value of that type can ever

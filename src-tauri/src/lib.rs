@@ -14,13 +14,26 @@ pub fn run() {
         .setup(|app| {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<AudioEvent>();
 
-            #[cfg(desktop)]
             let bridge = {
-                use melomaniac_audio::desktop::DesktopBridge;
-                Arc::new(
-                    DesktopBridge::new(event_tx)
-                        .expect("failed to open audio output device"),
-                ) as Arc<dyn melomaniac_audio::AudioBridge>
+                #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+                {
+                    use melomaniac_audio::desktop::DesktopBridge;
+                    Arc::new(
+                        DesktopBridge::new(event_tx)
+                            .expect("failed to open audio output device"),
+                    ) as Arc<dyn melomaniac_audio::AudioBridge>
+                }
+
+                #[cfg(target_os = "ios")]
+                {
+                    use melomaniac_audio::ios::IosBridge;
+                    Arc::new(IosBridge::new(event_tx)) as Arc<dyn melomaniac_audio::AudioBridge>
+                }
+
+                #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "ios")))]
+                {
+                    panic!("Audio bridge not implemented for this platform");
+                }
             };
 
             // Forward AudioEvents from the bridge to the frontend via Tauri events.

@@ -11,8 +11,8 @@
 - [x] Upgrade all Tauri packages from RC to stable v2 (tauri 2.10.3, tauri-build 2.5.6, tauri-plugin-shell 2.3.5, @tauri-apps/cli/api 2.10.1)
 - [x] Upgrade frontend toolchain (Vite 5→6, @vitejs/plugin-react 4→5, Swiper 11→12, 0 audit vulnerabilities)
 - [x] Gitignore generated targets: `src-tauri/gen/apple`, `src-tauri/gen/android`, `src-tauri/gen/schemas`, `src-tauri/target`
-- [ ] Configure workspace for iOS and Android compilation targets (requires Xcode — in progress)
-- [ ] Verify a "Hello World" build runs on Desktop, iOS simulator, and Android emulator
+- [x] Configure workspace for iOS and Android compilation targets (requires Xcode — fixed version mismatch for Xcode 15.4)
+- [ ] Verify a "Hello World" build runs on Desktop [x], iOS simulator [x], and Android emulator [ ]
 - [ ] Set up project directory structure (`.melomaniac/objects/`, `src/`, `src-tauri/`)
 
 ### Native Audio Bridge ⚠️ (Highest Risk — Do First)
@@ -21,6 +21,7 @@
 - [x] Implement desktop backend (`crates/audio/src/desktop.rs`) — dedicated audio thread, `MixerDeviceSink` + `Player` (rodio 0.22 API), `symphonia-all` codecs, atomic position tracking, volume persistence across loads
 - [x] Wire `AudioState` into Tauri managed state; implement all seven Tauri commands in `src/audio.rs` (`audio_load`, `audio_play`, `audio_pause`, `audio_stop`, `audio_seek`, `audio_set_volume`, `audio_position`)
 - [x] Spawn event-forwarding thread: `AudioEvent` → `AppHandle::emit("audio://event")` → frontend
+- [x] Create stub `IosBridge` and update `lib.rs` feature flags to enable iOS compilation
 - [ ] Integrate `tauri-plugin-native-audio` and `tauri-plugin-media`
 - [ ] Implement AVPlayer bridge for iOS background audio
 - [ ] Implement ExoPlayer / Media3 bridge for Android background audio
