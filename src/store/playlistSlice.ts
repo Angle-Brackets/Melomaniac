@@ -1,24 +1,31 @@
 import { StateCreator } from 'zustand'
-import { LoadStatus, PlaylistMeta } from './types'
+import { LoadStatus, PlaylistRecord } from './types'
 
 export type PlaylistSlice = {
-  playlists: PlaylistMeta[]
-  currentCommitHash: string | null // head commit of the active playlist
-  playlistStatus: LoadStatus
+  playlists:          PlaylistRecord[]
+  currentPlaylistId:  string | null   // UUID of the active playlist
+  currentBranchName:  string          // active branch within that playlist; default "main"
+  playlistStatus:     LoadStatus
 
   loadPlaylists: () => Promise<void>
-  setCurrentPlaylist: (commitHash: string) => void
+  setCurrentPlaylist: (id: string) => void
+  setCurrentBranch: (name: string) => void
 }
 
 export const createPlaylistSlice: StateCreator<PlaylistSlice> = (set) => ({
-  playlists: [],
-  currentCommitHash: null,
-  playlistStatus: 'idle',
+  playlists:         [],
+  currentPlaylistId: null,
+  currentBranchName: 'main',
+  playlistStatus:    'idle',
 
-  // No-op until the CAS/Commit layer is built — will walk the commit chain from SQLite
+  // No-op until the CAS/Commit layer is built — Tauri command will be `playlist_get_all`
+  // Returns Vec<PlaylistRecord> with branches eager-loaded
   loadPlaylists: async () => {
     set({ playlistStatus: 'ready' })
   },
 
-  setCurrentPlaylist: (commitHash) => set({ currentCommitHash: commitHash }),
+  setCurrentPlaylist: (id) => set({ currentPlaylistId: id, currentBranchName: 'main' }),
+
+  // Switching branch does not reset the playlist — both are independent selections
+  setCurrentBranch: (name) => set({ currentBranchName: name }),
 })

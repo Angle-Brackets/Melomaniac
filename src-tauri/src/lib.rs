@@ -1,4 +1,5 @@
 mod audio;
+mod storage;
 
 use std::sync::Arc;
 
@@ -37,6 +38,15 @@ pub fn run() {
 
             app.manage(AudioState { bridge });
 
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("failed to resolve app data dir");
+
+            let storage_state = tauri::async_runtime::block_on(storage::init_storage(app_data_dir))
+                .expect("failed to initialise storage");
+            app.manage(storage_state);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -47,6 +57,13 @@ pub fn run() {
             audio::audio_seek,
             audio::audio_set_volume,
             audio::audio_position,
+            storage::library_get_all,
+            storage::library_set_favorite,
+            storage::playlist_get_all,
+            storage::playlist_create,
+            storage::playlist_fork,
+            storage::branch_create,
+            storage::branch_commit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

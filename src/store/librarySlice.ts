@@ -1,9 +1,9 @@
 import { StateCreator } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import { LoadStatus, TrackMeta } from './types'
+import { LoadStatus, TrackRecord } from './types'
 
 export type LibrarySlice = {
-  tracks: TrackMeta[]
+  tracks: TrackRecord[]
   libraryStatus: LoadStatus
 
   loadLibrary: () => Promise<void>
@@ -18,7 +18,7 @@ export const createLibrarySlice: StateCreator<LibrarySlice> = (set, get) => ({
   loadLibrary: async () => {
     set({ libraryStatus: 'loading' })
     try {
-      const tracks = await invoke<TrackMeta[]>('library_get_all')
+      const tracks = await invoke<TrackRecord[]>('library_get_all')
       set({ tracks, libraryStatus: 'ready' })
     } catch {
       set({ libraryStatus: 'error' })

@@ -13,20 +13,35 @@ export enum RepeatMode {
   All  = 'All',
 }
 
-export type TrackMeta = {
-  hash: string
-  title: string
-  artist: string
-  album: string | null
-  artworkHash: string | null
-  duration_ms: number
-  favorited: boolean
+// All fields use snake_case to match the Rust TrackRecord serde output directly.
+// artwork_hash is a BLAKE3 hash of the artwork blob in CAS, not a URL or path.
+export type TrackRecord = {
+  hash:         string
+  title:        string
+  artist:       string
+  album:        string | null
+  artwork_hash: string | null
+  duration_ms:  number
+  favorited:    boolean
 }
 
-export type PlaylistMeta = {
-  commitHash: string
-  name: string
-  trackCount: number
+// BranchRecord mirrors the Rust BranchRecord. head_commit is null for an empty branch.
+export type BranchRecord = {
+  id:          string
+  playlist_id: string
+  name:        string
+  head_commit: string | null
+}
+
+// PlaylistRecord is a repository. branches are always eager-loaded alongside it.
+// forked_from is the UUID of the source playlist, null if this is an original.
+export type PlaylistRecord = {
+  id:          string
+  name:        string
+  description: string | null
+  created_at:  number
+  forked_from: string | null
+  branches:    BranchRecord[]
 }
 
 // Shared across library and playlist slices — avoids repeating the same union in each slice type

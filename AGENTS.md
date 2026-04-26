@@ -41,12 +41,12 @@ All P0 tasks must be complete before starting P1.
 - Audio-only download with FLAC/MP3 format selection
 - Expose ingest command to frontend via `invoke()`
 
-**CAS Storage Model**
-- BLAKE3 hash → blob at `.melomaniac/objects/<xx>/<remaining-hash>`
-- Deduplication check before writing
-- JSON Tree (playlist) and Commit schemas with read/write functions
-- SQLite (via `sqlx` or `rusqlite`) for track metadata index and play metrics
-- Indexer that populates SQLite from CAS on startup
+**CAS Storage Model** ✓ complete
+- `crates/storage` (`melomaniac-storage`) — Tauri-free, independently tested
+- `CasStore`: BLAKE3 → `<app_data_dir>/objects/<xx>/<remaining-62>`, atomic write, dedup
+- `Database`: sqlx SQLite pool, WAL + foreign keys, 4 migrations (tracks, plays/skips, playlists/branches, commits/commit_parents)
+- `Indexer`: startup reconciliation — removes stale DB rows, logs orphan blobs
+- `StorageState` managed by Tauri; 7 commands in `src-tauri/src/storage.rs`
 
 **Axum Sync Server**
 - `/status`, `/pull`, `/push` endpoints
@@ -125,7 +125,7 @@ SQLite tables:
 | Virtual list | tanstack/react-virtual (not yet installed) |
 | Rust audio | tauri-plugin-native-audio, tauri-plugin-media |
 | Rust hashing | blake3 |
-| Rust DB | sqlx or rusqlite (SQLite) |
+| Rust DB | sqlx 0.8 + SQLite (`melomaniac-storage` crate at `crates/storage/`) |
 | Rust HTTP server | Axum |
 | Rust P2P | quinn (QUIC), mdns-sd |
 | Rust CRDT | automerge |

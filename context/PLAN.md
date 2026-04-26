@@ -38,16 +38,17 @@
 - [ ] Expose ingest command to frontend via Tauri invoke
 
 ### Content-Addressable Storage (CAS) Model
-- [ ] Implement `blake3` file hashing for ingested audio and image files
-- [ ] Implement blob storage to `.melomaniac/objects/<xx>/<remaining-hash>`
-- [ ] Implement deduplication check before writing a new blob
-- [ ] Define and implement JSON Tree (playlist) manifest schema
-- [ ] Implement Tree read/write functions
-- [ ] Define and implement JSON Commit schema (tree hash, parent hash, timestamp, device ID)
-- [ ] Implement Commit read/write functions
-- [ ] Set up SQLite database with `sqlx` or `rusqlite`
-- [ ] Implement SQLite schema for track metadata index and play metrics
-- [ ] Implement indexer that populates SQLite from CAS objects on startup
+- [x] Implement `blake3` file hashing for ingested audio and image files (`crates/storage/src/cas.rs` — `CasStore::hash`)
+- [x] Implement blob storage to `<app_data_dir>/objects/<xx>/<remaining-62>` with atomic write (`CasStore::write_blob`)
+- [x] Implement deduplication check before writing a new blob (exists check in `write_blob`)
+- [x] Define JSON Tree (playlist) manifest schema (`{ "tracks": [{ "hash", "ab_start_ms", "ab_end_ms" }] }` — committed as CAS blob via `branch_commit`)
+- [x] Define and implement JSON Commit schema (tree_hash, parent, timestamp, device_id, message — `CommitRecord`)
+- [x] Implement Commit read/write functions (`db.insert_commit`, `db.get_commit`, `db.get_commit_history`)
+- [x] Set up SQLite database with `sqlx` (`crates/storage/src/db.rs` — WAL mode, foreign keys, migrations)
+- [x] Implement SQLite schema for track metadata, plays/skips, playlists, branches, commits, commit_parents (migrations 0001–0004)
+- [x] Implement indexer that reconciles SQLite against CAS on startup (`crates/storage/src/indexer.rs` — removes stale rows, logs orphan blobs)
+- [x] Wire `StorageState` into Tauri app (`src-tauri/src/storage.rs` + `lib.rs`); expose 7 commands: `library_get_all`, `library_set_favorite`, `playlist_get_all`, `playlist_create`, `playlist_fork`, `branch_create`, `branch_commit`
+- [x] Write integration tests for CAS, DB, and Indexer (18/18 passing)
 
 ### Axum Self-Hosted Sync Server
 - [ ] Scaffold Axum server project inside workspace

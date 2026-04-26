@@ -1,0 +1,185 @@
+use std::sync::Arc;
+
+use melomaniac_storage::{
+    BranchRecord, CasStore, CommitRecord, Database, Indexer, PlaylistRecord, TrackRecord,
+};
+use serde::Serialize;
+use tauri::State;
+
+// ── Shared state ──────────────────────────────────────────────────────────────
+
+pub struct StorageState {
+    pub cas: Arc<CasStore>,
+    pub db:  Arc<Database>,
+}
+
+// ── Response types ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct PlaylistWithBranches {
+    #[serde(flatten)]
+    pub playlist: PlaylistRecord,
+    pub branches: Vec<BranchRecord>,
+}
+
+// ── Library ───────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn library_get_all(
+    storage: State<'_, StorageState>,
+) -> Result<Vec<TrackRecord>, String> {
+    storage.db.get_all_tracks().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn library_set_favorite(
+    hash:      String,
+    favorited: bool,
+    storage:   State<'_, StorageState>,
+) -> Result<(), String> {
+    storage.db.set_favorited(&hash, favorited).await.map_err(|e| e.to_string())
+}
+
+// ── Playlists ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn playlist_get_all(
+    storage: State<'_, StorageState>,
+) -> Result<Vec<PlaylistWithBranches>, String> {
+    let playlists = storage.db.get_all_playlists().await.map_err(|e| e.to_string())?;
+    let mut result = Vec::with_capacity(playlists.len());
+    for playlist in playlists {
+        let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+        result.push(PlaylistWithBranches { playlist, branches });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn playlist_create(
+    name:        String,
+    description: Option<String>,
+    storage:     State<'_, StorageState>,
+) -> Result<PlaylistWithBranches, String> {
+    let playlist = storage.db
+        .create_playlist(&name, description.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+    let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+    Ok(PlaylistWithBranches { playlist, branches })
+}
+
+#[tauri::command]
+pub async fn playlist_fork(
+    source_id: String,
+    new_name:  String,
+    storage:   State<'_, StorageState>,
+) -> Result<PlaylistWithBranches, String> {
+    let playlist = storage.db
+        .fork_playlist(&source_id, &new_name)
+        .await
+        .map_err(|e| e.to_string())?;
+    let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+    Ok(PlaylistWithBranches { playlist, branches })
+}
+
+// ── Branches ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn branch_create(
+    playlist_id:  String,
+    name:         String,
+    from_commit:  Option<String>,
+    storage:      State<'_, StorageState>,
+) -> Result<BranchRecord, String> {
+    storage.db
+        .create_branch(&playlist_id, &name, from_commit.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Write a new commit from a JSON tree blob, advance the branch HEAD.
+///
+/// `tree_json` must conform to the tree blob format:
+/// `{ "tracks": [{ "hash": "<blake3>", "ab_start_ms": null, "ab_end_ms": null }] }`
+#[tauri::command]
+pub async fn branch_commit(
+    playlist_id:  String,
+    branch_name:  String,
+    tree_json:    String,
+    device_id:    String,
+    message:      Option<String>,
+    storage:      State<'_, StorageState>,
+) -> Result<String, String> {
+    let db  = &storage.db;
+    let cas = &storage.cas;
+
+    // Write tree blob → tree_hash
+    let tree_hash = cas.write_blob(tree_json.as_bytes()).await.map_err(|e| e.to_string())?;
+
+    // Determine parent (current HEAD)
+    let parent_hash = db
+        .get_branch(&playlist_id, &branch_name)
+        .await
+        .map_err(|e| e.to_string())?
+        .and_then(|b| b.head_commit);
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    // Build commit object, hash it, write as blob
+    let commit_body = serde_json::json!({
+        "tree_hash": &tree_hash,
+        "parent":    &parent_hash,
+        "timestamp": timestamp,
+        "device_id": &device_id,
+        "message":   &message,
+    })
+    .to_string();
+
+    let commit_hash = cas.write_blob(commit_body.as_bytes()).await.map_err(|e| e.to_string())?;
+
+    let record = CommitRecord {
+        hash:      commit_hash.clone(),
+        tree_hash,
+        timestamp,
+        device_id,
+        message,
+    };
+
+    let parents: Vec<&str> = parent_hash.iter().map(String::as_str).collect();
+    db.insert_commit(&record, &parents).await.map_err(|e| e.to_string())?;
+    db.update_branch_head(&playlist_id, &branch_name, &commit_hash)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(commit_hash)
+}
+
+// ── Initialisation helper ─────────────────────────────────────────────────────
+
+pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageState, String> {
+    let cas = Arc::new(CasStore::new(app_data_dir.join("objects")));
+    let db  = Arc::new(
+        Database::open(app_data_dir.join("db.sqlite"))
+            .await
+            .map_err(|e| e.to_string())?,
+    );
+    db.migrate().await.map_err(|e| e.to_string())?;
+
+    let report = Indexer::new(&cas, &db)
+        .reconcile()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if report.stale_removed > 0 || report.orphan_blobs > 0 {
+        eprintln!(
+            "[storage] indexer: {} stale removed, {} orphan blobs",
+            report.stale_removed, report.orphan_blobs
+        );
+    }
+
+    Ok(StorageState { cas, db })
+}
