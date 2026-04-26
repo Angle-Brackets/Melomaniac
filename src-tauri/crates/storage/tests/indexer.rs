@@ -68,3 +68,28 @@ async fn empty_objects_dir_is_fine() {
     assert_eq!(report.stale_removed, 0);
     assert_eq!(report.orphan_blobs, 0);
 }
+
+#[tokio::test]
+async fn mixed_stale_and_orphan() {
+    let dir = TempDir::new().unwrap();
+    let (cas, db) = setup(&dir).await;
+
+    // Blob with no DB row → orphan
+    cas.write_blob(b"orphan").await.unwrap();
+
+    // DB row with no blob → stale
+    db.insert_track(&track("a".repeat(64).as_str())).await.unwrap();
+
+    // Blob + matching DB row → clean
+    let clean_hash = cas.write_blob(b"clean audio").await.unwrap();
+    db.insert_track(&track(&clean_hash)).await.unwrap();
+
+    let report = Indexer::new(&cas, &db).reconcile().await.unwrap();
+    assert_eq!(report.stale_removed, 1);
+    assert_eq!(report.orphan_blobs, 1);
+
+    // The clean track survives
+    let remaining = db.get_all_tracks().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].hash, clean_hash);
+}

@@ -10,7 +10,7 @@ use tauri::State;
 
 pub struct StorageState {
     pub cas: Arc<CasStore>,
-    pub db:  Arc<Database>,
+    pub db: Arc<Database>,
 }
 
 // ── Response types ────────────────────────────────────────────────────────────
@@ -25,19 +25,21 @@ pub struct PlaylistWithBranches {
 // ── Library ───────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn library_get_all(
-    storage: State<'_, StorageState>,
-) -> Result<Vec<TrackRecord>, String> {
+pub async fn library_get_all(storage: State<'_, StorageState>) -> Result<Vec<TrackRecord>, String> {
     storage.db.get_all_tracks().await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn library_set_favorite(
-    hash:      String,
+    hash: String,
     favorited: bool,
-    storage:   State<'_, StorageState>,
+    storage: State<'_, StorageState>,
 ) -> Result<(), String> {
-    storage.db.set_favorited(&hash, favorited).await.map_err(|e| e.to_string())
+    storage
+        .db
+        .set_favorited(&hash, favorited)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ── Playlists ─────────────────────────────────────────────────────────────────
@@ -46,10 +48,18 @@ pub async fn library_set_favorite(
 pub async fn playlist_get_all(
     storage: State<'_, StorageState>,
 ) -> Result<Vec<PlaylistWithBranches>, String> {
-    let playlists = storage.db.get_all_playlists().await.map_err(|e| e.to_string())?;
+    let playlists = storage
+        .db
+        .get_all_playlists()
+        .await
+        .map_err(|e| e.to_string())?;
     let mut result = Vec::with_capacity(playlists.len());
     for playlist in playlists {
-        let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+        let branches = storage
+            .db
+            .get_branches(&playlist.id)
+            .await
+            .map_err(|e| e.to_string())?;
         result.push(PlaylistWithBranches { playlist, branches });
     }
     Ok(result)
@@ -57,29 +67,39 @@ pub async fn playlist_get_all(
 
 #[tauri::command]
 pub async fn playlist_create(
-    name:        String,
+    name: String,
     description: Option<String>,
-    storage:     State<'_, StorageState>,
+    storage: State<'_, StorageState>,
 ) -> Result<PlaylistWithBranches, String> {
-    let playlist = storage.db
+    let playlist = storage
+        .db
         .create_playlist(&name, description.as_deref())
         .await
         .map_err(|e| e.to_string())?;
-    let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+    let branches = storage
+        .db
+        .get_branches(&playlist.id)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(PlaylistWithBranches { playlist, branches })
 }
 
 #[tauri::command]
 pub async fn playlist_fork(
     source_id: String,
-    new_name:  String,
-    storage:   State<'_, StorageState>,
+    new_name: String,
+    storage: State<'_, StorageState>,
 ) -> Result<PlaylistWithBranches, String> {
-    let playlist = storage.db
+    let playlist = storage
+        .db
         .fork_playlist(&source_id, &new_name)
         .await
         .map_err(|e| e.to_string())?;
-    let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+    let branches = storage
+        .db
+        .get_branches(&playlist.id)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(PlaylistWithBranches { playlist, branches })
 }
 
@@ -87,12 +107,13 @@ pub async fn playlist_fork(
 
 #[tauri::command]
 pub async fn branch_create(
-    playlist_id:  String,
-    name:         String,
-    from_commit:  Option<String>,
-    storage:      State<'_, StorageState>,
+    playlist_id: String,
+    name: String,
+    from_commit: Option<String>,
+    storage: State<'_, StorageState>,
 ) -> Result<BranchRecord, String> {
-    storage.db
+    storage
+        .db
         .create_branch(&playlist_id, &name, from_commit.as_deref())
         .await
         .map_err(|e| e.to_string())
@@ -104,18 +125,21 @@ pub async fn branch_create(
 /// `{ "tracks": [{ "hash": "<blake3>", "ab_start_ms": null, "ab_end_ms": null }] }`
 #[tauri::command]
 pub async fn branch_commit(
-    playlist_id:  String,
-    branch_name:  String,
-    tree_json:    String,
-    device_id:    String,
-    message:      Option<String>,
-    storage:      State<'_, StorageState>,
+    playlist_id: String,
+    branch_name: String,
+    tree_json: String,
+    device_id: String,
+    message: Option<String>,
+    storage: State<'_, StorageState>,
 ) -> Result<String, String> {
-    let db  = &storage.db;
+    let db = &storage.db;
     let cas = &storage.cas;
 
     // Write tree blob → tree_hash
-    let tree_hash = cas.write_blob(tree_json.as_bytes()).await.map_err(|e| e.to_string())?;
+    let tree_hash = cas
+        .write_blob(tree_json.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Determine parent (current HEAD)
     let parent_hash = db
@@ -139,10 +163,13 @@ pub async fn branch_commit(
     })
     .to_string();
 
-    let commit_hash = cas.write_blob(commit_body.as_bytes()).await.map_err(|e| e.to_string())?;
+    let commit_hash = cas
+        .write_blob(commit_body.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
 
     let record = CommitRecord {
-        hash:      commit_hash.clone(),
+        hash: commit_hash.clone(),
         tree_hash,
         timestamp,
         device_id,
@@ -150,7 +177,9 @@ pub async fn branch_commit(
     };
 
     let parents: Vec<&str> = parent_hash.iter().map(String::as_str).collect();
-    db.insert_commit(&record, &parents).await.map_err(|e| e.to_string())?;
+    db.insert_commit(&record, &parents)
+        .await
+        .map_err(|e| e.to_string())?;
     db.update_branch_head(&playlist_id, &branch_name, &commit_hash)
         .await
         .map_err(|e| e.to_string())?;
@@ -162,7 +191,7 @@ pub async fn branch_commit(
 
 pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageState, String> {
     let cas = Arc::new(CasStore::new(app_data_dir.join("objects")));
-    let db  = Arc::new(
+    let db = Arc::new(
         Database::open(app_data_dir.join("db.sqlite"))
             .await
             .map_err(|e| e.to_string())?,

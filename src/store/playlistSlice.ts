@@ -1,10 +1,11 @@
 import { StateCreator } from 'zustand'
+import { invoke } from '@tauri-apps/api/core'
 import { LoadStatus, PlaylistRecord } from './types'
 
 export type PlaylistSlice = {
   playlists:          PlaylistRecord[]
-  currentPlaylistId:  string | null   // UUID of the active playlist
-  currentBranchName:  string          // active branch within that playlist; default "main"
+  currentPlaylistId:  string | null
+  currentBranchName:  string
   playlistStatus:     LoadStatus
 
   loadPlaylists: () => Promise<void>
@@ -18,14 +19,18 @@ export const createPlaylistSlice: StateCreator<PlaylistSlice> = (set) => ({
   currentBranchName: 'main',
   playlistStatus:    'idle',
 
-  // No-op until the CAS/Commit layer is built — Tauri command will be `playlist_get_all`
-  // Returns Vec<PlaylistRecord> with branches eager-loaded
   loadPlaylists: async () => {
-    set({ playlistStatus: 'ready' })
+    set({ playlistStatus: 'loading' })
+    try {
+      // playlist_get_all returns Vec<PlaylistWithBranches> which flattens to PlaylistRecord[]
+      const playlists = await invoke<PlaylistRecord[]>('playlist_get_all')
+      set({ playlists, playlistStatus: 'ready' })
+    } catch {
+      set({ playlistStatus: 'error' })
+    }
   },
 
   setCurrentPlaylist: (id) => set({ currentPlaylistId: id, currentBranchName: 'main' }),
 
-  // Switching branch does not reset the playlist — both are independent selections
   setCurrentBranch: (name) => set({ currentBranchName: name }),
 })

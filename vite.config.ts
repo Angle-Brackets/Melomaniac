@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -13,6 +14,12 @@ export default defineConfig(async () => ({
   // 1. prevent vite from obscuring rust errors
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
+  test: {
+    environment: "node",
+    globals: false,
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  },
+
   server: {
     port: 1420,
     strictPort: true,
