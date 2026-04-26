@@ -1,11 +1,13 @@
+[workspace]
+members = [".", "crates/audio"]
+resolver = "2"
+
 [package]
 name = "melomaniac"
 version = "0.0.1"
 description = "An app for infinite music"
 authors = ["Soupa"]
 edition = "2024"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "melomaniac_lib"
@@ -15,8 +17,12 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
+melomaniac-audio = { path = "crates/audio" }
 tauri = { version = "2.10.3", features = [] }
 tauri-plugin-shell = "2.3.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+rodio = { version = "0.22", features = ["symphonia-all"] }
 

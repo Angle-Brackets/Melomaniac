@@ -16,6 +16,11 @@
 - [ ] Set up project directory structure (`.melomaniac/objects/`, `src/`, `src-tauri/`)
 
 ### Native Audio Bridge ⚠️ (Highest Risk — Do First)
+- [x] Set up `crates/audio` workspace crate (`melomaniac-audio`) inside `src-tauri/`
+- [x] Define `AudioBridge` trait, `AudioSource` (`File` + uninhabitable `Stream` stub), `TrackMetadata`, `AudioEvent`, and `AudioError` in `crates/audio/src/lib.rs`
+- [x] Implement desktop backend (`crates/audio/src/desktop.rs`) — dedicated audio thread, `MixerDeviceSink` + `Player` (rodio 0.22 API), `symphonia-all` codecs, atomic position tracking, volume persistence across loads
+- [x] Wire `AudioState` into Tauri managed state; implement all seven Tauri commands in `src/audio.rs` (`audio_load`, `audio_play`, `audio_pause`, `audio_stop`, `audio_seek`, `audio_set_volume`, `audio_position`)
+- [x] Spawn event-forwarding thread: `AudioEvent` → `AppHandle::emit("audio://event")` → frontend
 - [ ] Integrate `tauri-plugin-native-audio` and `tauri-plugin-media`
 - [ ] Implement AVPlayer bridge for iOS background audio
 - [ ] Implement ExoPlayer / Media3 bridge for Android background audio
