@@ -26,8 +26,19 @@ fn compile_swift() {
         "cargo:rerun-if-changed=ios/Sources/MelomaniacPlayer/MelomaniacPlayer.swift"
     );
 
+    // Tauri sets SDKROOT to the iPhoneSimulator SDK before invoking build
+    // scripts. swift-rs compiles Package.swift as a *host* (macOS) tool and
+    // chokes when SDKROOT points at an iOS SDK. Unset it for the duration of
+    // SwiftLinker::link() — the same workaround used in tauri_utils::build.
+    let saved_sdkroot = std::env::var_os("SDKROOT");
+    std::env::remove_var("SDKROOT");
+
     SwiftLinker::new(&macos_min)
         .with_ios(&ios_min)
         .with_package("MelomaniacPlayer", &ios_dir)
         .link();
+
+    if let Some(root) = saved_sdkroot {
+        std::env::set_var("SDKROOT", root);
+    }
 }
