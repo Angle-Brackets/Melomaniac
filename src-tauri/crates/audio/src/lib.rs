@@ -57,6 +57,7 @@ pub struct TrackMetadata {
     /// Passed to iOS as `AVAudioPlayer(contentsOf:fileTypeHint:)` and to Android as
     /// `MediaItem.Builder().setMimeType(...)`. NULL-safe: platforms fall back to
     /// magic-byte detection when absent.
+    #[serde(default)]
     pub mime_type: Option<String>,
 }
 

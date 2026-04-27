@@ -7,16 +7,12 @@ import MusicControls from "./components/MusicControls"
 
 function App() {
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     const timer = setTimeout(async () => {
       try {
-        await invoke("audio_load", {
-          // Relative to src-tauri/ (Tauri's CWD in dev) — replace with CAS hash lookup once the storage layer is built
-          path: "../tests/audio/test.mp3",
-          metadata: { title: "Test Track", artist: "Test Artist", album: null, artwork_path: null, duration_ms: null },
-        });
-        await invoke("audio_play");
+        await invoke("debug_play_test_track");
       } catch (e) {
-        console.error("[audio] load/play failed:", e);
+        console.error("[audio] debug autoplay failed:", e);
       }
     }, 5000);
     return () => clearTimeout(timer);

@@ -63,6 +63,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            audio::debug_play_test_track,
             audio::audio_load,
             audio::audio_play,
             audio::audio_pause,

@@ -3,6 +3,56 @@ use std::sync::Arc;
 use melomaniac_audio::{AudioBridge, AudioSource, TrackMetadata};
 use tauri::State;
 
+// ── Debug autoplay ────────────────────────────────────────────────────────────
+
+/// Embeds `tests/audio/test.mp3` at compile time, writes it into the CAS,
+/// and immediately loads + plays it. Only functional in debug builds; returns
+/// an error in release so the handler can still be registered unconditionally.
+#[tauri::command]
+pub async fn debug_play_test_track(
+    audio: State<'_, AudioState>,
+    storage: State<'_, crate::storage::StorageState>,
+) -> Result<(), String> {
+    play_impl(audio, storage).await
+}
+
+#[cfg(debug_assertions)]
+async fn play_impl(
+    audio: State<'_, AudioState>,
+    storage: State<'_, crate::storage::StorageState>,
+) -> Result<(), String> {
+    const TEST_MP3: &[u8] = include_bytes!("../../tests/audio/test.mp3");
+
+    let hash = storage
+        .cas
+        .write_blob(TEST_MP3)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let path = storage.cas.blob_path(&hash);
+
+    let meta = TrackMetadata {
+        title: "Test Track".into(),
+        artist: "Test Artist".into(),
+        album: Some("Test Album".into()),
+        artwork_path: None,
+        duration_ms: Some(144_000), // 2.2 MB @ 128 kbps ≈ 2:24
+        mime_type: Some("audio/mpeg".into()),
+    };
+
+    let source = AudioSource::File(path);
+    audio.bridge.load(&source, meta).map_err(|e| e.to_string())?;
+    audio.bridge.play().map_err(|e| e.to_string())
+}
+
+#[cfg(not(debug_assertions))]
+async fn play_impl(
+    _audio: State<'_, AudioState>,
+    _storage: State<'_, crate::storage::StorageState>,
+) -> Result<(), String> {
+    Err("debug commands are not available in release builds".into())
+}
+
 /// Holds the active bridge implementation. Stored in Tauri managed state.
 /// `Arc<dyn AudioBridge>` is `Send + Sync` because `AudioBridge: Send + Sync`.
 pub struct AudioState {
