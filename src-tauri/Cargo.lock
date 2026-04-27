@@ -2212,7 +2212,7 @@ dependencies = [
  "rodio",
  "serde",
  "serde_json",
- "tauri-build",
+ "swift-rs",
  "thiserror 2.0.18",
 ]
 
