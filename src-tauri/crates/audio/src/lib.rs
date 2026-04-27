@@ -70,6 +70,16 @@ pub enum AudioEvent {
     PositionChanged(u64),
     /// A non-fatal error occurred; playback may continue with the next track.
     Error(String),
+    /// Lock-screen remote: play button pressed.
+    RemotePlay,
+    /// Lock-screen remote: pause button pressed.
+    RemotePause,
+    /// Lock-screen remote: next-track button pressed.
+    RemoteNextTrack,
+    /// Lock-screen remote: previous-track button pressed.
+    RemotePreviousTrack,
+    /// Lock-screen remote: headphone toggle (play/pause).
+    RemoteTogglePlayPause,
 }
 
 // ── Error type ────────────────────────────────────────────────────────────────

@@ -101,6 +101,38 @@ fn track_metadata_optional_fields_absent_in_json() {
     assert!(v["album"].is_null());
 }
 
+// ── Remote AudioEvent serialization ──────────────────────────────────────────
+
+#[test]
+fn event_remote_play_serializes() {
+    let json = serde_json::to_string(&AudioEvent::RemotePlay).unwrap();
+    assert_eq!(json, r#""RemotePlay""#);
+}
+
+#[test]
+fn event_remote_pause_serializes() {
+    let json = serde_json::to_string(&AudioEvent::RemotePause).unwrap();
+    assert_eq!(json, r#""RemotePause""#);
+}
+
+#[test]
+fn event_remote_next_track_serializes() {
+    let json = serde_json::to_string(&AudioEvent::RemoteNextTrack).unwrap();
+    assert_eq!(json, r#""RemoteNextTrack""#);
+}
+
+#[test]
+fn event_remote_previous_track_serializes() {
+    let json = serde_json::to_string(&AudioEvent::RemotePreviousTrack).unwrap();
+    assert_eq!(json, r#""RemotePreviousTrack""#);
+}
+
+#[test]
+fn event_remote_toggle_play_pause_serializes() {
+    let json = serde_json::to_string(&AudioEvent::RemoteTogglePlayPause).unwrap();
+    assert_eq!(json, r#""RemoteTogglePlayPause""#);
+}
+
 // ── Desktop bridge (requires audio device — skipped in CI) ────────────────────
 //
 // Run locally with: cargo test -p melomaniac-audio -- --include-ignored
