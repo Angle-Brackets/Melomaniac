@@ -21,6 +21,7 @@ fn compile_swift() {
     let ios_min = std::env::var("IPHONEOS_DEPLOYMENT_TARGET")
         .unwrap_or_else(|_| "14.0".into());
 
+    println!("cargo:rerun-if-changed=ios/Package.swift");
     println!(
         "cargo:rerun-if-changed=ios/Sources/MelomaniacPlayer/MelomaniacPlayer.swift"
     );
