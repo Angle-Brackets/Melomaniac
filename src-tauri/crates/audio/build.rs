@@ -30,8 +30,10 @@ fn compile_swift() {
     // scripts. swift-rs compiles Package.swift as a *host* (macOS) tool and
     // chokes when SDKROOT points at an iOS SDK. Unset it for the duration of
     // SwiftLinker::link() — the same workaround used in tauri_utils::build.
+    // set_var/remove_var are unsafe since Rust 1.87 (thread-safety).
+    // Build scripts are single-threaded, so this is safe in practice.
     let saved_sdkroot = std::env::var_os("SDKROOT");
-    std::env::remove_var("SDKROOT");
+    unsafe { std::env::remove_var("SDKROOT") };
 
     SwiftLinker::new(&macos_min)
         .with_ios(&ios_min)
@@ -39,6 +41,6 @@ fn compile_swift() {
         .link();
 
     if let Some(root) = saved_sdkroot {
-        std::env::set_var("SDKROOT", root);
+        unsafe { std::env::set_var("SDKROOT", root) };
     }
 }
