@@ -75,8 +75,8 @@ private func detectUTI(_ url: URL) -> String? {
 // • If already on main: executes immediately (avoids the deadlock that
 //   DispatchQueue.main.sync would cause when called from main).
 // • If on a background thread: blocks the caller until main finishes.
-//   This is intentional for MPNowPlayingInfoCenter — we want the update to
-//   be visible before the Swift function returns to Rust.
+//   This is intentional — we want state changes to be visible before
+//   returning to Rust.
 private func onMain(_ block: () -> Void) {
     if Thread.isMainThread { block() } else { DispatchQueue.main.sync(execute: block) }
 }
@@ -91,8 +91,10 @@ public func meloConfigureSession() -> Bool {
     do {
         try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         try AVAudioSession.sharedInstance().setActive(true)
+        NSLog("[Melo] AVAudioSession configured: .playback, active=true")
         return true
     } catch {
+        NSLog("[Melo] AVAudioSession setup failed: \(error)")
         return false
     }
 }
@@ -117,21 +119,71 @@ public func meloLoad(_ pathPtr: UnsafePointer<CChar>, _ mimeHint: UnsafePointer<
             : AVAudioPlayer(contentsOf: url)
         player?.delegate = playerDelegate
         player?.prepareToPlay()
+        NSLog("[Melo] Loaded '\(url.lastPathComponent)', duration=\(player?.duration ?? 0)s, uti=\(uti ?? "nil")")
         return true
     } catch {
+        NSLog("[Melo] Load failed: \(error)")
         player = nil
         return false
     }
 }
 
+// play / pause / stop all run on the main thread via onMain{} so that:
+//   1. AVAudioPlayer state changes are always visible on the main run loop.
+//   2. MPNowPlayingInfoCenter can be updated immediately (requires main thread)
+//      with the correct playbackRate, rather than waiting for the 250ms monitor.
+//      iOS uses playbackRate to decide whether to display the Now Playing widget;
+//      if the first write has rate=0.0 (set during load, before play is called)
+//      it may not surface the widget even after a later rate=1.0 update.
+
 @_cdecl("melo_play")
-public func meloPlay() -> Bool { player?.play() ?? false }
+public func meloPlay() -> Bool {
+    var result = false
+    onMain {
+        guard let p = player else {
+            NSLog("[Melo] play: no player loaded")
+            return
+        }
+        result = p.play()
+        NSLog("[Melo] play() → \(result), isPlaying=\(p.isPlaying)")
+        guard result else { return }
+
+        // Update Now Playing immediately so the widget appears as soon as
+        // playback starts — the 250ms monitoring thread would be too slow.
+        if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
+            info[MPNowPlayingInfoPropertyPlaybackRate]          = 1.0
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime]   = p.currentTime
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            NSLog("[Melo] NowPlaying: rate→1.0, pos=\(p.currentTime)")
+        } else {
+            NSLog("[Melo] play: nowPlayingInfo is nil — melo_update_now_playing not called yet")
+        }
+    }
+    return result
+}
 
 @_cdecl("melo_pause")
-public func meloPause() { player?.pause() }
+public func meloPause() {
+    onMain {
+        player?.pause()
+        NSLog("[Melo] pause()")
+        if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
+            info[MPNowPlayingInfoPropertyPlaybackRate]         = 0.0
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime]  = player?.currentTime ?? 0.0
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        }
+    }
+}
 
 @_cdecl("melo_stop")
-public func meloStop() { player?.stop(); player = nil }
+public func meloStop() {
+    onMain {
+        player?.stop()
+        player = nil
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        NSLog("[Melo] stop()")
+    }
+}
 
 @_cdecl("melo_seek")
 public func meloSeek(_ positionMs: UInt64) {
@@ -191,11 +243,14 @@ public func meloUpdateNowPlaying(
         let isPlaying = player?.isPlaying ?? false
 
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle:                       title,
-            MPMediaItemPropertyArtist:                      artist,
-            MPMediaItemPropertyPlaybackDuration:            duration,
-            MPNowPlayingInfoPropertyElapsedPlaybackTime:    position,
-            MPNowPlayingInfoPropertyPlaybackRate:           isPlaying ? 1.0 : 0.0,
+            MPMediaItemPropertyTitle:                           title,
+            MPMediaItemPropertyArtist:                          artist,
+            MPMediaItemPropertyPlaybackDuration:                duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime:        position,
+            MPNowPlayingInfoPropertyPlaybackRate:               isPlaying ? 1.0 : 0.0,
+            // Tells the system that 1× is the default speed; required by some
+            // lock-screen implementations to render the scrubber correctly.
+            MPNowPlayingInfoPropertyDefaultPlaybackRate:        1.0,
         ]
         if let album = album { info[MPMediaItemPropertyAlbumTitle] = album }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
@@ -223,6 +278,15 @@ public typealias MeloCommandCallback = @convention(c) (Int32) -> Void
 public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
     onMain {
         let c = MPRemoteCommandCenter.shared()
+
+        // isEnabled defaults to true when addTarget is called, but setting it
+        // explicitly prevents stale false state from a prior partial registration.
+        c.playCommand.isEnabled             = true
+        c.pauseCommand.isEnabled            = true
+        c.nextTrackCommand.isEnabled        = true
+        c.previousTrackCommand.isEnabled    = true
+        c.togglePlayPauseCommand.isEnabled  = true
+
         remoteCommandTokens = [
             c.playCommand.addTarget            { _ in callback(0); return .success },
             c.pauseCommand.addTarget           { _ in callback(1); return .success },
@@ -230,5 +294,6 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
             c.previousTrackCommand.addTarget   { _ in callback(3); return .success },
             c.togglePlayPauseCommand.addTarget { _ in callback(4); return .success },
         ]
+        NSLog("[Melo] Remote commands registered (\(remoteCommandTokens.count) tokens)")
     }
 }
