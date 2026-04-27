@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 // ── Swift FFI ─────────────────────────────────────────────────────────────────
 
 #[link(name = "MelomaniacPlayer")]
-extern "C" {
+unsafe extern "C" {
     fn melo_configure_session() -> bool;
     fn melo_load(path: *const c_char, mime_hint: *const c_char) -> bool;
     fn melo_play() -> bool;
