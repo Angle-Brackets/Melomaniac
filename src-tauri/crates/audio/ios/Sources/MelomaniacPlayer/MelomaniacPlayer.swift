@@ -42,17 +42,17 @@ private let playerDelegate = PlayerDelegate()
 private func mimeToUTI(_ mime: String) -> String? {
     switch mime {
     case "audio/mpeg", "audio/mp3":
-        return AVFileType.mp3.rawValue
+        return "public.mp3"
     case "audio/flac":
-        return AVFileType.flac.rawValue
+        return "org.xiph.flac"
     case "audio/mp4", "audio/m4a", "audio/aac", "audio/x-m4a":
-        return AVFileType.m4a.rawValue
+        return "com.apple.m4a-audio"
     case "audio/wav", "audio/wave", "audio/x-wav":
-        return AVFileType.wav.rawValue
+        return "com.microsoft.waveform-audio"
     case "audio/aiff", "audio/x-aiff":
-        return AVFileType.aiff.rawValue
+        return "public.aiff-audio"
     case "audio/caf":
-        return AVFileType.caf.rawValue
+        return "com.apple.coreaudio-format"
     default:
         return nil
     }
@@ -68,28 +68,28 @@ private func detectUTI(_ url: URL) -> String? {
 
     // MP3: ID3 header
     if bytes[0] == 0x49, bytes[1] == 0x44, bytes[2] == 0x33 {
-        return AVFileType.mp3.rawValue
+        return "public.mp3"
     }
     // MP3: sync bytes
     if bytes[0] == 0xFF, bytes[1] == 0xFB || bytes[1] == 0xF3 || bytes[1] == 0xF2 {
-        return AVFileType.mp3.rawValue
+        return "public.mp3"
     }
     // FLAC: fLaC
     if bytes[0] == 0x66, bytes[1] == 0x4C, bytes[2] == 0x61, bytes[3] == 0x43 {
-        return AVFileType.flac.rawValue
+        return "org.xiph.flac"
     }
     // M4A/AAC: ftyp at offset 4
     if bytes.count >= 8,
        bytes[4] == 0x66, bytes[5] == 0x74, bytes[6] == 0x79, bytes[7] == 0x70 {
-        return AVFileType.m4a.rawValue
+        return "com.apple.m4a-audio"
     }
     // WAV: RIFF
     if bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46 {
-        return AVFileType.wav.rawValue
+        return "com.microsoft.waveform-audio"
     }
     // CAF: caff
     if bytes[0] == 0x63, bytes[1] == 0x61, bytes[2] == 0x66, bytes[3] == 0x66 {
-        return AVFileType.caf.rawValue
+        return "com.apple.coreaudio-format"
     }
 
     return nil
@@ -243,7 +243,7 @@ public func meloUpdateNowPlaying(
 // MeloCommand integer codes (must match the Rust enum in ios.rs):
 //   0 = Play  1 = Pause  2 = NextTrack  3 = PreviousTrack  4 = TogglePlayPause
 
-typealias MeloCommandCallback = @convention(c) (Int32) -> Void
+public typealias MeloCommandCallback = @convention(c) (Int32) -> Void
 
 /// Registers lock-screen transport controls. `callback` is called on each
 /// button press with the corresponding MeloCommand integer code.
