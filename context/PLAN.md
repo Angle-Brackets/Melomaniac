@@ -102,10 +102,10 @@
 - [ ] Fall back to Axum HTTPS sync when no LAN peer is found
 
 ### UI Polish
-- [ ] Implement carousel view for albums / playlists
-- [ ] Refine info-dense tracklist layout
-- [ ] Add artwork display in player and library views
-- [ ] General visual polish pass
+- [x] Implement carousel view for albums / playlists — custom coverflow with cubic easing + 3D tilt
+- [x] Refine info-dense tracklist layout — 10-column grid with drag reorder and context menu
+- [x] Add artwork display in player and library views — gradient album art with per-pixel shine
+- [ ] General visual polish pass (bugs remain from initial port — see Desktop UI section below)
 
 ---
 
@@ -136,4 +136,49 @@
 
 ---
 
-*Last updated: 2026-05-03. iOS audio bridge complete and verified on real device. CAS + SQLite storage layer complete with 18 passing integration tests. No external data is collected — all telemetry is stored locally per GPLv2 ethos.*
+---
+
+## Desktop UI — Branch `desktop-ui`
+
+Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). All code lives in `src/desktop/`; old mobile placeholder components in `src/components/` are untouched and serve as the future mobile UI base.
+
+### What was built
+
+| File | Description |
+|---|---|
+| `src/desktop/style.css` | Full design-system CSS — warm brown palette (`--bg-0` → `--bg-5`), accent/text/border tokens, all component classes |
+| `src/desktop/data.ts` | Typed mock data — `Album`, `Track`, `Playlist`, `Commit` + chart data |
+| `src/desktop/types.ts` | Shared `Tweaks` interface (avoids circular imports) |
+| `src/desktop/DesktopApp.tsx` | Root app — all state, `useTweaks` hook, dynamic CSS variable updates on theme change |
+| `components/TitleBar.tsx` | macOS traffic-light titlebar with drag region |
+| `components/Sidebar.tsx` | Icon rail with animated tooltips, collapsible playlist tree, pinned playlists, folder popup, yt-dlp importer stub |
+| `components/Carousel.tsx` | Custom coverflow — cubic ease-out animation, `requestAnimationFrame`, 3D tilt on hover with mouse-tracking shine |
+| `components/PlaylistHeader.tsx` | Playlist name, version, git action buttons (Shuffle / Commit / Branch / Push / Pull), tab bar |
+| `components/PlayerControls.tsx` | Play/pause/shuffle/loop, A·B loop mode with draggable markers on seek bar, volume slider |
+| `components/TrackList.tsx` | 10-column grid, HTML5 drag-to-reorder with uncommitted-changes banner, dots context menu rendered as a fixed portal |
+| `components/RightPanel.tsx` | AI vibe text → mock playlist generator, mini SVG bar/line charts, connections panel, AI Vibes preview |
+| `components/CommitGraph.tsx` | SVG DAG with branch lane columns — both overlay modal and inline (History tab) variants |
+| `components/BranchModal.tsx` | Branch creation with commit selector radio list |
+| `components/SettingsModal.tsx` | Theme switcher, accent hue slider (live CSS variable), density pills, right-panel toggle, carousel size slider |
+| `components/PlaylistSettingsPanel.tsx` | Per-playlist settings — upstream URL, fork/delete/save |
+| `components/EditorView.tsx` | "Unimplemented" placeholder for the MP3 metadata editor |
+
+### Known bugs (next session)
+
+- `void hoveredRow` workaround in `TrackList.tsx` — row hover state is tracked but not yet used for anything visible; remove the suppression when hover actions are wired
+- The seek bar in `PlayerControls` uses hardcoded `24:20` total duration — needs to be driven by actual track length
+- `PlayerControls` track info shows `TRACKS[0]` unconditionally — should follow `activeTrackId`
+- Rail git icon opens the commit graph modal but leaves `railItem` set to `'git'`; navigating away doesn't reset the highlighted rail icon correctly
+- Right-panel collapse button points `›` the wrong way (should be `‹` when expanded)
+- No Tailwind/DaisyUI migration yet — still using inline styles throughout; migration planned for a future session
+- Audio not wired — all controls are visual only
+
+### Next steps
+
+1. Fix the known bugs above
+2. Wire `PlayerControls` play/pause/seek/volume buttons to `invoke()` audio commands
+3. Replace hardcoded mock data with real SQLite reads via `library_get_all` / `playlist_get_all`
+4. Migrate component styles to Tailwind + DaisyUI for consistency with future mobile UI
+5. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
+
+*Last updated: 2026-05-02. Desktop UI ported from Claude Design prototype, TypeScript clean, production build passing. No audio wired yet.*
