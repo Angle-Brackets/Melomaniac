@@ -1,0 +1,265 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+/* ── CSS Variables ─────────────────────────────────────────────────────────── */
+:root {
+  --bg-0: #110b04;
+  --bg-1: #1a1007;
+  --bg-2: #22160a;
+  --bg-3: #2c1d0e;
+  --bg-4: #382513;
+  --bg-5: #452e18;
+  --accent: #d4803c;
+  --accent-light: #eca04e;
+  --accent-dim: #7a4820;
+  --text-0: #f5e6cc;
+  --text-1: #c09a72;
+  --text-2: #8a6440;
+  --text-3: #5a3e20;
+  --border-0: #1e1208;
+  --border-1: #2a1a0c;
+  --border-2: #3e2814;
+  --green: #4ead7a;
+  --blue: #7ab0d8;
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
+.desktop-root *, .desktop-root *::before, .desktop-root *::after {
+  box-sizing: border-box;
+}
+
+.desktop-root {
+  width: 100vw;
+  height: 100vh;
+  background: #080604;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* ── App Window ────────────────────────────────────────────────────────────── */
+.app-window {
+  width: 1340px;
+  height: 800px;
+  background: var(--bg-2);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.8), 0 0 0 0.5px rgba(255,255,255,0.06);
+  position: relative;
+}
+
+/* ── Titlebar ──────────────────────────────────────────────────────────────── */
+.titlebar {
+  height: 32px;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border-0);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 10px;
+  flex-shrink: 0;
+  position: relative;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.traffic-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  flex-shrink: 0;
+}
+
+.titlebar-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Track List ────────────────────────────────────────────────────────────── */
+.tl-row {
+  display: grid;
+  grid-template-columns: 18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px;
+  padding: 4px 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-0);
+  gap: 0;
+  min-width: 0;
+  transition: background 0.1s;
+}
+
+.tl-row:hover { background: var(--bg-4); }
+.tl-row.active-row { background: var(--bg-5); }
+.tl-row.active-row:hover { background: var(--bg-5); }
+
+.tl-cell {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+  min-width: 0;
+}
+
+.tl-cell.bright { color: var(--text-0); }
+.tl-cell.muted  { color: var(--text-2); }
+.tl-cell.mono   { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-2); }
+
+/* ── Control Buttons ───────────────────────────────────────────────────────── */
+.ctrl-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.ctrl-btn:hover { background: var(--bg-4); color: var(--text-0); }
+.ctrl-btn.active { color: var(--accent-light); }
+.ctrl-btn.active:hover { color: var(--accent-light); background: var(--bg-4); }
+
+.ctrl-btn.large {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-4);
+}
+
+.ctrl-btn.large:hover {
+  background: var(--bg-5);
+  border-color: var(--accent-dim);
+}
+
+/* ── Git Buttons ───────────────────────────────────────────────────────────── */
+.git-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-3);
+  color: var(--text-1);
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.git-btn:hover { background: var(--bg-4); color: var(--text-0); border-color: var(--border-2); }
+
+.git-btn.primary {
+  background: var(--bg-5);
+  color: var(--accent-light);
+  border-color: var(--accent-dim);
+}
+
+.git-btn.primary:hover { background: var(--accent-dim); }
+
+/* ── Chips ─────────────────────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-1);
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 5px;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  transition: all 0.15s;
+}
+
+.chip:hover { border-color: var(--border-2); color: var(--text-1); }
+.chip.active { border-color: var(--accent-dim); color: var(--accent-light); background: var(--bg-5); }
+
+/* ── Seek Bar ──────────────────────────────────────────────────────────────── */
+.seek-track {
+  height: 3px;
+  background: var(--border-1);
+  border-radius: 2px;
+  position: relative;
+  transition: height 0.12s;
+}
+
+.seek-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* ── Rail Icons & Tooltip ──────────────────────────────────────────────────── */
+.rail-icon-wrap {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.rail-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  background: var(--bg-4);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-1);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  font-family: 'Outfit', sans-serif;
+}
+
+.rail-icon-wrap:hover .rail-tooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────────── */
+.styled-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+.styled-scroll::-webkit-scrollbar-track { background: transparent; }
+.styled-scroll::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
+.styled-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.tl-context-menu { animation: fadeInScale 0.12s ease; }
