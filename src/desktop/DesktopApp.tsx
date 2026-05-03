@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import './style.css';
+import { applyTheme, writeCustomHue, NAMED_THEMES } from '../shared/themes';
+import type { ThemeName } from '../shared/themes';
 
 import { ALBUMS, TRACKS, PLAYLISTS } from './data';
 import type { Track, Playlist } from './data';
@@ -66,11 +68,11 @@ export default function DesktopApp() {
   const [folderPopupItem,  setFolderPopupItem]   = useState<Playlist | null>(null);
   const [folders,          setFolders]           = useState([{ id: 4, name: 'Gaming Sessions' }]);
   const [editorTrackId,    setEditorTrackId]     = useState<number | null>(null);
-  const [carouselIdx,      setCarouselIdx]       = useState(1);
   const [activeTrackId,    setActiveTrackId]     = useState(1);
   const [isPlaying,        setIsPlaying]         = useState(false);
   const [isFav,            setIsFav]             = useState(false);
   const [isShuffle,        setIsShuffle]         = useState(false);
+  const [shuffledQueue,    setShuffledQueue]     = useState<Track[] | null>(null);
   const [seekPct,          setSeekPct]           = useState(0.18);
   const [volume,           setVolume]            = useState(0.72);
   const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
@@ -78,48 +80,20 @@ export default function DesktopApp() {
 
   const playlist = PLAYLISTS[1];
 
-  // ── Theme effect: sets both our custom vars AND DaisyUI's vars ────────────
+  // Effective play order: shuffled queue when active, otherwise the playlist order
+  const playQueue = useMemo(
+    () => (isShuffle && shuffledQueue ? shuffledQueue : trackOrder),
+    [isShuffle, shuffledQueue, trackOrder],
+  );
+  const carouselAlbums = useMemo(
+    () => playQueue.map(t => ALBUMS[t.albumRef] ?? ALBUMS[0]),
+    [playQueue],
+  );
+  const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
+
+  // ── Theme effect — all palette logic lives in shared/themes.ts ──────────
   useEffect(() => {
-    const h = settings.accentHue;
-    const root = document.documentElement;
-
-    // Apply DaisyUI data-theme so component classes pick up the right palette
-    root.setAttribute('data-theme', 'melomaniac');
-
-    // Per-theme lightness/chroma curves
-    let L: number[], c: number;
-    if (settings.theme === 'warm') {
-      L = [0.09, 0.12, 0.15, 0.18, 0.21, 0.25]; c = 0.025;
-    } else if (settings.theme === 'cool') {
-      L = [0.09, 0.12, 0.15, 0.18, 0.21, 0.25]; c = 0.018;
-    } else {
-      // forest / violet — deeper blacks, lower chroma
-      L = [0.08, 0.11, 0.14, 0.17, 0.20, 0.24]; c = 0.015;
-    }
-
-    // Our custom variables (used by custom CSS and inline styles)
-    for (let i = 0; i < 6; i++) {
-      root.style.setProperty(`--bg-${i}`, `oklch(${L[i]} ${i === 0 ? 0.02 : c} ${h})`);
-    }
-    root.style.setProperty('--accent',       `oklch(0.62 0.15 ${h})`);
-    root.style.setProperty('--accent-light', `oklch(0.72 0.14 ${h})`);
-    root.style.setProperty('--accent-dim',   `oklch(0.38 0.1  ${h})`);
-    root.style.setProperty('--border-0',     `oklch(0.18 0.025 ${h})`);
-    root.style.setProperty('--border-1',     `oklch(0.22 0.03  ${h})`);
-    root.style.setProperty('--border-2',     `oklch(0.30 0.04  ${h})`);
-    root.style.setProperty('--text-1',       `oklch(0.62 0.06  ${h})`);
-    root.style.setProperty('--text-2',       `oklch(0.48 0.05  ${h})`);
-    root.style.setProperty('--text-3',       `oklch(0.35 0.04  ${h})`);
-
-    // DaisyUI vars (bare oklch channels — DaisyUI wraps them in oklch())
-    root.style.setProperty('--p',  `0.62 0.15 ${h}`);   // primary = accent
-    root.style.setProperty('--pc', `0.9 0.02 ${h}`);    // primary-content
-    root.style.setProperty('--n',  `${L[3]} ${c} ${h}`);// neutral
-    root.style.setProperty('--nc', `0.62 0.06 ${h}`);   // neutral-content
-    root.style.setProperty('--b1', `${L[1]} ${c} ${h}`);// base-100
-    root.style.setProperty('--b2', `${L[2]} ${c} ${h}`);// base-200
-    root.style.setProperty('--b3', `${L[3]} ${c} ${h}`);// base-300
-    root.style.setProperty('--bc', `0.85 0.03 ${h}`);   // base-content
+    applyTheme(settings.theme, settings.accentHue);
   }, [settings.theme, settings.accentHue]);
 
   // ── Sync A·B handles on track change ──────────────────────────────────────
@@ -137,9 +111,21 @@ export default function DesktopApp() {
   });
 
   const handleReorder = (newOrder: Track[] | null) => {
-    if (newOrder === null) { setTrackOrder(TRACKS); setHasUncommitted(false); return; }
-    setTrackOrder(newOrder);
-    setHasUncommitted(true);
+    if (newOrder === null) { setTrackOrder(TRACKS); setHasUncommitted(false); }
+    else { setTrackOrder(newOrder); setHasUncommitted(true); }
+    // Manual reorder defines a new canonical order — clear any active shuffle queue
+    if (shuffledQueue) { setShuffledQueue(null); setIsShuffle(false); }
+  };
+
+  const handleShuffle = () => {
+    if (!isShuffle) {
+      const shuffled = [...trackOrder].sort(() => Math.random() - 0.5);
+      setShuffledQueue(shuffled);
+      setIsShuffle(true);
+    } else {
+      setShuffledQueue(null);
+      setIsShuffle(false);
+    }
   };
 
   const handleCommitReorder = () => {
@@ -158,6 +144,22 @@ export default function DesktopApp() {
   };
 
   const handleLoopCycle = () => setLoopMode(m => m === 'off' ? 'one' : m === 'one' ? 'ab' : 'off');
+
+  // Intercept accent-hue changes: write to the CUSTOM slot and activate it.
+  // Switching to a named theme resets accentHue to that theme's default.
+  const handleUpdateSetting: typeof updateSetting = (key, value) => {
+    if (key === 'accentHue' && typeof value === 'number') {
+      const base = settings.theme !== 'custom' ? settings.theme as Exclude<ThemeName, 'custom'> : undefined;
+      writeCustomHue(value, base);
+      updateSetting({ theme: 'custom', accentHue: value });
+    } else if (typeof key === 'object' && 'theme' in key && key.theme !== 'custom') {
+      // Named theme selected — reset hue to that theme's default
+      const themeName = key.theme as Exclude<ThemeName, 'custom'>;
+      updateSetting({ ...key, accentHue: NAMED_THEMES[themeName].hue });
+    } else {
+      updateSetting(key, value);
+    }
+  };
 
   const handleGitAction = (action: string) => {
     const msgs: Record<string, string> = {
@@ -179,7 +181,6 @@ export default function DesktopApp() {
 
   const handleSelectTrack = (id: number) => {
     setActiveTrackId(id);
-    setCarouselIdx(Math.max(0, Math.min(ALBUMS.length - 1, id - 1)));
     setIsPlaying(true);
   };
 
@@ -225,16 +226,20 @@ export default function DesktopApp() {
                   <>
                     <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: 0 }}>
                       <Carousel
-                        albums={ALBUMS}
+                        albums={carouselAlbums}
                         activeIndex={carouselIdx}
-                        onIndexChange={idx => { setCarouselIdx(idx); setActiveTrackId(idx + 1); }}
+                        onIndexChange={idx => {
+                          const t = playQueue[idx];
+                          if (t) handleSelectTrack(t.id);
+                        }}
+                        size={settings.carouselSize}
                       />
                     </div>
                     <PlayerControls
                       isPlaying={isPlaying} onPlayPause={() => setIsPlaying(p => !p)}
                       isFav={isFav}         onFav={() => setIsFav(p => !p)}
                       loopMode={loopMode}   onLoopCycle={handleLoopCycle}
-                      isShuffle={isShuffle} onShuffle={() => setIsShuffle(p => !p)}
+                      isShuffle={isShuffle} onShuffle={handleShuffle}
                       seekPct={seekPct}     onSeek={setSeekPct}
                       volume={volume}       onVolume={setVolume}
                       abA={abA} abB={abB}   onAbChange={handleAbChange}
@@ -341,7 +346,7 @@ export default function DesktopApp() {
         {showSettings && (
           <SettingsModal
             settings={settings}
-            updateSetting={updateSetting}
+            updateSetting={handleUpdateSetting}
             onClose={() => setShowSettings(false)}
             onReset={() => { updateSetting(SETTING_DEFAULTS); setShowSettings(false); }}
           />

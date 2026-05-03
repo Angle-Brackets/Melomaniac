@@ -68,7 +68,7 @@ export default function PlaylistHeader({
       </div>
 
       {/* DaisyUI tabs */}
-      <div className="tabs tabs-bordered px-2 -mb-px">
+      <div className="tabs tabs-border px-2 -mb-px">
         {TABS.map(tab => (
           <button
             key={tab}

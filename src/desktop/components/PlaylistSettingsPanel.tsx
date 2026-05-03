@@ -28,7 +28,7 @@ export default function PlaylistSettingsPanel({ playlist }: { playlist: Playlist
           <input
             value={upstream}
             onChange={e => setUpstream(e.target.value)}
-            className="input input-bordered input-sm w-full font-mono text-[11px] bg-mm-3 text-mm-t0"
+            className="input input-sm w-full font-mono text-[11px] bg-mm-3 text-mm-t0"
           />
         </div>
 

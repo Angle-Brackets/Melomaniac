@@ -24,7 +24,8 @@ export default function TrackList({
   const [dropIdx,     setDropIdx]     = useState<number | null>(null);
   const [menuTrackId, setMenuTrackId] = useState<number | null>(null);
   const [menuPos,     setMenuPos]     = useState({ x: 0, y: 0 });
-  const wasDragging = useRef(false);
+  const dropIdxRef   = useRef<number | null>(null);
+  const rowRefs      = useRef<(HTMLDivElement | null)[]>([]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -38,30 +39,47 @@ export default function TrackList({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const handleDragStart = (e: React.DragEvent, idx: number) => {
-    wasDragging.current = false;
-    setDragIdx(idx);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
-    e.preventDefault();
-    wasDragging.current = true;
-    e.dataTransfer.dropEffect = 'move';
-    setDropIdx(idx);
-  };
-  const handleDrop = (e: React.DragEvent, idx: number) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === idx) { setDragIdx(null); setDropIdx(null); return; }
-    const next = [...tracks];
-    const [moved] = next.splice(dragIdx, 1);
-    next.splice(idx, 0, moved);
-    onReorder(next);
-    setDragIdx(null); setDropIdx(null);
-  };
-  const handleDragEnd = () => {
-    setDragIdx(null); setDropIdx(null);
-    setTimeout(() => { wasDragging.current = false; }, 50);
-  };
+  // Mouse-based drag — active only while dragIdx is set
+  useEffect(() => {
+    if (dragIdx === null) return;
+    document.body.style.cursor = 'grabbing';
+
+    const onMove = (e: MouseEvent) => {
+      let closest: number | null = null;
+      let minDist = Infinity;
+      rowRefs.current.forEach((el, i) => {
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        const mid = r.top + r.height / 2;
+        const d = Math.abs(e.clientY - mid);
+        if (d < minDist) { minDist = d; closest = i; }
+      });
+      dropIdxRef.current = closest;
+      setDropIdx(closest);
+    };
+
+    const onUp = () => {
+      const target = dropIdxRef.current;
+      document.body.style.cursor = '';
+      if (target !== null && target !== dragIdx) {
+        const next = [...tracks];
+        const [moved] = next.splice(dragIdx, 1);
+        next.splice(target, 0, moved);
+        onReorder(next);
+      }
+      dropIdxRef.current = null;
+      setDragIdx(null);
+      setDropIdx(null);
+    };
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+    };
+  }, [dragIdx, tracks, onReorder]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -97,13 +115,9 @@ export default function TrackList({
           return (
             <div
               key={t.id}
-              draggable
-              onDragStart={e => handleDragStart(e, idx)}
-              onDragOver={e => handleDragOver(e, idx)}
-              onDrop={e => handleDrop(e, idx)}
-              onDragEnd={handleDragEnd}
+              ref={el => { rowRefs.current[idx] = el; }}
               onDoubleClick={() => onSelect(t.id)}
-              onClick={() => { if (!wasDragging.current) onSelect(t.id); }}
+              onClick={() => { if (dragIdx === null) onSelect(t.id); }}
               className={`tl-row${active ? ' active-row' : ''}`}
               style={{
                 gridTemplateColumns: '18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px',
@@ -112,7 +126,11 @@ export default function TrackList({
                 transition: 'opacity 0.15s',
               }}
             >
-              <div className="tl-cell justify-center"><IcoDragHandle /></div>
+              <div
+                className="tl-cell justify-center"
+                style={{ cursor: 'grab' }}
+                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setDragIdx(idx); }}
+              ><IcoDragHandle /></div>
               <div className={`tl-cell text-[10px] ${active ? 'bright' : 'muted'}`}>{active ? '▶' : idx + 1}</div>
               <div className="tl-cell">
                 <div className="w-[22px] h-[22px] rounded-[3px] shrink-0" style={{ background: art.gradient }} />

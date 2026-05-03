@@ -1,12 +1,35 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "daisyui";
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Custom colour tokens — all mm-* Tailwind utilities (bg-mm-0, text-mm-t1,
+   border-mm-b2, etc.) resolve to CSS variables set at runtime by
+   shared/themes.ts::applyTheme(). */
+@theme {
+  --color-mm-0:          var(--bg-0);
+  --color-mm-1:          var(--bg-1);
+  --color-mm-2:          var(--bg-2);
+  --color-mm-3:          var(--bg-3);
+  --color-mm-4:          var(--bg-4);
+  --color-mm-5:          var(--bg-5);
+  --color-mm-accent:     var(--accent);
+  --color-mm-accent-lit: var(--accent-light);
+  --color-mm-accent-dim: var(--accent-dim);
+  --color-mm-t0:         var(--text-0);
+  --color-mm-t1:         var(--text-1);
+  --color-mm-t2:         var(--text-2);
+  --color-mm-t3:         var(--text-3);
+  --color-mm-b0:         var(--border-0);
+  --color-mm-b1:         var(--border-1);
+  --color-mm-b2:         var(--border-2);
+  --color-mm-green:      var(--green);
+  --color-mm-blue:       var(--blue);
 }
+
+/* NOTE: Do NOT put * { margin:0; padding:0 } here as unlayered CSS.
+   DaisyUI v5 component styles live inside named @layer blocks, and unlayered
+   CSS beats all layered CSS regardless of specificity — it would silently
+   strip padding from every component. Tailwind v4 Preflight (inside @layer
+   base) handles element resets correctly. */
 
 html, body, #root {
   width: 100%;
@@ -14,6 +37,4 @@ html, body, #root {
   overflow: hidden;
 }
 
-body {
-  background: #080604;
-}
+body { background: #080604; }

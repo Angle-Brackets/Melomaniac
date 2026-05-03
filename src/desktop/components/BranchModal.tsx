@@ -43,7 +43,7 @@ export default function BranchModal({ onClose, onCreateBranch }: BranchModalProp
                 placeholder="feature-name"
                 autoFocus
                 onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                className="input input-bordered input-sm flex-1 rounded-l-none bg-mm-3 text-mm-t0 font-mono text-[11px]"
+                className="input input-sm flex-1 rounded-l-none bg-mm-3 text-mm-t0 font-mono text-[11px]"
                 onFocus={e => (e.target.style.borderColor = 'var(--accent-dim)')}
                 onBlur={e => (e.target.style.borderColor = '')}
               />

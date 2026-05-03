@@ -115,7 +115,7 @@ export function AddToFolderPopup({ item, folders, onClose, onAddToFolder, onCrea
                   if (e.key === 'Enter' && newName.trim()) { onCreateFolder(newName.trim(), item.id); onClose(); }
                   if (e.key === 'Escape') setCreating(false);
                 }}
-                className="input input-bordered input-xs flex-1 bg-mm-3 text-mm-t0 font-['Outfit']"
+                className="input input-xs flex-1 bg-mm-3 text-mm-t0 font-['Outfit']"
               />
               <button
                 onClick={() => { if (newName.trim()) { onCreateFolder(newName.trim(), item.id); onClose(); } }}
@@ -342,7 +342,7 @@ export default function LibrarySidebar({
               <p className="text-[11px] text-mm-t2">yt-dlp URL</p>
               <input
                 placeholder="https://youtube.com/..."
-                className="input input-bordered input-xs w-full bg-mm-3 text-mm-t1 font-['Outfit']"
+                className="input input-xs w-full bg-mm-3 text-mm-t1 font-['Outfit']"
               />
               <button className="btn btn-ghost btn-xs btn-block">Download &amp; Import</button>
               <button className="btn btn-ghost btn-xs btn-block">Import Local Files</button>

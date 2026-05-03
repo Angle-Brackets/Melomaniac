@@ -1,4 +1,9 @@
 import type { AppSettings } from '../types';
+import { NAMED_THEMES } from '../../shared/themes';
+import type { ThemeName } from '../../shared/themes';
+
+type NamedThemeName = Exclude<ThemeName, 'custom'>;
+const NAMED_THEME_ENTRIES = Object.entries(NAMED_THEMES) as [NamedThemeName, typeof NAMED_THEMES[NamedThemeName]][];
 
 interface SettingsModalProps {
   settings: AppSettings;
@@ -7,11 +12,7 @@ interface SettingsModalProps {
   onReset: () => void;
 }
 
-const THEMES = ['warm', 'cool', 'forest', 'violet'] as const;
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
-
-// Preset hue for each theme — user can still fine-tune with the slider
-const THEME_HUES: Record<string, number> = { warm: 28, cool: 210, forest: 135, violet: 280 };
 
 export default function SettingsModal({ settings, updateSetting, onClose, onReset }: SettingsModalProps) {
   return (
@@ -35,15 +36,19 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
             <div className="flex items-center justify-between py-2 border-b border-mm-b0">
               <span className="text-xs text-mm-t1">Color theme</span>
               <div className="flex gap-1">
-                {THEMES.map(t => (
+                {NAMED_THEME_ENTRIES.map(([key, cfg]) => (
                   <button
-                    key={t}
-                    onClick={() => updateSetting({ theme: t, accentHue: THEME_HUES[t] })}
-                    className={`btn btn-xs ${settings.theme === t ? 'btn-primary' : 'btn-ghost'}`}
+                    key={key}
+                    onClick={() => updateSetting({ theme: key })}
+                    className={`btn btn-xs ${settings.theme === key ? 'btn-primary' : 'btn-ghost'}`}
                   >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                    {cfg.label}
                   </button>
                 ))}
+                <button
+                  onClick={() => updateSetting({ theme: 'custom' })}
+                  className={`btn btn-xs ${settings.theme === 'custom' ? 'btn-primary' : 'btn-ghost'}`}
+                >Custom</button>
               </div>
             </div>
 

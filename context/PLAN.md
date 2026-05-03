@@ -25,7 +25,7 @@
 - [x] Implement AVAudioPlayer bridge for iOS background audio — Swift FFI via `@_cdecl`, `swift-rs` SPM package at `crates/audio/ios/`; `IosBridge` in `crates/audio/src/ios.rs`; `UIBackgroundModes: audio` in `src-tauri/Info.ios.plist`
 - [x] Verify background audio persistence when app is minimised on iOS (confirmed on device)
 - [x] Implement lockscreen/Control Centre Now Playing widget — `MPNowPlayingInfoCenter` updated every 250 ms + immediately on play; `MPRemoteCommandCenter` (play, pause, next, prev, toggle) with token retention; `RemotePlay/RemotePause/RemoteNextTrack/RemotePreviousTrack/RemoteTogglePlayPause` variants added to `AudioEvent`
-- [ ] Verify Now Playing widget appears on real device (simulator cannot show it — test when device controls are wired)
+- [x] Verify Now Playing widget appears on real device (simulator cannot show it — test when device controls are wired)
 - [ ] Implement ExoPlayer / Media3 bridge for Android background audio
 - [ ] Verify background audio persistence when app is minimised on Android
 - [ ] Implement lockscreen controls (play, pause, skip) on Android
@@ -105,7 +105,7 @@
 - [x] Implement carousel view for albums / playlists — custom coverflow with cubic easing + 3D tilt
 - [x] Refine info-dense tracklist layout — 10-column grid with drag reorder and context menu
 - [x] Add artwork display in player and library views — gradient album art with per-pixel shine
-- [ ] General visual polish pass (bugs remain from initial port — see Desktop UI section below)
+- [x] General visual polish pass — DaisyUI v5 migration, theme centralization, responsive carousel, mouse drag-reorder, play queue ordering
 
 ---
 
@@ -142,43 +142,55 @@
 
 Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). All code lives in `src/desktop/`; old mobile placeholder components in `src/components/` are untouched and serve as the future mobile UI base.
 
-### What was built
+### Component inventory
 
 | File | Description |
 |---|---|
-| `src/desktop/style.css` | Full design-system CSS — warm brown palette (`--bg-0` → `--bg-5`), accent/text/border tokens, all component classes |
+| `src/shared/themes.ts` | Central theme system — `NAMED_THEMES` (warm/cool/forest/violet), mutable `_custom` slot, `writeCustomHue()`, `applyTheme()` sets all CSS vars + DaisyUI v5 vars |
+| `src/desktop/style.css` | Design-system CSS — fallback palette vars, layout classes, `.tl-row` grid, `.seek-track`, `.rail-tooltip`, `.styled-scroll`, animations; no hover-3d polyfill (native DaisyUI v5) |
+| `src/main.css` | Tailwind v4 entry — `@import "tailwindcss"`, `@plugin "daisyui"`, `@theme {}` mapping `--color-mm-*` → runtime CSS vars |
 | `src/desktop/data.ts` | Typed mock data — `Album`, `Track`, `Playlist`, `Commit` + chart data |
-| `src/desktop/types.ts` | Shared `Tweaks` interface (avoids circular imports) |
-| `src/desktop/DesktopApp.tsx` | Root app — all state, `useTweaks` hook, dynamic CSS variable updates on theme change |
-| `components/TitleBar.tsx` | macOS traffic-light titlebar with drag region |
-| `components/Sidebar.tsx` | Icon rail with animated tooltips, collapsible playlist tree, pinned playlists, folder popup, yt-dlp importer stub |
-| `components/Carousel.tsx` | Custom coverflow — cubic ease-out animation, `requestAnimationFrame`, 3D tilt on hover with mouse-tracking shine |
-| `components/PlaylistHeader.tsx` | Playlist name, version, git action buttons (Shuffle / Commit / Branch / Push / Pull), tab bar |
-| `components/PlayerControls.tsx` | Play/pause/shuffle/loop, A·B loop mode with draggable markers on seek bar, volume slider |
-| `components/TrackList.tsx` | 10-column grid, HTML5 drag-to-reorder with uncommitted-changes banner, dots context menu rendered as a fixed portal |
-| `components/RightPanel.tsx` | AI vibe text → mock playlist generator, mini SVG bar/line charts, connections panel, AI Vibes preview |
-| `components/CommitGraph.tsx` | SVG DAG with branch lane columns — both overlay modal and inline (History tab) variants |
-| `components/BranchModal.tsx` | Branch creation with commit selector radio list |
-| `components/SettingsModal.tsx` | Theme switcher, accent hue slider (live CSS variable), density pills, right-panel toggle, carousel size slider |
+| `src/desktop/types.ts` | `AppSettings` interface; imports `ThemeName` from `src/shared/themes` |
+| `src/desktop/DesktopApp.tsx` | Root app — all state, `useMemo` play-queue/carousel derivation, `handleShuffle` builds a frozen shuffled queue, `handleUpdateSetting` intercepts accent-hue changes to write the custom theme slot |
+| `components/TitleBar.tsx` | Custom titlebar with drag region and window controls |
+| `components/Sidebar.tsx` | Icon rail with tooltips, collapsible playlist tree, pinned playlists, folder popup, yt-dlp importer stub |
+| `components/Carousel.tsx` | Coverflow — cubic ease-out animation, `requestAnimationFrame`, DaisyUI `hover-3d`, `ResizeObserver` for responsive width, `size` prop drives card px and `halfVisible` cutoff |
+| `components/PlaylistHeader.tsx` | Playlist name, version, git action buttons, tab bar (`tabs-border` DaisyUI v5) |
+| `components/PlayerControls.tsx` | Play/pause/shuffle/loop/queue buttons; play button is an explicit 44 px circle overriding DaisyUI min-height; A·B loop mode with draggable seek markers |
+| `components/TrackList.tsx` | 10-column grid; mouse-event drag-to-reorder (replaces broken HTML5 DnD); `window` mousemove/mouseup listeners scoped via `useEffect` on `dragIdx`; `dropIdxRef` for synchronous mouseup access; uncommitted-changes banner; fixed portal context menu |
+| `components/RightPanel.tsx` | AI vibe text → mock playlist generator, mini SVG charts, connections panel |
+| `components/CommitGraph.tsx` | SVG DAG — branch lane columns, overlay modal and inline (History tab) variants; Tailwind/mm-* classes |
+| `components/BranchModal.tsx` | Branch creation with commit selector |
+| `components/SettingsModal.tsx` | Named theme pills (warm/cool/forest/violet) + always-visible Custom pill; accent hue slider writes to custom slot; density, right-panel toggle, carousel size slider |
 | `components/PlaylistSettingsPanel.tsx` | Per-playlist settings — upstream URL, fork/delete/save |
-| `components/EditorView.tsx` | "Unimplemented" placeholder for the MP3 metadata editor |
+| `components/EditorView.tsx` | Placeholder for the MP3 metadata editor |
 
-### Known bugs (next session)
+### Toolchain
 
-- `void hoveredRow` workaround in `TrackList.tsx` — row hover state is tracked but not yet used for anything visible; remove the suppression when hover actions are wired
+- **Tailwind v4** — `@import "tailwindcss"` + `@tailwindcss/vite` plugin; `tailwind.config.js` deleted; CSS-first config via `@theme {}`
+- **DaisyUI v5** — `@plugin "daisyui"`; class renames: `input-bordered` → `input`, `tabs-bordered` → `tabs-border`; `--depth: 0` / `--noise: 0` for flat native-desktop look; `hover-3d` native (polyfill removed); full oklch() vars (`--color-primary`, `--color-base-100`, etc.)
+- **CSS cascade layers** — no unlayered `* { padding:0 }` reset (would beat all `@layer daisyui.*` component styles); Tailwind v4 Preflight handles element resets inside `@layer base`
+
+### Play queue / carousel ordering
+
+- `playQueue` — `useMemo`; equals `trackOrder` unless shuffle is active, in which case it's a frozen Fisher-Yates shuffle created when the user enables shuffle
+- `carouselAlbums` — `playQueue.map(t => ALBUMS[t.albumRef])` — one card per track in play order
+- `carouselIdx` — `playQueue.findIndex(t => t.id === activeTrackId)` — always points at the active track
+- Enabling shuffle: `shuffledQueue` state is set to a shuffled copy of `trackOrder`; disabling clears it
+- Manual drag-reorder clears `shuffledQueue` and turns off shuffle (user redefined the canonical order)
+- Carousel uses `key={i}` (array position) instead of `album.id` to avoid duplicate-key warnings when multiple tracks share the same album
+
+### Known bugs / remaining work
+
 - The seek bar in `PlayerControls` uses hardcoded `24:20` total duration — needs to be driven by actual track length
 - `PlayerControls` track info shows `TRACKS[0]` unconditionally — should follow `activeTrackId`
-- Rail git icon opens the commit graph modal but leaves `railItem` set to `'git'`; navigating away doesn't reset the highlighted rail icon correctly
-- Right-panel collapse button points `›` the wrong way (should be `‹` when expanded)
-- No Tailwind/DaisyUI migration yet — still using inline styles throughout; migration planned for a future session
+- Rail git icon opens the commit graph modal but doesn't reset the highlighted rail icon when navigating away
 - Audio not wired — all controls are visual only
 
 ### Next steps
 
-1. Fix the known bugs above
-2. Wire `PlayerControls` play/pause/seek/volume buttons to `invoke()` audio commands
-3. Replace hardcoded mock data with real SQLite reads via `library_get_all` / `playlist_get_all`
-4. Migrate component styles to Tailwind + DaisyUI for consistency with future mobile UI
-5. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
+1. Wire `PlayerControls` play/pause/seek/volume buttons to `invoke()` audio commands
+2. Replace hardcoded mock data with real SQLite reads via `library_get_all` / `playlist_get_all`
+3. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
 
-*Last updated: 2026-05-02. Desktop UI ported from Claude Design prototype, TypeScript clean, production build passing. No audio wired yet.*
+*Last updated: 2026-05-03. DaisyUI v5 + Tailwind v4 migration complete. Theme system centralized in `src/shared/themes.ts`. Mouse-based drag-to-reorder. Carousel respects play queue order and shuffle state. No audio wired yet.*
