@@ -30,7 +30,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "iOS": {}
-
+    "iOS": {
+      "developmentTeam": "76438TBLFL"
+    }
   }
 }

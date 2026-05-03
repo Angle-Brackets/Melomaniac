@@ -8,6 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "ios:sim": "tauri ios dev",
+    "ios:dev": "node scripts/ios-dev.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

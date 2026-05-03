@@ -41,8 +41,13 @@ async fn play_impl(
     };
 
     let source = AudioSource::File(path);
-    audio.bridge.load(&source, meta).map_err(|e| e.to_string())?;
-    audio.bridge.play().map_err(|e| e.to_string())
+    let bridge = Arc::clone(&audio.bridge);
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge.load(&source, meta).map_err(|e| e.to_string())?;
+        bridge.play().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(not(debug_assertions))]
