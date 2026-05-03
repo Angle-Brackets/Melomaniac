@@ -79,6 +79,7 @@ export default function PlayerControls({
       {/* Controls — left | play | right */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center px-6 py-1.5">
         <div className="flex items-center gap-2 justify-end">
+          <button className="btn btn-ghost btn-square btn-sm" title="Queue"><IcoQueue size={16} /></button>
           <button
             className={`btn btn-ghost btn-square btn-sm ${isShuffle ? 'text-primary' : ''}`}
             onClick={onShuffle} title="Shuffle"
@@ -86,12 +87,13 @@ export default function PlayerControls({
           <button className="btn btn-ghost btn-square btn-sm" title="Previous"><IcoPrev size={16} /></button>
         </div>
 
-        {/* Play/pause — slightly larger, bordered */}
+        {/* Play/pause — explicit 44px circle so DaisyUI size classes don't squash it */}
         <button
-          className="btn btn-ghost btn-circle border border-base-content/10 bg-base-300 w-10 h-10 mx-3"
+          className="btn btn-ghost btn-circle mx-3 border-2 border-mm-b2 bg-mm-3"
+          style={{ width: 44, height: 44, minHeight: 'unset' }}
           onClick={onPlayPause} title={isPlaying ? 'Pause' : 'Play'}
         >
-          {isPlaying ? <IcoPause size={16} /> : <IcoPlay size={16} />}
+          {isPlaying ? <IcoPause size={18} /> : <IcoPlay size={18} />}
         </button>
 
         <div className="flex items-center gap-2">
