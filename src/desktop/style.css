@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
 /* ── CSS Variables ─────────────────────────────────────────────────────────── */
+/* Fallback values (JS overrides these on mount via the settings effect) */
 :root {
   --bg-0: #110b04;
   --bg-1: #1a1007;
@@ -22,58 +23,47 @@
   --blue: #7ab0d8;
 }
 
-/* ── Reset ─────────────────────────────────────────────────────────────────── */
+/* ── Box-sizing scope ──────────────────────────────────────────────────────── */
 .desktop-root *, .desktop-root *::before, .desktop-root *::after {
   box-sizing: border-box;
 }
 
+/* ── Root layout ───────────────────────────────────────────────────────────── */
+/* Fills the Tauri window; no centering or inner shadow needed since decorations=false */
 .desktop-root {
   width: 100vw;
   height: 100vh;
-  background: #080604;
   font-family: 'Outfit', sans-serif;
   color: var(--text-1);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   overflow: hidden;
 }
 
-/* ── App Window ────────────────────────────────────────────────────────────── */
 .app-window {
-  width: 1340px;
-  height: 800px;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
   background: var(--bg-2);
-  border-radius: 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 32px 80px rgba(0,0,0,0.8), 0 0 0 0.5px rgba(255,255,255,0.06);
   position: relative;
 }
 
-/* ── Titlebar ──────────────────────────────────────────────────────────────── */
+/* ── Custom title bar ──────────────────────────────────────────────────────── */
+/* decorations=false means we own the entire window chrome */
 .titlebar {
   height: 32px;
   background: var(--bg-0);
   border-bottom: 1px solid var(--border-0);
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  gap: 10px;
+  padding: 0;
   flex-shrink: 0;
   position: relative;
   -webkit-app-region: drag;
   user-select: none;
-}
-
-.traffic-light {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  flex-shrink: 0;
 }
 
 .titlebar-title {
@@ -89,7 +79,29 @@
   white-space: nowrap;
 }
 
-/* ── Track List ────────────────────────────────────────────────────────────── */
+/* Window control buttons — no-drag so clicks land on the button, not the drag region */
+.titlebar-btn {
+  width: 46px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  transition: background 0.1s, color 0.1s;
+  font-family: 'Outfit', sans-serif;
+  flex-shrink: 0;
+}
+.titlebar-btn:hover             { background: var(--bg-3); color: var(--text-0); }
+.titlebar-btn-close:hover       { background: #c0392b; color: #fff; }
+
+/* ── Track list grid ───────────────────────────────────────────────────────── */
+/* Custom column layout — DaisyUI table is too opinionated for this grid */
 .tl-row {
   display: grid;
   grid-template-columns: 18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px;
@@ -100,10 +112,9 @@
   min-width: 0;
   transition: background 0.1s;
 }
-
-.tl-row:hover { background: var(--bg-4); }
-.tl-row.active-row { background: var(--bg-5); }
-.tl-row.active-row:hover { background: var(--bg-5); }
+.tl-row:hover     { background: var(--bg-4); }
+.tl-row.active-row              { background: var(--bg-5); }
+.tl-row.active-row:hover        { background: var(--bg-5); }
 
 .tl-cell {
   display: flex;
@@ -116,88 +127,12 @@
   padding: 0 4px;
   min-width: 0;
 }
-
 .tl-cell.bright { color: var(--text-0); }
 .tl-cell.muted  { color: var(--text-2); }
 .tl-cell.mono   { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-2); }
 
-/* ── Control Buttons ───────────────────────────────────────────────────────── */
-.ctrl-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: none;
-  background: transparent;
-  color: var(--text-1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-  padding: 0;
-}
-
-.ctrl-btn:hover { background: var(--bg-4); color: var(--text-0); }
-.ctrl-btn.active { color: var(--accent-light); }
-.ctrl-btn.active:hover { color: var(--accent-light); background: var(--bg-4); }
-
-.ctrl-btn.large {
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border-2);
-  background: var(--bg-4);
-}
-
-.ctrl-btn.large:hover {
-  background: var(--bg-5);
-  border-color: var(--accent-dim);
-}
-
-/* ── Git Buttons ───────────────────────────────────────────────────────────── */
-.git-btn {
-  padding: 4px 10px;
-  border: 1px solid var(--border-2);
-  background: var(--bg-3);
-  color: var(--text-1);
-  border-radius: 5px;
-  font-size: 11px;
-  cursor: pointer;
-  font-family: 'Outfit', sans-serif;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-
-.git-btn:hover { background: var(--bg-4); color: var(--text-0); border-color: var(--border-2); }
-
-.git-btn.primary {
-  background: var(--bg-5);
-  color: var(--accent-light);
-  border-color: var(--accent-dim);
-}
-
-.git-btn.primary:hover { background: var(--accent-dim); }
-
-/* ── Chips ─────────────────────────────────────────────────────────────────── */
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid var(--border-1);
-  background: transparent;
-  color: var(--text-2);
-  border-radius: 5px;
-  font-size: 10px;
-  cursor: pointer;
-  font-family: 'Outfit', sans-serif;
-  transition: all 0.15s;
-}
-
-.chip:hover { border-color: var(--border-2); color: var(--text-1); }
-.chip.active { border-color: var(--accent-dim); color: var(--accent-light); background: var(--bg-5); }
-
-/* ── Seek Bar ──────────────────────────────────────────────────────────────── */
+/* ── Seek / volume bars ────────────────────────────────────────────────────── */
+/* Custom because of the draggable A·B loop markers overlaid on the seek track */
 .seek-track {
   height: 3px;
   background: var(--border-1);
@@ -205,21 +140,20 @@
   position: relative;
   transition: height 0.12s;
 }
-
 .seek-fill {
   height: 100%;
   background: var(--accent);
   border-radius: 2px;
 }
 
-/* ── Rail Icons & Tooltip ──────────────────────────────────────────────────── */
+/* ── Rail icon tooltips ────────────────────────────────────────────────────── */
+/* DaisyUI tooltip uses data-tip but requires absolute positioning we can't easily control here */
 .rail-icon-wrap {
   position: relative;
   width: 32px;
   height: 32px;
   flex-shrink: 0;
 }
-
 .rail-tooltip {
   position: absolute;
   left: calc(100% + 8px);
@@ -239,16 +173,15 @@
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   font-family: 'Outfit', sans-serif;
 }
-
 .rail-icon-wrap:hover .rail-tooltip {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
 }
 
-/* ── Scrollbars ────────────────────────────────────────────────────────────── */
-.styled-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
-.styled-scroll::-webkit-scrollbar-track { background: transparent; }
-.styled-scroll::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 2px; }
+/* ── Custom scrollbar ──────────────────────────────────────────────────────── */
+.styled-scroll::-webkit-scrollbar        { width: 4px; height: 4px; }
+.styled-scroll::-webkit-scrollbar-track  { background: transparent; }
+.styled-scroll::-webkit-scrollbar-thumb  { background: var(--border-2); border-radius: 2px; }
 .styled-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
 
 /* ── Animations ────────────────────────────────────────────────────────────── */
@@ -256,10 +189,8 @@
   from { opacity: 0; transform: translateX(-50%) translateY(6px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
-
 @keyframes fadeInScale {
   from { opacity: 0; transform: scale(0.97); }
   to   { opacity: 1; transform: scale(1); }
 }
-
 .tl-context-menu { animation: fadeInScale 0.12s ease; }

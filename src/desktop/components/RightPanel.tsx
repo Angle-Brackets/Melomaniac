@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { CHART_BARS, CHART_LINE } from '../data';
+import { FiChevronRight } from 'react-icons/fi';
 
+// ── Inline mini charts ────────────────────────────────────────────────────────
 function MiniBarChart({ data, color = 'var(--accent-dim)' }: { data: number[]; color?: string }) {
   const max = Math.max(...data);
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 32, marginTop: 4 }}>
+    <div className="flex items-end gap-0.5 h-8 mt-1">
       {data.map((v, i) => (
         <div key={i} style={{
-          flex: 1,
-          height: `${(v / max) * 100}%`,
-          background: color,
-          borderRadius: '1px 1px 0 0',
-          minHeight: 2,
-          opacity: 0.7 + (v / max) * 0.3,
+          flex: 1, height: `${(v / max) * 100}%`,
+          background: color, borderRadius: '1px 1px 0 0',
+          minHeight: 2, opacity: 0.7 + (v / max) * 0.3,
         }} />
       ))}
     </div>
@@ -20,29 +19,40 @@ function MiniBarChart({ data, color = 'var(--accent-dim)' }: { data: number[]; c
 }
 
 function MiniLineChart({ data, color = 'var(--accent)' }: { data: number[]; color?: string }) {
-  const max = Math.max(...data);
-  const min = Math.min(...data);
+  const max = Math.max(...data), min = Math.min(...data);
   const range = max - min || 1;
   const W = 100, H = 32;
   const pts = data.map((v, i) => [
     (i / (data.length - 1)) * W,
     H - ((v - min) / range) * (H - 4) - 2,
   ]);
-  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
+  const d    = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p[0]} ${p[1]}`).join(' ');
   const fill = `${d} L ${pts[pts.length - 1][0]} ${H} L 0 ${H} Z`;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 32, marginTop: 4, display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-8 mt-1 block">
       <defs>
         <linearGradient id="lgf" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.35" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+          <stop offset="0%" stopColor={color} stopOpacity="0.35"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0.02"/>
         </linearGradient>
       </defs>
-      <path d={fill} fill="url(#lgf)" />
-      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={fill} fill="url(#lgf)"/>
+      <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
+
+// ── Connections ───────────────────────────────────────────────────────────────
+const CONNECTIONS = [
+  { name: 'Spotify Premium', status: 'Connected',  color: '#1db954', dot: true },
+  { name: 'Last.fm',         status: 'Connect…',   color: '#d51007', dot: false },
+  { name: 'Upstream Remote', status: 'Up-to-Date', color: 'var(--green)', dot: true },
+];
+
+// ── Section label ─────────────────────────────────────────────────────────────
+const SectionLabel = ({ children }: { children: React.ReactNode }) => (
+  <p className="text-[9px] font-bold tracking-[0.12em] text-mm-t2 uppercase mb-1.5">{children}</p>
+);
 
 interface RightPanelProps {
   vibeText: string;
@@ -50,20 +60,9 @@ interface RightPanelProps {
   onCollapse: () => void;
 }
 
-const rpLabel: React.CSSProperties = {
-  fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-  color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 6,
-};
-
-const CONNECTIONS = [
-  { name: 'Spotify Premium', status: 'Connected',  color: '#1db954', dot: true },
-  { name: 'Last.fm',         status: 'Connect…',   color: '#d51007', dot: false },
-  { name: 'Upstream Remote', status: 'Up-to-Date', color: 'var(--green)', dot: true },
-];
-
 export default function RightPanel({ vibeText, onVibeChange, onCollapse }: RightPanelProps) {
   const [generating, setGenerating] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [aiResult,   setAiResult]   = useState<string | null>(null);
 
   const handleGenerate = async () => {
     if (!vibeText.trim()) return;
@@ -90,131 +89,111 @@ export default function RightPanel({ vibeText, onVibeChange, onCollapse }: Right
       borderLeft: '1px solid var(--border-0)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0,
     }}>
-      <div style={{
-        padding: '8px 12px', fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
-        color: 'var(--text-2)', textTransform: 'uppercase',
-        borderBottom: '1px solid var(--border-0)', flexShrink: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      }}>
-        <span>Melomaniac AI & Metrics</span>
-        <span style={{ color: 'var(--border-2)', cursor: 'pointer', fontSize: 11 }} onClick={onCollapse}>›</span>
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-mm-b0 shrink-0">
+        <span className="text-[9px] font-bold tracking-[0.12em] text-mm-t2 uppercase">
+          Melomaniac AI &amp; Metrics
+        </span>
+        <button className="btn btn-ghost btn-xs btn-square text-mm-t2" onClick={onCollapse}>
+          <FiChevronRight size={11} />
+        </button>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 10px' }} className="styled-scroll">
+      <div className="flex-1 overflow-y-auto px-2.5 py-2.5 space-y-3 styled-scroll">
 
-        {/* AI vibe section */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={rpLabel}>1. Describe your vibe…</div>
+        {/* 1. AI vibe generator */}
+        <section>
+          <SectionLabel>1. Describe your vibe…</SectionLabel>
           <textarea
             value={vibeText}
             onChange={e => onVibeChange(e.target.value)}
             placeholder="chill ambient music for focus"
-            style={{
-              width: '100%', background: 'var(--bg-3)', border: '1px solid var(--border-1)',
-              borderRadius: 5, padding: '6px 8px', fontSize: 11, color: 'var(--text-1)',
-              fontFamily: "'Outfit', sans-serif", resize: 'none', outline: 'none',
-              minHeight: 48, transition: 'border-color 0.15s', boxSizing: 'border-box',
-            }}
+            className="textarea textarea-bordered textarea-xs w-full bg-mm-3 text-mm-t1 font-['Outfit'] resize-none min-h-[48px]"
             onFocus={e => (e.target.style.borderColor = 'var(--accent-dim)')}
-            onBlur={e => (e.target.style.borderColor = 'var(--border-1)')}
+            onBlur={e => (e.target.style.borderColor = '')}
           />
           <button
             onClick={handleGenerate}
             disabled={generating}
-            style={{
-              marginTop: 5, width: '100%', padding: '6px 0',
-              background: 'var(--bg-4)', border: '1px solid var(--border-2)',
-              borderRadius: 5, fontSize: 11, color: generating ? 'var(--text-2)' : 'var(--accent-light)',
-              cursor: generating ? 'wait' : 'pointer', fontFamily: "'Outfit', sans-serif",
-              transition: 'all 0.15s',
-            }}
-          >{generating ? 'Generating…' : "Generate Playlist"}</button>
+            className={`btn btn-ghost btn-xs btn-block mt-1 ${generating ? '' : 'text-primary'}`}
+          >
+            {generating ? 'Generating…' : 'Generate Playlist'}
+          </button>
 
           {aiResult && (
-            <div style={{
-              marginTop: 8, padding: '8px', background: 'var(--bg-3)',
-              borderRadius: 5, border: '1px solid var(--border-1)',
-              fontSize: 10, color: 'var(--text-1)', lineHeight: 1.6,
-              whiteSpace: 'pre-wrap', fontFamily: "'JetBrains Mono', monospace",
-            }}>{aiResult}</div>
+            <pre className="mt-2 p-2 bg-mm-3 rounded border border-mm-b1 text-[10px] text-mm-t1 leading-relaxed font-mono whitespace-pre-wrap">
+              {aiResult}
+            </pre>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 5px var(--green)' }} />
-            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace" }}>
-              Gemma 4 (Local AI) <span style={{ color: 'var(--green)' }}>Active</span>
+          {/* Local AI indicator */}
+          <div className="flex items-center gap-1.5 mt-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-mm-green"
+              style={{ boxShadow: '0 0 5px var(--green)' }} />
+            <span className="font-mono text-[10px] text-mm-t2">
+              Gemma 4 (Local AI) <span className="text-mm-green">Active</span>
             </span>
           </div>
-        </div>
+        </section>
 
-        <div style={{ height: 1, background: 'var(--border-0)', margin: '0 0 12px' }} />
+        <div className="h-px bg-mm-b0" />
 
-        {/* Stats */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={rpLabel}>2. Your Stats</div>
-          <div style={{ fontSize: 10, color: 'var(--text-2)', marginBottom: 6 }}>
-            Listen time · most played artist · top playlist
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <div style={{ flex: 1, background: 'var(--bg-3)', border: '1px solid var(--border-0)', borderRadius: 5, padding: '6px 7px' }}>
-              <div style={{ fontSize: 9, color: 'var(--text-2)' }}>Play time</div>
+        {/* 2. Stats */}
+        <section>
+          <SectionLabel>2. Your Stats</SectionLabel>
+          <p className="text-[10px] text-mm-t2 mb-1.5">Listen time · most played artist · top playlist</p>
+          <div className="flex gap-1.5">
+            <div className="flex-1 bg-mm-3 border border-mm-b0 rounded p-1.5">
+              <p className="text-[9px] text-mm-t2">Play time</p>
               <MiniLineChart data={CHART_LINE} color="var(--accent)" />
             </div>
-            <div style={{ flex: 1, background: 'var(--bg-3)', border: '1px solid var(--border-0)', borderRadius: 5, padding: '6px 7px' }}>
-              <div style={{ fontSize: 9, color: 'var(--text-2)' }}>Skips</div>
+            <div className="flex-1 bg-mm-3 border border-mm-b0 rounded p-1.5">
+              <p className="text-[9px] text-mm-t2">Skips</p>
               <MiniBarChart data={CHART_BARS} color="var(--accent-dim)" />
             </div>
           </div>
-          <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
-            {([['4h 22m', 'This week'], ['Anna Bair', 'Top artist'], ['Study Beats', 'Top playlist']] as const).map(([v, l]) => (
-              <div key={l} style={{
-                flex: 1, background: 'var(--bg-3)', border: '1px solid var(--border-0)',
-                borderRadius: 4, padding: '5px 5px',
-              }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v}</div>
-                <div style={{ fontSize: 9, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l}</div>
-              </div>
-            ))}
+          <div className="flex gap-1 mt-1.5">
+            {(['4h 22m', 'Anna Bair', 'Study Beats'] as const).map((v, i) => {
+              const labels = ['This week', 'Top artist', 'Top playlist'];
+              return (
+                <div key={v} className="flex-1 bg-mm-3 border border-mm-b0 rounded px-1.5 py-1.5">
+                  <p className="text-[10px] font-semibold text-mm-t0 truncate">{v}</p>
+                  <p className="text-[9px] text-mm-t2 mt-px truncate">{labels[i]}</p>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        </section>
 
-        <div style={{ height: 1, background: 'var(--border-0)', margin: '0 0 12px' }} />
+        <div className="h-px bg-mm-b0" />
 
-        {/* Connections */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={rpLabel}>3. Connections</div>
+        {/* 3. Service connections */}
+        <section>
+          <SectionLabel>3. Connections</SectionLabel>
           {CONNECTIONS.map(({ name, status, color, dot }) => (
-            <div key={name} style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '5px 0', borderBottom: '1px solid var(--border-0)',
-            }}>
+            <div key={name} className="flex items-center gap-1.5 py-1.5 border-b border-mm-b0">
               <div style={{
-                width: 18, height: 18, borderRadius: '50%', background: color + '22',
-                border: `1px solid ${color}44`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                background: color + '22', border: `1px solid ${color}44`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 <div style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
               </div>
-              <span style={{ flex: 1, fontSize: 11, color: 'var(--text-1)' }}>{name}</span>
-              <span style={{ fontSize: 9, color: dot ? 'var(--green)' : 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace" }}>{status}</span>
+              <span className="flex-1 text-[11px] text-mm-t1">{name}</span>
+              <span className="font-mono text-[9px]" style={{ color: dot ? 'var(--green)' : 'var(--text-2)' }}>{status}</span>
             </div>
           ))}
-        </div>
+        </section>
 
-        <div style={{ height: 1, background: 'var(--border-0)', margin: '0 0 12px' }} />
+        <div className="h-px bg-mm-b0" />
 
         {/* AI Vibes preview */}
-        <div>
-          <div style={rpLabel}>AI Vibes</div>
-          <div style={{
-            background: 'var(--bg-3)', border: '1px solid var(--border-1)',
-            borderRadius: 5, padding: '7px 8px',
-            fontSize: 11, color: 'var(--text-1)', lineHeight: 1.5,
-            fontStyle: 'italic',
-          }}>
+        <section>
+          <SectionLabel>AI Vibes</SectionLabel>
+          <p className="bg-mm-3 border border-mm-b1 rounded p-2 text-[11px] text-mm-t1 leading-relaxed italic">
             {vibeText || 'warm acoustic and soft piano for a rainy day'}
-          </div>
-        </div>
+          </p>
+        </section>
 
       </div>
     </div>

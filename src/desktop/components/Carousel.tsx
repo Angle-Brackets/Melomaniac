@@ -169,7 +169,12 @@ export default function Carousel({ albums, activeIndex, onIndexChange }: Carouse
   };
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: 210, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{
+      position: 'relative', width: '100%', height: 210,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      willChange: 'transform', transform: 'translateZ(0)',
+      contain: 'layout style paint',
+    }}>
       <div
         ref={containerRef}
         onMouseDown={e => { e.preventDefault(); startDrag(e.clientX); }}
@@ -199,6 +204,7 @@ export default function Carousel({ albums, activeIndex, onIndexChange }: Carouse
               style={{
                 position: 'absolute', left: '50%', marginLeft: -90,
                 cursor: 'pointer', willChange: 'transform',
+                backfaceVisibility: 'hidden',
                 ...props,
               }}
             >

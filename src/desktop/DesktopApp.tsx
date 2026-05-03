@@ -3,7 +3,7 @@ import './style.css';
 
 import { ALBUMS, TRACKS, PLAYLISTS } from './data';
 import type { Track, Playlist } from './data';
-import type { Tweaks } from './types';
+import type { AppSettings } from './types';
 
 import TitleBar from './components/TitleBar';
 import LibrarySidebar, { AddToFolderPopup } from './components/Sidebar';
@@ -19,10 +19,10 @@ import SettingsModal from './components/SettingsModal';
 import PlaylistSettingsPanel from './components/PlaylistSettingsPanel';
 import EditorView from './components/EditorView';
 
-// ── Tweaks ────────────────────────────────────────────────────────────────────
-export type { Tweaks };
+export type { AppSettings };
 
-const TWEAK_DEFAULTS: Tweaks = {
+// ── Default settings ──────────────────────────────────────────────────────────
+const SETTING_DEFAULTS: AppSettings = {
   theme: 'warm',
   accentHue: 28,
   showRightPanel: true,
@@ -31,77 +31,75 @@ const TWEAK_DEFAULTS: Tweaks = {
   defaultView: 'Tracks',
 };
 
-function useTweaks(defaults: Tweaks): [Tweaks, (key: keyof Tweaks | Partial<Tweaks>, value?: unknown) => void] {
-  const [tweaks, setTweaks] = useState<Tweaks>(defaults);
-  const setTweak = (key: keyof Tweaks | Partial<Tweaks>, value?: unknown) => {
+// Thin hook so the settings object stays in one place
+function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettings | Partial<AppSettings>, value?: unknown) => void] {
+  const [settings, setSettings] = useState<AppSettings>(defaults);
+  const updateSetting = (key: keyof AppSettings | Partial<AppSettings>, value?: unknown) => {
     if (typeof key === 'object') {
-      setTweaks(prev => ({ ...prev, ...key }));
+      setSettings(prev => ({ ...prev, ...key }));
     } else {
-      setTweaks(prev => ({ ...prev, [key]: value }));
+      setSettings(prev => ({ ...prev, [key]: value }));
     }
   };
-  return [tweaks, setTweak];
+  return [settings, updateSetting];
 }
 
 // ── Root App ──────────────────────────────────────────────────────────────────
 export default function DesktopApp() {
-  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
-  const [leftExpanded, setLeftExpanded] = useState(true);
-  const [rightExpanded, setRightExpanded] = useState(true);
-  const [showCommitGraph, setShowCommitGraph] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showBranchModal, setShowBranchModal] = useState(false);
-  const [activePlaylistId, setActivePlaylistId] = useState(2);
-  const [railItem, setRailItem] = useState('library');
-  const [activeTab, setActiveTab] = useState('Tracks');
-  const [pinnedIds, setPinnedIds] = useState(new Set([2]));
-  const [trackOrder, setTrackOrder] = useState<Track[]>(TRACKS);
-  const [hasUncommitted, setHasUncommitted] = useState(false);
-  const [abA, setAbA] = useState(0.2);
-  const [abB, setAbB] = useState(0.7);
-  const [loopMode, setLoopMode] = useState<LoopMode>('off');
-  const [trackAbPoints, setTrackAbPoints] = useState<Record<number, { a: number; b: number }>>({ 1: { a: 0.2, b: 0.7 } });
-  const [folderPopupItem, setFolderPopupItem] = useState<Playlist | null>(null);
-  const [folders, setFolders] = useState([{ id: 4, name: 'Gaming Sessions' }]);
-  const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
-  const [carouselIdx, setCarouselIdx] = useState(1);
-  const [activeTrackId, setActiveTrackId] = useState(1);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isFav, setIsFav] = useState(false);
-  const [isShuffle, setIsShuffle] = useState(false);
-  const [seekPct, setSeekPct] = useState(0.18);
-  const [volume, setVolume] = useState(0.72);
-  const [vibeText, setVibeText] = useState('chill ambient music for focus');
-  const [gitToast, setGitToast] = useState<string | null>(null);
+  const [leftExpanded,     setLeftExpanded]     = useState(true);
+  const [rightExpanded,    setRightExpanded]     = useState(true);
+  const [showCommitGraph,  setShowCommitGraph]   = useState(false);
+  const [showSettings,     setShowSettings]      = useState(false);
+  const [showBranchModal,  setShowBranchModal]   = useState(false);
+  const [activePlaylistId, setActivePlaylistId]  = useState(2);
+  const [railItem,         setRailItem]          = useState('library');
+  const [activeTab,        setActiveTab]         = useState('Tracks');
+  const [pinnedIds,        setPinnedIds]         = useState(new Set([2]));
+  const [trackOrder,       setTrackOrder]        = useState<Track[]>(TRACKS);
+  const [hasUncommitted,   setHasUncommitted]    = useState(false);
+  const [abA,              setAbA]               = useState(0.2);
+  const [abB,              setAbB]               = useState(0.7);
+  const [loopMode,         setLoopMode]          = useState<LoopMode>('off');
+  const [trackAbPoints,    setTrackAbPoints]     = useState<Record<number, { a: number; b: number }>>({ 1: { a: 0.2, b: 0.7 } });
+  const [folderPopupItem,  setFolderPopupItem]   = useState<Playlist | null>(null);
+  const [folders,          setFolders]           = useState([{ id: 4, name: 'Gaming Sessions' }]);
+  const [editorTrackId,    setEditorTrackId]     = useState<number | null>(null);
+  const [carouselIdx,      setCarouselIdx]       = useState(1);
+  const [activeTrackId,    setActiveTrackId]     = useState(1);
+  const [isPlaying,        setIsPlaying]         = useState(false);
+  const [isFav,            setIsFav]             = useState(false);
+  const [isShuffle,        setIsShuffle]         = useState(false);
+  const [seekPct,          setSeekPct]           = useState(0.18);
+  const [volume,           setVolume]            = useState(0.72);
+  const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
+  const [gitToast,         setGitToast]          = useState<string | null>(null);
 
   const playlist = PLAYLISTS[1];
 
-  // ── Accent hue effect ─────────────────────────────────────────────────────
+  // ── Theme effect: sets both our custom vars AND DaisyUI's vars ────────────
   useEffect(() => {
-    const h = tweaks.accentHue;
+    const h = settings.accentHue;
     const root = document.documentElement;
-    if (tweaks.theme === 'warm') {
-      root.style.setProperty('--bg-0', `oklch(0.09 0.02 ${h})`);
-      root.style.setProperty('--bg-1', `oklch(0.12 0.025 ${h})`);
-      root.style.setProperty('--bg-2', `oklch(0.15 0.025 ${h})`);
-      root.style.setProperty('--bg-3', `oklch(0.18 0.025 ${h})`);
-      root.style.setProperty('--bg-4', `oklch(0.21 0.025 ${h})`);
-      root.style.setProperty('--bg-5', `oklch(0.25 0.025 ${h})`);
-    } else if (tweaks.theme === 'cool') {
-      root.style.setProperty('--bg-0', `oklch(0.09 0.018 ${h})`);
-      root.style.setProperty('--bg-1', `oklch(0.12 0.022 ${h})`);
-      root.style.setProperty('--bg-2', `oklch(0.15 0.022 ${h})`);
-      root.style.setProperty('--bg-3', `oklch(0.18 0.022 ${h})`);
-      root.style.setProperty('--bg-4', `oklch(0.21 0.022 ${h})`);
-      root.style.setProperty('--bg-5', `oklch(0.25 0.022 ${h})`);
+
+    // Apply DaisyUI data-theme so component classes pick up the right palette
+    root.setAttribute('data-theme', 'melomaniac');
+
+    // Per-theme lightness/chroma curves
+    let L: number[], c: number;
+    if (settings.theme === 'warm') {
+      L = [0.09, 0.12, 0.15, 0.18, 0.21, 0.25]; c = 0.025;
+    } else if (settings.theme === 'cool') {
+      L = [0.09, 0.12, 0.15, 0.18, 0.21, 0.25]; c = 0.018;
     } else {
-      root.style.setProperty('--bg-0', `oklch(0.08 0.015 ${h})`);
-      root.style.setProperty('--bg-1', `oklch(0.11 0.018 ${h})`);
-      root.style.setProperty('--bg-2', `oklch(0.14 0.018 ${h})`);
-      root.style.setProperty('--bg-3', `oklch(0.17 0.018 ${h})`);
-      root.style.setProperty('--bg-4', `oklch(0.20 0.018 ${h})`);
-      root.style.setProperty('--bg-5', `oklch(0.24 0.018 ${h})`);
+      // forest / violet — deeper blacks, lower chroma
+      L = [0.08, 0.11, 0.14, 0.17, 0.20, 0.24]; c = 0.015;
+    }
+
+    // Our custom variables (used by custom CSS and inline styles)
+    for (let i = 0; i < 6; i++) {
+      root.style.setProperty(`--bg-${i}`, `oklch(${L[i]} ${i === 0 ? 0.02 : c} ${h})`);
     }
     root.style.setProperty('--accent',       `oklch(0.62 0.15 ${h})`);
     root.style.setProperty('--accent-light', `oklch(0.72 0.14 ${h})`);
@@ -112,14 +110,24 @@ export default function DesktopApp() {
     root.style.setProperty('--text-1',       `oklch(0.62 0.06  ${h})`);
     root.style.setProperty('--text-2',       `oklch(0.48 0.05  ${h})`);
     root.style.setProperty('--text-3',       `oklch(0.35 0.04  ${h})`);
-  }, [tweaks.theme, tweaks.accentHue]);
+
+    // DaisyUI vars (bare oklch channels — DaisyUI wraps them in oklch())
+    root.style.setProperty('--p',  `0.62 0.15 ${h}`);   // primary = accent
+    root.style.setProperty('--pc', `0.9 0.02 ${h}`);    // primary-content
+    root.style.setProperty('--n',  `${L[3]} ${c} ${h}`);// neutral
+    root.style.setProperty('--nc', `0.62 0.06 ${h}`);   // neutral-content
+    root.style.setProperty('--b1', `${L[1]} ${c} ${h}`);// base-100
+    root.style.setProperty('--b2', `${L[2]} ${c} ${h}`);// base-200
+    root.style.setProperty('--b3', `${L[3]} ${c} ${h}`);// base-300
+    root.style.setProperty('--bc', `0.85 0.03 ${h}`);   // base-content
+  }, [settings.theme, settings.accentHue]);
 
   // ── Sync A·B handles on track change ──────────────────────────────────────
   useEffect(() => {
     const pts = trackAbPoints[activeTrackId];
     if (pts) { setAbA(pts.a); setAbB(pts.b); }
-    else { setAbA(0.2); setAbB(0.7); }
-  }, [activeTrackId]);  // eslint-disable-line react-hooks/exhaustive-deps
+    else      { setAbA(0.2);  setAbB(0.7);   }
+  }, [activeTrackId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const togglePin = (id: number) => setPinnedIds(prev => {
@@ -149,19 +157,13 @@ export default function DesktopApp() {
     }
   };
 
-  const handleLoopCycle = () => {
-    setLoopMode(m => {
-      if (m === 'off') return 'one';
-      if (m === 'one') return 'ab';
-      return 'off';
-    });
-  };
+  const handleLoopCycle = () => setLoopMode(m => m === 'off' ? 'one' : m === 'one' ? 'ab' : 'off');
 
   const handleGitAction = (action: string) => {
     const msgs: Record<string, string> = {
-      commit: 'Committed snapshot → a3f891',
-      push:   'Pushed to upstream/study-beats ✓',
-      pull:   'Pulled 2 new tracks from remote',
+      commit:  'Committed snapshot → a3f891',
+      push:    'Pushed to upstream/study-beats ✓',
+      pull:    'Pulled 2 new tracks from remote',
       shuffle: 'Shuffled queue',
       branch:  'Branch created',
     };
@@ -171,7 +173,7 @@ export default function DesktopApp() {
 
   const handleRailChange = (item: string) => {
     setRailItem(item);
-    if (item === 'git') { setShowCommitGraph(true); }
+    if (item === 'git') setShowCommitGraph(true);
     if (item === 'editor') setActiveTab('Tracks');
   };
 
@@ -203,7 +205,7 @@ export default function DesktopApp() {
             onAddToFolderClick={setFolderPopupItem}
           />
 
-          {/* Center */}
+          {/* Center column */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
             {railItem === 'editor' ? (
               <EditorView track={TRACKS.find(t => t.id === (editorTrackId ?? activeTrackId ?? 1))} />
@@ -230,13 +232,12 @@ export default function DesktopApp() {
                     </div>
                     <PlayerControls
                       isPlaying={isPlaying} onPlayPause={() => setIsPlaying(p => !p)}
-                      isFav={isFav} onFav={() => setIsFav(p => !p)}
-                      loopMode={loopMode} onLoopCycle={handleLoopCycle}
+                      isFav={isFav}         onFav={() => setIsFav(p => !p)}
+                      loopMode={loopMode}   onLoopCycle={handleLoopCycle}
                       isShuffle={isShuffle} onShuffle={() => setIsShuffle(p => !p)}
-                      seekPct={seekPct} onSeek={setSeekPct}
-                      volume={volume} onVolume={setVolume}
-                      abA={abA} abB={abB}
-                      onAbChange={handleAbChange}
+                      seekPct={seekPct}     onSeek={setSeekPct}
+                      volume={volume}       onVolume={setVolume}
+                      abA={abA} abB={abB}   onAbChange={handleAbChange}
                     />
                     <TrackList
                       tracks={trackOrder}
@@ -263,21 +264,22 @@ export default function DesktopApp() {
             )}
           </div>
 
-          {/* Right panel */}
+          {/* Right panel — collapsible */}
           <div style={{
-            width: rightExpanded && tweaks.showRightPanel ? 220 : 0,
+            width: rightExpanded && settings.showRightPanel ? 220 : 0,
             overflow: 'hidden',
             transition: 'width 0.28s cubic-bezier(0.4,0,0.2,1)',
             flexShrink: 0, display: 'flex',
           }}>
-            {tweaks.showRightPanel && (
+            {settings.showRightPanel && (
               <RightPanel vibeText={vibeText} onVibeChange={setVibeText} onCollapse={() => setRightExpanded(false)} />
             )}
           </div>
 
-          {/* Right panel toggle tab */}
-          {(!rightExpanded || !tweaks.showRightPanel) && (
-            <div onClick={() => setRightExpanded(true)}
+          {/* Right panel re-open tab */}
+          {(!rightExpanded || !settings.showRightPanel) && (
+            <div
+              onClick={() => setRightExpanded(true)}
               style={{
                 position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
                 width: 18, height: 60, background: 'var(--bg-3)',
@@ -298,15 +300,16 @@ export default function DesktopApp() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '0 12px', flexShrink: 0,
         }}>
-          <span style={{ fontSize: 9, color: 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace" }}>
-            Melomaniac | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--green)' }}>Up-to-Date</span>
+          <span className="font-mono text-[9px] text-mm-t2">
+            Melomaniac | Rust + Tauri | GPLv3 | Syncing: <span className="text-mm-green">Up-to-Date</span>
           </span>
-          <span style={{ fontSize: 9, color: 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace" }}>
+          <span className="font-mono text-[9px] text-mm-t2">
             {trackOrder.length} tracks · branch: main · commit: 4fa9b0
           </span>
         </div>
 
-        {/* Folder popup */}
+        {/* ── Overlays ────────────────────────────────────────────────── */}
+
         {folderPopupItem && (
           <AddToFolderPopup
             item={folderPopupItem}
@@ -324,7 +327,6 @@ export default function DesktopApp() {
           />
         )}
 
-        {/* Branch modal */}
         {showBranchModal && (
           <BranchModal
             onClose={() => setShowBranchModal(false)}
@@ -336,22 +338,20 @@ export default function DesktopApp() {
           />
         )}
 
-        {/* Settings modal */}
         {showSettings && (
           <SettingsModal
-            tweaks={tweaks}
-            setTweak={setTweak}
+            settings={settings}
+            updateSetting={updateSetting}
             onClose={() => setShowSettings(false)}
-            onReset={() => { setTweak(TWEAK_DEFAULTS); setShowSettings(false); }}
+            onReset={() => { updateSetting(SETTING_DEFAULTS); setShowSettings(false); }}
           />
         )}
 
-        {/* Commit graph modal */}
         {showCommitGraph && (
           <CommitGraph onClose={() => { setShowCommitGraph(false); setRailItem('library'); }} />
         )}
 
-        {/* Git toast */}
+        {/* Git operation toast */}
         {gitToast && (
           <div style={{
             position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)',

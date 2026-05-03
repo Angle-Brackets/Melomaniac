@@ -1,45 +1,29 @@
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
+import { IcoEditor } from '../icons';
 
 export default function EditorView({ track }: { track?: Track }) {
   const albumGradient = track ? (ALBUMS[track.albumRef]?.gradient ?? ALBUMS[0].gradient) : 'var(--bg-4)';
 
   return (
-    <div style={{
-      flex: 1, display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center',
-      background: 'var(--bg-2)', gap: 14,
-    }}>
-      <div style={{
-        width: 56, height: 56, borderRadius: 12,
-        background: albumGradient,
-        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-        flexShrink: 0,
-      }} />
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)', marginBottom: 4 }}>
+    <div className="flex-1 flex flex-col items-center justify-center bg-mm-2 gap-3.5">
+      <div className="w-14 h-14 rounded-xl shrink-0"
+        style={{ background: albumGradient, boxShadow: '0 4px 20px rgba(0,0,0,0.5)' }}
+      />
+      <div className="text-center">
+        <div className="text-sm font-bold text-mm-t0 mb-1">
           {track ? track.title : 'No track selected'}
         </div>
         {track && (
-          <div style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 16 }}>
+          <div className="text-[11px] text-mm-t2 mb-4">
             {track.artist} · {track.album}
           </div>
         )}
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: 8,
-          padding: '8px 18px', borderRadius: 8,
-          border: '1px dashed var(--border-2)',
-          background: 'var(--bg-3)',
-        }}>
-          <svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="var(--accent)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8.5 2l2.5 2.5L4 11H1.5v-2.5L8.5 2z"/>
-            <path d="M7 3.5l2.5 2.5"/>
-          </svg>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent-light)', fontFamily: "'JetBrains Mono', monospace" }}>
-            Unimplemented!
-          </span>
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-mm-b2 bg-mm-3">
+          <IcoEditor size={14} className="text-mm-accent" />
+          <span className="text-[13px] font-semibold text-mm-accent-lit font-mono">Unimplemented!</span>
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-2)', marginTop: 10, fontFamily: "'JetBrains Mono', monospace" }}>
+        <div className="text-[10px] text-mm-t2 mt-2.5 font-mono">
           MP3 metadata editor · coming soon
         </div>
       </div>
