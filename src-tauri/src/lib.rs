@@ -1,5 +1,6 @@
 mod audio;
 mod storage;
+mod stats;
 
 use std::sync::Arc;
 
@@ -72,6 +73,7 @@ pub fn run() {
             }
 
             app.manage(storage_state);
+            app.manage(stats::SystemState(std::sync::Mutex::new(sysinfo::System::new())));
 
             Ok(())
         })
@@ -94,6 +96,7 @@ pub fn run() {
             storage::playlist_fork,
             storage::branch_create,
             storage::branch_commit,
+            stats::get_system_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

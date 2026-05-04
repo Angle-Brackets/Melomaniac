@@ -107,6 +107,7 @@
 - [x] Refine info-dense tracklist layout — 10-column grid with drag reorder and context menu
 - [x] Add artwork display in player and library views — gradient album art with per-pixel shine
 - [x] General visual polish pass — DaisyUI v5 migration, theme centralization, responsive carousel, mouse drag-reorder, play queue ordering
+- [x] Add F12 performance toggle for CPU and RAM usage via `sysinfo` integration
 
 ---
 

@@ -83,6 +83,8 @@ export default function DesktopApp() {
   const [volume,           setVolume]            = useState(0.72);
   const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
   const [gitToast,         setGitToast]          = useState<string | null>(null);
+  const [showStats,        setShowStats]         = useState(false);
+  const [appStats,         setAppStats]          = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
 
   const playlist = PLAYLISTS[1];
 
@@ -115,6 +117,29 @@ export default function DesktopApp() {
       })
       .catch(console.error);
   }, []);
+
+  // ── Global Stats Listener ────────────────────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F12') {
+        setShowStats(p => !p);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!showStats) return;
+    const fetchStats = () => {
+      invoke<{ memory_mb: number; cpu_usage: number }>('get_system_stats')
+        .then(setAppStats)
+        .catch(console.error);
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 1000);
+    return () => clearInterval(interval);
+  }, [showStats]);
 
   // ── Audio event listener ─────────────────────────────────────────────────
   useEffect(() => {
@@ -413,6 +438,11 @@ export default function DesktopApp() {
         }}>
           <span className="font-mono text-[9px] text-mm-t2">
             Melomaniac | Rust + Tauri | GPLv3 | Syncing: <span className="text-mm-green">Up-to-Date</span>
+            {showStats && appStats && (
+              <span className="ml-4 text-mm-accent-lit">
+                RAM: {appStats.memory_mb.toFixed(1)} MB | CPU: {appStats.cpu_usage.toFixed(1)}%
+              </span>
+            )}
           </span>
           <span className="font-mono text-[9px] text-mm-t2">
             {trackOrder.length} tracks · branch: main · commit: 4fa9b0
