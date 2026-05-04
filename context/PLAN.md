@@ -30,6 +30,7 @@
 - [ ] Verify background audio persistence when app is minimised on Android
 - [ ] Implement lockscreen controls (play, pause, skip) on Android
 - [x] Expose `play`, `pause`, `seek`, `stop`, `audio_load`, `audio_set_volume`, `audio_position` Tauri commands to frontend
+- [x] Fix rodio Symphonia decoder RandomAccessNotSupported error on backward seek by implementing decoder reload fallback
 
 ### yt-dlp Ingestion Wrapper
 - [ ] Implement `std::process::Command` wrapper around `yt-dlp` binary

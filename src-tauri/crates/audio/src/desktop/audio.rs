@@ -112,6 +112,7 @@ fn audio_thread(
     let mut player: Option<Player> = None;
     let mut track_active = false;
     let mut volume: f32 = 1.0;
+    let mut active_path: Option<PathBuf> = None;
 
     loop {
         match req_rx.recv_timeout(Duration::from_millis(250)) {
@@ -122,6 +123,7 @@ fn audio_thread(
                     &mut player,
                     &mut track_active,
                     &mut volume,
+                    &mut active_path,
                     &position_ms,
                     &duration_ms,
                     &event_tx,
@@ -178,6 +180,7 @@ fn handle_cmd(
     player: &mut Option<Player>,
     track_active: &mut bool,
     volume: &mut f32,
+    active_path: &mut Option<PathBuf>,
     position_ms: &Arc<AtomicU64>,
     duration_ms: &Arc<AtomicU64>,
     event_tx: &mpsc::Sender<AudioEvent>,
@@ -192,6 +195,7 @@ fn handle_cmd(
 
             let file = File::open(&path)
                 .map_err(|_| AudioError::SourceNotFound(path.display().to_string()))?;
+            *active_path = Some(path);
             let source = Decoder::new(BufReader::new(file))
                 .map_err(|e| AudioError::UnsupportedFormat(e.to_string()))?;
 
@@ -224,6 +228,7 @@ fn handle_cmd(
             // Drop the Player — its Drop impl signals the queue to stop.
             *player = None;
             *track_active = false;
+            *active_path = None;
             position_ms.store(0, Ordering::Relaxed);
         }
 
@@ -232,9 +237,37 @@ fn handle_cmd(
             let dur = duration_ms.load(Ordering::Relaxed);
             // Only clamp if duration is known; 0 means unknown.
             let target = if dur > 0 { pos_ms.min(dur) } else { pos_ms };
-            p.try_seek(Duration::from_millis(target))
-                .map_err(|e| AudioError::Playback(e.to_string()))?;
-            position_ms.store(target, Ordering::Relaxed);
+            match p.try_seek(Duration::from_millis(target)) {
+                Ok(_) => {
+                    position_ms.store(target, Ordering::Relaxed);
+                }
+                Err(_) => {
+                    // Backward seek might fail if RandomAccess is not supported by Decoder.
+                    // Fallback: reload the source and seek forward.
+                    if let Some(path) = active_path.as_ref() {
+                        let is_paused = p.is_paused();
+                        
+                        let file = File::open(path)
+                            .map_err(|_| AudioError::SourceNotFound(path.display().to_string()))?;
+                        let source = Decoder::new(BufReader::new(file))
+                            .map_err(|e| AudioError::UnsupportedFormat(e.to_string()))?;
+
+                        let new_player = Player::connect_new(device_sink.mixer());
+                        new_player.set_volume(*volume);
+                        if is_paused {
+                            new_player.pause();
+                        }
+                        new_player.append(source);
+                        new_player.try_seek(Duration::from_millis(target))
+                            .map_err(|e| AudioError::Playback(e.to_string()))?;
+                        
+                        *player = Some(new_player);
+                        position_ms.store(target, Ordering::Relaxed);
+                    } else {
+                        return Err(AudioError::NotLoaded);
+                    }
+                }
+            }
         }
 
         Cmd::Volume(vol) => {
