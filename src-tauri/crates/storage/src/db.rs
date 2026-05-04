@@ -114,6 +114,18 @@ impl Database {
         Ok(())
     }
 
+    pub async fn update_duration(&self, hash: &str, duration_ms: i64) -> Result<(), StorageError> {
+        sqlx::query("UPDATE tracks SET duration_ms = ? WHERE hash = ?")
+            .bind(duration_ms).bind(hash).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn update_artwork_hash(&self, hash: &str, artwork_hash: &str) -> Result<(), StorageError> {
+        sqlx::query("UPDATE tracks SET artwork_hash = ? WHERE hash = ?")
+            .bind(artwork_hash).bind(hash).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn remove_track(&self, hash: &str) -> Result<(), StorageError> {
         sqlx::query("DELETE FROM tracks WHERE hash = ?")
             .bind(hash).execute(&self.pool).await?;

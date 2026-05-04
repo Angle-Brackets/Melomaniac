@@ -124,6 +124,7 @@ fn audio_thread(
                     &mut volume,
                     &position_ms,
                     &duration_ms,
+                    &event_tx,
                 );
                 let _ = req.resp.send(result);
             }
@@ -179,6 +180,7 @@ fn handle_cmd(
     volume: &mut f32,
     position_ms: &Arc<AtomicU64>,
     duration_ms: &Arc<AtomicU64>,
+    event_tx: &mpsc::Sender<AudioEvent>,
 ) -> Result<(), AudioError> {
     match cmd {
         Cmd::Load(path, _metadata) => {
@@ -194,9 +196,11 @@ fn handle_cmd(
                 .map_err(|e| AudioError::UnsupportedFormat(e.to_string()))?;
 
             // Capture duration before the source is moved into the Player.
-            if let Some(dur) = source.total_duration() {
-                duration_ms.store(dur.as_millis() as u64, Ordering::Relaxed);
-            }
+            let dur_ms = source.total_duration()
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            duration_ms.store(dur_ms, Ordering::Relaxed);
+            let _ = event_tx.send(AudioEvent::DurationKnown(dur_ms));
 
             let new_player = Player::connect_new(device_sink.mixer());
             new_player.set_volume(*volume);

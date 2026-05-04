@@ -1,6 +1,7 @@
 pub mod cas;
 pub mod db;
 pub mod indexer;
+pub mod ingest;
 
 pub use cas::CasStore;
 pub use db::{BranchRecord, CommitRecord, Database, PlaylistRecord, TrackRecord};

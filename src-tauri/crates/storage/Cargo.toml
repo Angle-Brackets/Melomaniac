@@ -12,6 +12,8 @@ blake3     = "1"
 uuid       = { version = "1", features = ["v4"] }
 tokio      = { version = "1", features = ["fs"] }
 sqlx       = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+id3        = "1"
+symphonia  = { version = "0.5", features = ["mp3"] }
 
 # Android NDK does not ship libsqlite3 headers — bundle SQLite from source
 [target.'cfg(target_os = "android")'.dependencies]

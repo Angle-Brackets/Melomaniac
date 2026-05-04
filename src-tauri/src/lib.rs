@@ -58,6 +58,19 @@ pub fn run() {
 
             let storage_state = tauri::async_runtime::block_on(storage::init_storage(app_data_dir))
                 .expect("failed to initialise storage");
+
+            // In debug builds, pre-ingest the bundled test track so the library
+            // is never empty during development.
+            #[cfg(debug_assertions)]
+            {
+                const TEST_MP3: &[u8] = include_bytes!("../../tests/audio/test.mp3");
+                let cas = Arc::clone(&storage_state.cas);
+                let db  = Arc::clone(&storage_state.db);
+                tauri::async_runtime::block_on(
+                    melomaniac_storage::ingest::ingest_bytes(TEST_MP3, "test", &cas, &db)
+                ).ok(); // idempotent — silently skip if already present
+            }
+
             app.manage(storage_state);
 
             Ok(())
@@ -71,8 +84,11 @@ pub fn run() {
             audio::audio_seek,
             audio::audio_set_volume,
             audio::audio_position,
+            audio::track_play,
             storage::library_get_all,
             storage::library_set_favorite,
+            storage::track_ingest_files,
+            storage::track_get_artwork,
             storage::playlist_get_all,
             storage::playlist_create,
             storage::playlist_fork,

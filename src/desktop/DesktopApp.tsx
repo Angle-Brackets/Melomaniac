@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import './style.css';
 import { applyTheme, writeCustomHue, NAMED_THEMES } from '../shared/themes';
 import type { ThemeName } from '../shared/themes';
 
-import { ALBUMS, TRACKS, PLAYLISTS } from './data';
-import type { Track, Playlist } from './data';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack } from './data';
+import type { Track, Playlist, TrackRecord } from './data';
 import type { AppSettings } from './types';
 
 import TitleBar from './components/TitleBar';
@@ -73,7 +75,11 @@ export default function DesktopApp() {
   const [isFav,            setIsFav]             = useState(false);
   const [isShuffle,        setIsShuffle]         = useState(false);
   const [shuffledQueue,    setShuffledQueue]     = useState<Track[] | null>(null);
-  const [seekPct,          setSeekPct]           = useState(0.18);
+  const [loadedHash,       setLoadedHash]        = useState<string | null>(null);
+  const [positionMs,       setPositionMs]        = useState(0);
+  const [durationMs,       setDurationMs]        = useState(0);
+  const lastSeekTime = useRef(0);
+  const [artworkUrls,      setArtworkUrls]       = useState<Record<string, string>>({});
   const [volume,           setVolume]            = useState(0.72);
   const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
   const [gitToast,         setGitToast]          = useState<string | null>(null);
@@ -86,8 +92,11 @@ export default function DesktopApp() {
     [isShuffle, shuffledQueue, trackOrder],
   );
   const carouselAlbums = useMemo(
-    () => playQueue.map(t => ALBUMS[t.albumRef] ?? ALBUMS[0]),
-    [playQueue],
+    () => playQueue.map(t => ({
+      ...(ALBUMS[t.albumRef] ?? ALBUMS[0]),
+      artworkUrl: artworkUrls[t.hash] ?? null,
+    })),
+    [playQueue, artworkUrls],
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
 
@@ -95,6 +104,64 @@ export default function DesktopApp() {
   useEffect(() => {
     applyTheme(settings.theme, settings.accentHue);
   }, [settings.theme, settings.accentHue]);
+
+  // ── Load real tracks from storage on mount ───────────────────────────────
+  useEffect(() => {
+    invoke<TrackRecord[]>('library_get_all')
+      .then(records => {
+        if (records.length > 0) {
+          setTrackOrder(records.map(trackRecordToTrack));
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // ── Audio event listener ─────────────────────────────────────────────────
+  useEffect(() => {
+    type AudioPayload =
+      | 'TrackEnded' | 'RemotePlay' | 'RemotePause'
+      | 'RemoteNextTrack' | 'RemotePreviousTrack' | 'RemoteTogglePlayPause'
+      | { PositionChanged: number }
+      | { DurationKnown: number }
+      | { Error: string };
+
+    let unlisten: (() => void) | undefined;
+    listen<AudioPayload>('audio://event', ({ payload }) => {
+      if (typeof payload === 'object' && 'PositionChanged' in payload) {
+        // Ignore stale ticks for 600ms after a seek to prevent snap-back
+        if (Date.now() - lastSeekTime.current > 600) {
+          setPositionMs(payload.PositionChanged);
+        }
+      }
+      if (typeof payload === 'object' && 'DurationKnown' in payload) {
+        if (payload.DurationKnown > 0) setDurationMs(payload.DurationKnown);
+      }
+      if (payload === 'TrackEnded') {
+        setIsPlaying(false);
+        setPositionMs(0);
+      }
+      if (payload === 'RemotePlay')  setIsPlaying(true);
+      if (payload === 'RemotePause') setIsPlaying(false);
+      if (payload === 'RemoteTogglePlayPause') setIsPlaying(p => !p);
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  // ── Fetch artwork for the active track ────────────────────────────────────
+  // Depends on artwork_hash (not just activeTrackId) so it re-fires when
+  // library_get_all resolves and populates artwork_hash on the initial track.
+  const activeArtworkHash = playQueue.find(t => t.id === activeTrackId)?.artwork_hash ?? null;
+  useEffect(() => {
+    const track = playQueue.find(t => t.id === activeTrackId);
+    if (!track?.artwork_hash || artworkUrls[track.hash]) return;
+    invoke<number[]>('track_get_artwork', { hash: track.hash })
+      .then(bytes => {
+        const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
+        setArtworkUrls(prev => ({ ...prev, [track.hash]: url }));
+      })
+      .catch(console.error); // log failures so they're visible in DevTools
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTrackId, activeArtworkHash]);
 
   // ── Sync A·B handles on track change ──────────────────────────────────────
   useEffect(() => {
@@ -111,9 +178,17 @@ export default function DesktopApp() {
   });
 
   const handleReorder = (newOrder: Track[] | null) => {
-    if (newOrder === null) { setTrackOrder(TRACKS); setHasUncommitted(false); }
-    else { setTrackOrder(newOrder); setHasUncommitted(true); }
-    // Manual reorder defines a new canonical order — clear any active shuffle queue
+    if (newOrder === null) {
+      // Discard: restore the last committed state from the backend if available,
+      // otherwise fall back to static mock data.
+      invoke<TrackRecord[]>('library_get_all')
+        .then(records => setTrackOrder(records.length > 0 ? records.map(trackRecordToTrack) : TRACKS))
+        .catch(() => setTrackOrder(TRACKS));
+      setHasUncommitted(false);
+    } else {
+      setTrackOrder(newOrder);
+      setHasUncommitted(true);
+    }
     if (shuffledQueue) { setShuffledQueue(null); setIsShuffle(false); }
   };
 
@@ -181,7 +256,29 @@ export default function DesktopApp() {
 
   const handleSelectTrack = (id: number) => {
     setActiveTrackId(id);
-    setIsPlaying(true);
+  };
+
+  const handlePlayPause = () => {
+    const track = playQueue.find(t => t.id === activeTrackId);
+    if (!track?.hash) return;
+
+    if (track.hash === loadedHash) {
+      // Same track: toggle pause/resume
+      if (isPlaying) {
+        invoke('audio_pause').catch(console.error);
+        setIsPlaying(false);
+      } else {
+        invoke('audio_play').catch(console.error);
+        setIsPlaying(true);
+      }
+    } else {
+      // New track: load and play
+      invoke('track_play', { hash: track.hash }).catch(console.error);
+      setLoadedHash(track.hash);
+      setDurationMs(track.duration_ms);
+      setPositionMs(0);
+      setIsPlaying(true);
+    }
   };
 
   return (
@@ -236,11 +333,19 @@ export default function DesktopApp() {
                       />
                     </div>
                     <PlayerControls
-                      isPlaying={isPlaying} onPlayPause={() => setIsPlaying(p => !p)}
+                      track={playQueue.find(t => t.id === activeTrackId) ?? null}
+                      positionMs={positionMs}
+                      durationMs={durationMs}
+                      isPlaying={isPlaying} onPlayPause={handlePlayPause}
                       isFav={isFav}         onFav={() => setIsFav(p => !p)}
                       loopMode={loopMode}   onLoopCycle={handleLoopCycle}
                       isShuffle={isShuffle} onShuffle={handleShuffle}
-                      seekPct={seekPct}     onSeek={setSeekPct}
+                      onSeek={pct => {
+                        const ms = Math.floor(pct * durationMs);
+                        lastSeekTime.current = Date.now();
+                        setPositionMs(ms);
+                        invoke('audio_seek', { positionMs: ms }).catch(console.error);
+                      }}
                       volume={volume}       onVolume={setVolume}
                       abA={abA} abB={abB}   onAbChange={handleAbChange}
                     />
@@ -252,6 +357,7 @@ export default function DesktopApp() {
                       hasUncommitted={hasUncommitted}
                       onCommitChanges={handleCommitReorder}
                       onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
+                      artworkUrls={artworkUrls}
                     />
                   </>
                 )}

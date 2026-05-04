@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import { TRACKS } from '../data';
+import type { Track } from '../data';
 import {
   IcoPlay, IcoPause, IcoNext, IcoPrev,
   IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue,
@@ -8,23 +8,27 @@ import {
 export type LoopMode = 'off' | 'one' | 'ab';
 
 interface PlayerControlsProps {
+  track:       Track | null;
+  positionMs:  number;
+  durationMs:  number;
   isPlaying:   boolean; onPlayPause: () => void;
   isFav:       boolean; onFav:       () => void;
   loopMode:    LoopMode; onLoopCycle: () => void;
   isShuffle:   boolean; onShuffle:   () => void;
-  seekPct:     number;  onSeek:      (pct: number) => void;
+  onSeek:      (pct: number) => void;
   volume:      number;  onVolume:    (vol: number) => void;
   abA:         number;  abB:         number;
   onAbChange:  (handle: 'A' | 'B', val: number) => void;
 }
 
 export default function PlayerControls({
+  track, positionMs, durationMs,
   isPlaying, onPlayPause, isFav, onFav,
   loopMode, onLoopCycle, isShuffle, onShuffle,
-  seekPct, onSeek, volume, onVolume,
+  onSeek, volume, onVolume,
   abA, abB, onAbChange,
 }: PlayerControlsProps) {
-  const track = TRACKS[0];
+  const seekPct = durationMs > 0 ? positionMs / durationMs : 0;
   const seekRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
   const seekingRef  = useRef(false);
@@ -56,22 +60,24 @@ export default function PlayerControls({
     loopMode === 'one' ? 'Loop: Single Song — click for A·B loop' :
     'Loop: A·B — drag handles on seek bar · click to disable';
 
-  const timeStr = (pct: number) => {
-    const secs = Math.floor(pct * 24 * 60);
-    return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  const fmtMs = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   };
 
   return (
     <div className="shrink-0">
       {/* Track info */}
       <div className="text-center px-5 pt-1.5 pb-0.5">
-        <p className="text-[13px] font-semibold text-mm-t0">Track: {track.title}</p>
-        <p className="text-[11px] text-mm-t2 mt-px">
-          {track.artist} &nbsp;·&nbsp; {track.album}
+        <p className="text-[13px] font-semibold text-mm-t0">
+          {track ? track.title : '—'}
         </p>
-        {abActive && (
+        <p className="text-[11px] text-mm-t2 mt-px">
+          {track ? `${track.artist} · ${track.album}` : 'Select a track and press play'}
+        </p>
+        {abActive && durationMs > 0 && (
           <p className="font-mono text-[10px] text-mm-accent-lit mt-0.5">
-            A·B Loop: {(abA * 24).toFixed(1)}min → {(abB * 24).toFixed(1)}min
+            A·B Loop: {fmtMs(abA * durationMs)} → {fmtMs(abB * durationMs)}
           </p>
         )}
       </div>
@@ -112,7 +118,7 @@ export default function PlayerControls({
       {/* Seek bar + volume */}
       <div className="flex items-center gap-2 px-5 pb-1.5">
         <span className="font-mono text-[10px] text-mm-t2 min-w-[32px] text-right">
-          {timeStr(seekPct)}
+          {fmtMs(positionMs)}
         </span>
 
         {/* Custom seek bar — needed for draggable A·B loop markers */}
@@ -128,15 +134,25 @@ export default function PlayerControls({
             else { seekingRef.current = true; onSeek(pct); }
           }}
         >
-          <div className="seek-track absolute inset-x-0 top-1/2 -translate-y-1/2 h-[3px] m-0">
+          {/* Inline styles only — avoid Tailwind-v4 cascade overriding position */}
+          <div style={{
+            position: 'absolute', left: 0, right: 0,
+            top: '50%', transform: 'translateY(-50%)',
+            height: 3, background: 'var(--border-1)', borderRadius: 2,
+            transition: 'height 0.12s',
+          }}>
             {abActive && (
               <div style={{
                 position: 'absolute',
                 left: `${abA * 100}%`, width: `${(abB - abA) * 100}%`,
-                height: '100%', background: 'var(--accent-dim)', opacity: 0.7, borderRadius: 2,
+                top: 0, bottom: 0, background: 'var(--accent-dim)', opacity: 0.7, borderRadius: 2,
               }} />
             )}
-            <div className="seek-fill" style={{ width: `${seekPct * 100}%` }} />
+            <div style={{
+              position: 'absolute', left: 0, top: 0, bottom: 0,
+              width: `${seekPct * 100}%`,
+              background: 'var(--accent)', borderRadius: 2,
+            }} />
           </div>
 
           {abActive && (
@@ -173,7 +189,9 @@ export default function PlayerControls({
           )}
         </div>
 
-        <span className="font-mono text-[10px] text-mm-t2 min-w-[32px]">24:20</span>
+        <span className="font-mono text-[10px] text-mm-t2 min-w-[32px]">
+          {durationMs > 0 ? fmtMs(durationMs) : '—'}
+        </span>
 
         {/* Volume */}
         <div className="flex items-center gap-1.5 shrink-0">

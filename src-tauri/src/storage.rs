@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use melomaniac_storage::{
     BranchRecord, CasStore, CommitRecord, Database, Indexer, PlaylistRecord, TrackRecord,
@@ -29,6 +29,27 @@ pub async fn library_get_all(storage: State<'_, StorageState>) -> Result<Vec<Tra
     storage.db.get_all_tracks().await.map_err(|e| e.to_string())
 }
 
+/// Ingest one or more local audio files into the CAS + metadata DB.
+/// Paths that are already ingested are returned immediately (idempotent).
+#[tauri::command]
+pub async fn track_ingest_files(
+    paths: Vec<String>,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<TrackRecord>, String> {
+    let mut results = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let record = melomaniac_storage::ingest::ingest_file(
+            &PathBuf::from(p),
+            &storage.cas,
+            &storage.db,
+        )
+        .await
+        .map_err(|e| format!("{p}: {e}"))?;
+        results.push(record);
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 pub async fn library_set_favorite(
     hash: String,
@@ -38,6 +59,31 @@ pub async fn library_set_favorite(
     storage
         .db
         .set_favorited(&hash, favorited)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Return the raw artwork bytes (JPEG or PNG) for a track.
+/// Returns an error if the track has no artwork or if it hasn't been ingested yet.
+#[tauri::command]
+pub async fn track_get_artwork(
+    hash: String,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<u8>, String> {
+    let record = storage
+        .db
+        .get_track(&hash)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("track not found: {hash}"))?;
+
+    let artwork_hash = record
+        .artwork_hash
+        .ok_or_else(|| "no artwork for this track".to_string())?;
+
+    storage
+        .cas
+        .read_blob(&artwork_hash)
         .await
         .map_err(|e| e.to_string())
 }

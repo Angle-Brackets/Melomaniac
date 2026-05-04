@@ -4,10 +4,15 @@ export interface Album {
   artist: string;
   gradient: string;
   accent: string;
+  artworkUrl?: string | null;
 }
 
 export interface Track {
   id: number;
+  /** CAS hash — set for real tracks, empty string for mock/placeholder tracks */
+  hash: string;
+  artwork_hash: string | null;
+  duration_ms: number;
   title: string;
   artist: string;
   album: string;
@@ -15,6 +20,18 @@ export interface Track {
   added: string;
   length: string;
   albumRef: number;
+}
+
+/** Shape returned by the `library_get_all` Tauri command (mirrors TrackRecord in Rust) */
+export interface TrackRecord {
+  hash:         string;
+  title:        string;
+  artist:       string;
+  album:        string | null;
+  artwork_hash: string | null;
+  duration_ms:  number;
+  favorited:    boolean;
+  mime_type:    string | null;
 }
 
 export interface Playlist {
@@ -50,15 +67,38 @@ export const ALBUMS: Album[] = [
 ];
 
 export const TRACKS: Track[] = [
-  { id: 1, title: "Chill Ambient",       artist: "Anna Bair",   album: "Chill Ruests",   commit: "4fa9b0", added: "2h ago",  length: "24:20", albumRef: 1 },
-  { id: 2, title: "Coffee Terpomarai",   artist: "Lorun",       album: "Coffee Shop A.", commit: "4fa9b0", added: "5h ago",  length: "23:35", albumRef: 1 },
-  { id: 3, title: "Denny Wrock Before",  artist: "Study Beats", album: "Coffee Shop A.", commit: "4fa9b0", added: "1d ago",  length: "23:57", albumRef: 2 },
-  { id: 4, title: "Coffee Shop Ambienc.", artist: "Anna Bair",  album: "Coffee Shop A.", commit: "4fa9b0", added: "1d ago",  length: "23:19", albumRef: 2 },
-  { id: 5, title: "Sunset Keys",         artist: "Lorun",       album: "Sunset Drift",   commit: "9c2a31", added: "3d ago",  length: "18:44", albumRef: 2 },
-  { id: 6, title: "Rain on Glass",       artist: "Anna Bair",   album: "Rainy Window",   commit: "9c2a31", added: "3d ago",  length: "31:02", albumRef: 0 },
-  { id: 7, title: "Midnight Protocol",   artist: "Study Beats", album: "Midnight Bloom", commit: "b7f192", added: "5d ago",  length: "22:11", albumRef: 3 },
-  { id: 8, title: "Ember Walk",          artist: "Various",     album: "Ember",          commit: "b7f192", added: "5d ago",  length: "19:55", albumRef: 4 },
+  { id: 1, hash: '', artwork_hash: null, duration_ms: 0, title: "Chill Ambient",        artist: "Anna Bair",   album: "Chill Ruests",   commit: "4fa9b0", added: "2h ago",  length: "24:20", albumRef: 1 },
+  { id: 2, hash: '', artwork_hash: null, duration_ms: 0, title: "Coffee Terpomarai",    artist: "Lorun",       album: "Coffee Shop A.", commit: "4fa9b0", added: "5h ago",  length: "23:35", albumRef: 1 },
+  { id: 3, hash: '', artwork_hash: null, duration_ms: 0, title: "Denny Wrock Before",   artist: "Study Beats", album: "Coffee Shop A.", commit: "4fa9b0", added: "1d ago",  length: "23:57", albumRef: 2 },
+  { id: 4, hash: '', artwork_hash: null, duration_ms: 0, title: "Coffee Shop Ambienc.", artist: "Anna Bair",   album: "Coffee Shop A.", commit: "4fa9b0", added: "1d ago",  length: "23:19", albumRef: 2 },
+  { id: 5, hash: '', artwork_hash: null, duration_ms: 0, title: "Sunset Keys",          artist: "Lorun",       album: "Sunset Drift",   commit: "9c2a31", added: "3d ago",  length: "18:44", albumRef: 2 },
+  { id: 6, hash: '', artwork_hash: null, duration_ms: 0, title: "Rain on Glass",        artist: "Anna Bair",   album: "Rainy Window",   commit: "9c2a31", added: "3d ago",  length: "31:02", albumRef: 0 },
+  { id: 7, hash: '', artwork_hash: null, duration_ms: 0, title: "Midnight Protocol",    artist: "Study Beats", album: "Midnight Bloom", commit: "b7f192", added: "5d ago",  length: "22:11", albumRef: 3 },
+  { id: 8, hash: '', artwork_hash: null, duration_ms: 0, title: "Ember Walk",           artist: "Various",     album: "Ember",          commit: "b7f192", added: "5d ago",  length: "19:55", albumRef: 4 },
 ];
+
+function fmtDuration(ms: number): string {
+  if (!ms) return '—';
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Convert a backend TrackRecord into the display Track type. */
+export function trackRecordToTrack(r: TrackRecord, idx: number): Track {
+  return {
+    id:           idx + 1,
+    hash:         r.hash,
+    artwork_hash: r.artwork_hash,
+    duration_ms:  r.duration_ms,
+    title:        r.title,
+    artist:       r.artist,
+    album:        r.album ?? 'Unknown Album',
+    commit:       r.hash.slice(0, 6),
+    added:        '—',
+    length:       fmtDuration(r.duration_ms),
+    albumRef:     parseInt(r.hash[0], 16) % ALBUMS.length,
+  };
+}
 
 export const PLAYLISTS: Playlist[] = [
   { id: 1, name: "Cozy Melodies",  version: "1.5", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },

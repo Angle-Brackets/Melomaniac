@@ -14,11 +14,12 @@ interface TrackListProps {
   hasUncommitted:  boolean;
   onCommitChanges: () => void;
   onEditTrack:     (id: number) => void;
+  artworkUrls:     Record<string, string>;
 }
 
 export default function TrackList({
   tracks, activeTrackId, onSelect, onReorder,
-  hasUncommitted, onCommitChanges, onEditTrack,
+  hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
 }: TrackListProps) {
   const [dragIdx,     setDragIdx]     = useState<number | null>(null);
   const [dropIdx,     setDropIdx]     = useState<number | null>(null);
@@ -110,13 +111,13 @@ export default function TrackList({
       {/* Track rows */}
       <div className="flex-1 overflow-y-auto styled-scroll">
         {tracks.map((t, idx) => {
-          const active = t.id === activeTrackId;
-          const art    = ALBUMS[t.albumRef] ?? ALBUMS[0];
+          const active     = t.id === activeTrackId;
+          const art        = ALBUMS[t.albumRef] ?? ALBUMS[0];
+          const artworkUrl = artworkUrls[t.hash];
           return (
             <div
               key={t.id}
               ref={el => { rowRefs.current[idx] = el; }}
-              onDoubleClick={() => onSelect(t.id)}
               onClick={() => { if (dragIdx === null) onSelect(t.id); }}
               className={`tl-row${active ? ' active-row' : ''}`}
               style={{
@@ -133,7 +134,11 @@ export default function TrackList({
               ><IcoDragHandle /></div>
               <div className={`tl-cell text-[10px] ${active ? 'bright' : 'muted'}`}>{active ? '▶' : idx + 1}</div>
               <div className="tl-cell">
-                <div className="w-[22px] h-[22px] rounded-[3px] shrink-0" style={{ background: art.gradient }} />
+                <div className="w-[22px] h-[22px] rounded-[3px] shrink-0" style={{
+                  background: artworkUrl
+                    ? `url(${artworkUrl}) center/cover no-repeat, ${art.gradient}`
+                    : art.gradient,
+                }} />
               </div>
               <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`}>{t.title}</div>
               <div className="tl-cell">{t.artist}</div>

@@ -64,6 +64,45 @@ pub struct AudioState {
     pub bridge: Arc<dyn AudioBridge>,
 }
 
+// ── Unified play-by-hash command ──────────────────────────────────────────────
+
+/// Resolve `hash` → CAS path + DB metadata, then load and play in one call.
+/// This is the primary playback entry-point for the frontend; `audio_load` is
+/// kept as an internal detail used only by debug commands.
+#[tauri::command]
+pub async fn track_play(
+    hash: String,
+    storage: State<'_, crate::storage::StorageState>,
+    audio: State<'_, AudioState>,
+) -> Result<(), String> {
+    let record = storage
+        .db
+        .get_track(&hash)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("track not found in library: {hash}"))?;
+
+    let path = storage.cas.blob_path(&hash);
+
+    let meta = TrackMetadata {
+        title:        record.title,
+        artist:       record.artist,
+        album:        record.album,
+        artwork_path: None, // artwork resolution is a future task
+        duration_ms:  Some(record.duration_ms as u64),
+        mime_type:    record.mime_type,
+    };
+
+    let source = AudioSource::File(path);
+    let bridge = Arc::clone(&audio.bridge);
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge.load(&source, meta).map_err(|e| e.to_string())?;
+        bridge.play().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 //
 // All commands convert AudioError → String at the boundary so Tauri can

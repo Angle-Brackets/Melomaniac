@@ -69,6 +69,9 @@ pub enum AudioEvent {
     TrackEnded,
     /// Periodic position tick while playing, in milliseconds.
     PositionChanged(u64),
+    /// Emitted once when a track finishes loading; carries the total duration in ms.
+    /// May fire with 0 if the format does not expose duration (e.g. live streams).
+    DurationKnown(u64),
     /// A non-fatal error occurred; playback may continue with the next track.
     Error(String),
     /// Lock-screen remote: play button pressed.

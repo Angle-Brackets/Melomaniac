@@ -14,7 +14,9 @@ export function AlbumArt({ album, size = 180, style = {} }: AlbumArtProps) {
       <div style={{
         width: size, height: size,
         borderRadius: 10,
-        background: album.gradient,
+        background: album.artworkUrl
+          ? `url(${album.artworkUrl}) center/cover no-repeat, ${album.gradient}`
+          : album.gradient,
         overflow: 'hidden',
         position: 'relative',
         ...style,
