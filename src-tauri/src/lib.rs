@@ -1,6 +1,6 @@
 mod audio;
-mod storage;
 mod stats;
+mod storage;
 
 use std::sync::Arc;
 
@@ -20,8 +20,7 @@ pub fn run() {
                 {
                     use melomaniac_audio::desktop::DesktopBridge;
                     Arc::new(
-                        DesktopBridge::new(event_tx)
-                            .expect("failed to open audio output device"),
+                        DesktopBridge::new(event_tx).expect("failed to open audio output device"),
                     ) as Arc<dyn melomaniac_audio::AudioBridge>
                 }
 
@@ -31,7 +30,12 @@ pub fn run() {
                     Arc::new(IosBridge::new(event_tx)) as Arc<dyn melomaniac_audio::AudioBridge>
                 }
 
-                #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "ios")))]
+                #[cfg(not(any(
+                    target_os = "macos",
+                    target_os = "windows",
+                    target_os = "linux",
+                    target_os = "ios"
+                )))]
                 {
                     panic!("Audio bridge not implemented for this platform");
                 }
@@ -65,15 +69,23 @@ pub fn run() {
             #[cfg(debug_assertions)]
             {
                 const TEST_MP3: &[u8] = include_bytes!("../../tests/audio/test.mp3");
+                const TEST_MP3_2: &[u8] = include_bytes!("../../tests/audio/test2.mp3");
                 let cas = Arc::clone(&storage_state.cas);
-                let db  = Arc::clone(&storage_state.db);
-                tauri::async_runtime::block_on(
-                    melomaniac_storage::ingest::ingest_bytes(TEST_MP3, "test", &cas, &db)
-                ).ok(); // idempotent — silently skip if already present
+                let db = Arc::clone(&storage_state.db);
+                tauri::async_runtime::block_on(melomaniac_storage::ingest::ingest_bytes(
+                    TEST_MP3, "test", &cas, &db,
+                ))
+                .ok(); // idempotent — silently skip if already present
+                tauri::async_runtime::block_on(melomaniac_storage::ingest::ingest_bytes(
+                    TEST_MP3_2, "test2", &cas, &db,
+                ))
+                .ok(); // idempotent — silently skip if already present
             }
 
             app.manage(storage_state);
-            app.manage(stats::SystemState(std::sync::Mutex::new(sysinfo::System::new())));
+            app.manage(stats::SystemState(std::sync::Mutex::new(
+                sysinfo::System::new(),
+            )));
 
             Ok(())
         })
