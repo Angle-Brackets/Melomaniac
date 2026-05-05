@@ -126,6 +126,48 @@ impl Database {
         Ok(())
     }
 
+    /// Replace a track's hash and update its editable metadata fields atomically.
+    pub async fn update_track_hash_and_metadata(
+        &self,
+        old_hash:  &str,
+        new_hash:  &str,
+        title:     &str,
+        artist:    &str,
+        album:     Option<&str>,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            "UPDATE tracks SET hash = ?, title = ?, artist = ?, album = ? WHERE hash = ?"
+        )
+        .bind(new_hash).bind(title).bind(artist).bind(album).bind(old_hash)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Return all (branch_id, head_commit_hash) pairs for branches with a commit.
+    pub async fn get_all_branches_with_heads(&self) -> Result<Vec<(String, String)>, StorageError> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT id, head_commit FROM branches WHERE head_commit IS NOT NULL"
+        )
+        .fetch_all(&self.pool).await?;
+        Ok(rows)
+    }
+
+    /// Advance multiple branch HEADs in a single transaction.
+    /// Each tuple is (branch_id, new_commit_hash).
+    pub async fn batch_update_branch_heads(
+        &self,
+        updates: &[(String, String)],
+    ) -> Result<(), StorageError> {
+        let mut tx = self.pool.begin().await?;
+        for (branch_id, commit_hash) in updates {
+            sqlx::query("UPDATE branches SET head_commit = ? WHERE id = ?")
+                .bind(commit_hash).bind(branch_id)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn remove_track(&self, hash: &str) -> Result<(), StorageError> {
         sqlx::query("DELETE FROM tracks WHERE hash = ?")
             .bind(hash).execute(&self.pool).await?;

@@ -1,0 +1,495 @@
+use std::{path::Path, sync::Arc};
+use serde::{Deserialize, Serialize};
+
+use crate::{CasStore, CommitRecord, Database, StorageError};
+
+// ── Public types ──────────────────────────────────────────────────────────────
+
+/// Unified audio metadata — covers ID3v2, Vorbis comments, iTunes atoms.
+/// `duration_ms`, `format`, and `file_size` are read-only (ignored on write).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioMetadata {
+    pub title:        Option<String>,
+    pub artist:       Option<String>,
+    pub album:        Option<String>,
+    pub album_artist: Option<String>,
+    pub year:         Option<u32>,
+    pub track_number: Option<u32>,
+    pub track_total:  Option<u32>,
+    pub disc_number:  Option<u32>,
+    pub disc_total:   Option<u32>,
+    pub genre:        Option<String>,
+    pub composer:     Option<String>,
+    pub comment:      Option<String>,
+    pub lyrics:       Option<String>,
+    pub bpm:          Option<u32>,
+    pub copyright:    Option<String>,
+    // Read-only — populated on read, ignored on write
+    pub duration_ms:  u64,
+    pub format:       String,
+    pub file_size:    Option<u64>,
+}
+
+/// Lightweight entry returned by `scan_directory`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub path:        String,
+    pub filename:    String,
+    pub format:      String,
+    pub size_bytes:  u64,
+    pub title:       Option<String>,
+    pub artist:      Option<String>,
+    pub album:       Option<String>,
+    pub duration_ms: u64,
+}
+
+// Internal — not exposed outside this module
+struct BranchHeadUpdate {
+    branch_id:       String,
+    new_commit_hash: String,
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/// Read all metadata from any audio file path on disk.
+pub async fn read_metadata(path: &Path) -> Result<AudioMetadata, StorageError> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || read_metadata_sync(&path))
+        .await
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+}
+
+/// Write metadata back to an arbitrary audio file on disk (non-CAS).
+pub async fn write_metadata_to_file(
+    path: &Path,
+    metadata: &AudioMetadata,
+) -> Result<(), StorageError> {
+    let path     = path.to_path_buf();
+    let metadata = metadata.clone();
+    tokio::task::spawn_blocking(move || apply_lofty_tags(&path, &metadata))
+        .await
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+}
+
+/// List all audio files in `path` (non-recursive) with basic metadata.
+pub async fn scan_directory(path: &Path) -> Result<Vec<FileEntry>, StorageError> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || scan_directory_sync(&path))
+        .await
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+}
+
+/// Edit a library track already in CAS:
+///   1. Read the blob, apply new tags, compute new BLAKE3 hash.
+///   2. Write the new blob to CAS.
+///   3. Update the DB track record.
+///   4. Patch all branch trees in parallel (each in its own tokio task).
+///   5. Commit each affected branch in a single batch DB transaction.
+///
+/// Returns the new track hash. If the tags produce no byte-level change the
+/// original hash is returned unchanged.
+pub async fn edit_cas_track(
+    old_hash: &str,
+    metadata: &AudioMetadata,
+    cas:      &Arc<CasStore>,
+    db:       &Arc<Database>,
+) -> Result<String, StorageError> {
+    // Look up the track so we know its mime_type for the temp-file extension.
+    let track = db.get_track(old_hash).await?
+        .ok_or_else(|| StorageError::BlobNotFound(old_hash.to_string()))?;
+
+    let ext = mime_to_ext(track.mime_type.as_deref().unwrap_or("audio/mpeg")).to_string();
+
+    // Read → patch tags → new bytes
+    let original  = cas.read_blob(old_hash).await?;
+    let new_bytes = apply_metadata_to_bytes(original, ext, metadata.clone()).await?;
+
+    // Compute the new blob hash
+    let new_hash = CasStore::hash(&new_bytes);
+
+    // No effective change — nothing to commit
+    if new_hash == old_hash {
+        return Ok(new_hash.to_string());
+    }
+
+    // Store the new blob
+    cas.write_blob(&new_bytes).await?;
+
+    // Update the tracks table
+    db.update_track_hash_and_metadata(
+        old_hash,
+        &new_hash,
+        metadata.title.as_deref().unwrap_or(&track.title),
+        metadata.artist.as_deref().unwrap_or(&track.artist),
+        metadata.album.as_deref().or(track.album.as_deref()),
+    ).await?;
+
+    // Patch every branch tree that references the old hash — parallel
+    let commit_msg = format!(
+        "Edit metadata: {}",
+        metadata.title.as_deref().unwrap_or(&track.title),
+    );
+    patch_trees_parallel(old_hash, &new_hash, &commit_msg, cas, db).await?;
+
+    Ok(new_hash)
+}
+
+// ── Parallel tree patching ────────────────────────────────────────────────────
+
+async fn patch_trees_parallel(
+    old_hash:   &str,
+    new_hash:   &str,
+    commit_msg: &str,
+    cas:        &Arc<CasStore>,
+    db:         &Arc<Database>,
+) -> Result<(), StorageError> {
+    let branches = db.get_all_branches_with_heads().await?;
+
+    let mut set = tokio::task::JoinSet::new();
+    for (branch_id, head_commit) in branches {
+        let old = old_hash.to_string();
+        let new = new_hash.to_string();
+        let msg = commit_msg.to_string();
+        let cas = Arc::clone(cas);
+        let db  = Arc::clone(db);
+        set.spawn(async move {
+            patch_single_branch(branch_id, head_commit, old, new, msg, cas, db).await
+        });
+    }
+
+    let mut updates: Vec<BranchHeadUpdate> = Vec::new();
+    while let Some(result) = set.join_next().await {
+        match result {
+            Ok(Ok(Some(u))) => updates.push(u),
+            Ok(Ok(None))    => {}
+            Ok(Err(e))      => eprintln!("[editor] branch patch error: {e}"),
+            Err(e)          => eprintln!("[editor] branch task error: {e}"),
+        }
+    }
+
+    if !updates.is_empty() {
+        let pairs: Vec<(String, String)> = updates
+            .into_iter()
+            .map(|u| (u.branch_id, u.new_commit_hash))
+            .collect();
+        db.batch_update_branch_heads(&pairs).await?;
+    }
+
+    Ok(())
+}
+
+async fn patch_single_branch(
+    branch_id:   String,
+    head_commit: String,
+    old_hash:    String,
+    new_hash:    String,
+    commit_msg:  String,
+    cas:         Arc<CasStore>,
+    db:          Arc<Database>,
+) -> Result<Option<BranchHeadUpdate>, StorageError> {
+    let commit = match db.get_commit(&head_commit).await? {
+        Some(c) => c,
+        None    => return Ok(None),
+    };
+
+    // Load the tree JSON blob
+    let tree_bytes = cas.read_blob(&commit.tree_hash).await?;
+    let mut tree: serde_json::Value = serde_json::from_slice(&tree_bytes)?;
+
+    let tracks = match tree["tracks"].as_array_mut() {
+        Some(t) => t,
+        None    => return Ok(None),
+    };
+
+    // Patch any entries that reference the old hash
+    let mut changed = false;
+    for entry in tracks.iter_mut() {
+        if entry["hash"].as_str() == Some(&old_hash) {
+            entry["hash"] = serde_json::Value::String(new_hash.clone());
+            changed = true;
+        }
+    }
+
+    if !changed {
+        return Ok(None);
+    }
+
+    // Write the new tree blob
+    let new_tree_bytes = serde_json::to_vec(&tree)?;
+    let new_tree_hash  = cas.write_blob(&new_tree_bytes).await?;
+
+    // Build and store a new commit
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let commit_body = serde_json::json!({
+        "tree_hash": &new_tree_hash,
+        "parent":    &head_commit,
+        "timestamp": timestamp,
+        "device_id": "melomaniac-editor",
+        "message":   &commit_msg,
+    }).to_string();
+
+    let new_commit_hash = cas.write_blob(commit_body.as_bytes()).await?;
+
+    let record = CommitRecord {
+        hash:      new_commit_hash.clone(),
+        tree_hash: new_tree_hash,
+        timestamp,
+        device_id: "melomaniac-editor".to_string(),
+        message:   Some(commit_msg),
+    };
+    db.insert_commit(&record, &[head_commit.as_str()]).await?;
+
+    Ok(Some(BranchHeadUpdate { branch_id, new_commit_hash }))
+}
+
+// ── Lofty sync helpers (always called inside spawn_blocking) ──────────────────
+
+fn read_metadata_sync(path: &Path) -> Result<AudioMetadata, StorageError> {
+    use lofty::prelude::*;
+    use lofty::probe::Probe;
+    use lofty::tag::ItemKey;
+
+    let tagged = Probe::open(path)
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+        .guess_file_type()
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+        .read()
+        .map_err(|e| StorageError::Metadata(e.to_string()))?;
+
+    let duration_ms = tagged.properties().duration().as_millis() as u64;
+    let format      = format!("{:?}", tagged.file_type());
+    let file_size   = std::fs::metadata(path).ok().map(|m| m.len());
+
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let get = |key: &ItemKey| tag.and_then(|t| t.get_string(key)).map(str::to_string);
+
+    let (track_number, track_total) = parse_nn_total(get(&ItemKey::TrackNumber).as_deref());
+    let (disc_number,  disc_total)  = parse_nn_total(get(&ItemKey::DiscNumber).as_deref());
+
+    Ok(AudioMetadata {
+        title:        get(&ItemKey::TrackTitle),
+        artist:       get(&ItemKey::TrackArtist),
+        album:        get(&ItemKey::AlbumTitle),
+        album_artist: get(&ItemKey::AlbumArtist),
+        year:         get(&ItemKey::Year).and_then(|s| s.parse().ok()),
+        track_number,
+        track_total,
+        disc_number,
+        disc_total,
+        genre:        get(&ItemKey::Genre),
+        composer:     get(&ItemKey::Composer),
+        comment:      get(&ItemKey::Comment),
+        lyrics:       get(&ItemKey::Lyrics),
+        bpm:          get(&ItemKey::Bpm).and_then(|s| s.parse().ok()),
+        copyright:    get(&ItemKey::CopyrightMessage),
+        duration_ms,
+        format,
+        file_size,
+    })
+}
+
+fn apply_lofty_tags(path: &Path, metadata: &AudioMetadata) -> Result<(), StorageError> {
+    use lofty::prelude::*;
+    use lofty::probe::Probe;
+    use lofty::config::WriteOptions;
+
+    let mut tagged = Probe::open(path)
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+        .guess_file_type()
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+        .read()
+        .map_err(|e| StorageError::Metadata(e.to_string()))?;
+
+    if tagged.primary_tag().is_none() {
+        let tag_type = default_tag_type(tagged.file_type());
+        tagged.insert_tag(lofty::tag::Tag::new(tag_type));
+    }
+
+    if let Some(tag) = tagged.primary_tag_mut() {
+        apply_tag_fields(tag, metadata);
+    }
+
+    tagged.save_to_path(path, WriteOptions::default())
+        .map_err(|e| StorageError::Metadata(e.to_string()))
+}
+
+fn apply_tag_fields(tag: &mut lofty::tag::Tag, m: &AudioMetadata) {
+    use lofty::prelude::*;
+    use lofty::tag::ItemKey;
+
+    macro_rules! set_opt {
+        ($key:expr, $val:expr) => {
+            if let Some(ref v) = $val {
+                tag.insert_text($key, v.clone());
+            } else {
+                tag.remove_key(&$key);
+            }
+        };
+    }
+
+    set_opt!(ItemKey::TrackTitle,       m.title);
+    set_opt!(ItemKey::TrackArtist,      m.artist);
+    set_opt!(ItemKey::AlbumTitle,       m.album);
+    set_opt!(ItemKey::AlbumArtist,      m.album_artist);
+    set_opt!(ItemKey::Genre,            m.genre);
+    set_opt!(ItemKey::Composer,         m.composer);
+    set_opt!(ItemKey::Comment,          m.comment);
+    set_opt!(ItemKey::Lyrics,           m.lyrics);
+    set_opt!(ItemKey::CopyrightMessage, m.copyright);
+
+    if let Some(y) = m.year {
+        tag.insert_text(ItemKey::Year, y.to_string());
+    }
+    if let Some(n) = m.track_number {
+        let s = match m.track_total {
+            Some(t) => format!("{n}/{t}"),
+            None    => n.to_string(),
+        };
+        tag.insert_text(ItemKey::TrackNumber, s);
+    }
+    if let Some(n) = m.disc_number {
+        let s = match m.disc_total {
+            Some(t) => format!("{n}/{t}"),
+            None    => n.to_string(),
+        };
+        tag.insert_text(ItemKey::DiscNumber, s);
+    }
+    if let Some(b) = m.bpm {
+        tag.insert_text(ItemKey::Bpm, b.to_string());
+    }
+}
+
+fn scan_directory_sync(path: &Path) -> Result<Vec<FileEntry>, StorageError> {
+    use lofty::prelude::*;
+    use lofty::probe::Probe;
+    use lofty::tag::ItemKey;
+
+    const AUDIO_EXTS: &[&str] = &[
+        "mp3", "flac", "ogg", "wav", "m4a", "aac", "opus", "alac", "aiff", "wma",
+    ];
+
+    let mut entries = Vec::new();
+
+    for entry in std::fs::read_dir(path)?.flatten() {
+        let p = entry.path();
+        if !p.is_file() { continue; }
+
+        let ext = p.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+
+        match ext.as_deref() {
+            Some(e) if AUDIO_EXTS.contains(&e) => {}
+            _ => continue,
+        }
+
+        let size_bytes = entry.metadata().ok().map(|m| m.len()).unwrap_or(0);
+        let filename   = p.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Best-effort metadata — skip unreadable files silently
+        let (title, artist, album, duration_ms, format) = Probe::open(&p)
+            .ok()
+            .and_then(|pr| pr.guess_file_type().ok())
+            .and_then(|pr| pr.read().ok())
+            .map(|tagged| {
+                let dur = tagged.properties().duration().as_millis() as u64;
+                let fmt = format!("{:?}", tagged.file_type());
+                let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+                let get = |key: &ItemKey| tag.and_then(|t| t.get_string(key)).map(str::to_string);
+                (
+                    get(&ItemKey::TrackTitle),
+                    get(&ItemKey::TrackArtist),
+                    get(&ItemKey::AlbumTitle),
+                    dur,
+                    fmt,
+                )
+            })
+            .unwrap_or_else(|| {
+                let fmt = ext.unwrap_or_default().to_uppercase();
+                (None, None, None, 0, fmt)
+            });
+
+        entries.push(FileEntry {
+            path: p.display().to_string(),
+            filename,
+            format,
+            size_bytes,
+            title,
+            artist,
+            album,
+            duration_ms,
+        });
+    }
+
+    entries.sort_by(|a, b| a.filename.cmp(&b.filename));
+    Ok(entries)
+}
+
+// ── Tag bytes via temp file ───────────────────────────────────────────────────
+
+/// Write `bytes` to a uniquely-named temp file, apply lofty tags, read back.
+async fn apply_metadata_to_bytes(
+    bytes:    Vec<u8>,
+    ext:      String,
+    metadata: AudioMetadata,
+) -> Result<Vec<u8>, StorageError> {
+    let tmp = std::env::temp_dir()
+        .join(format!("melomaniac_edit_{}.{}", uuid::Uuid::new_v4(), ext));
+
+    tokio::fs::write(&tmp, &bytes).await?;
+
+    let tmp_clone = tmp.clone();
+    tokio::task::spawn_blocking(move || apply_lofty_tags(&tmp_clone, &metadata))
+        .await
+        .map_err(|e| StorageError::Metadata(e.to_string()))??;
+
+    let new_bytes = tokio::fs::read(&tmp).await?;
+    tokio::fs::remove_file(&tmp).await.ok();
+    Ok(new_bytes)
+}
+
+// ── Small helpers ─────────────────────────────────────────────────────────────
+
+/// Parse "N" or "N/Total" into (number, optional_total).
+fn parse_nn_total(s: Option<&str>) -> (Option<u32>, Option<u32>) {
+    let Some(s) = s else { return (None, None) };
+    let mut parts = s.splitn(2, '/');
+    let num   = parts.next().and_then(|n| n.trim().parse().ok());
+    let total = parts.next().and_then(|n| n.trim().parse().ok());
+    (num, total)
+}
+
+fn default_tag_type(file_type: lofty::file::FileType) -> lofty::tag::TagType {
+    use lofty::file::FileType;
+    use lofty::tag::TagType;
+    match file_type {
+        FileType::Mpeg                     => TagType::Id3v2,
+        FileType::Flac                     => TagType::VorbisComments,
+        FileType::Vorbis | FileType::Opus  => TagType::VorbisComments,
+        FileType::Wav                      => TagType::Id3v2,
+        FileType::Mp4                      => TagType::Mp4Ilst,
+        FileType::Aiff                     => TagType::Id3v2,
+        FileType::Ape                      => TagType::Ape,
+        _                                  => TagType::Id3v2,
+    }
+}
+
+fn mime_to_ext(mime: &str) -> &'static str {
+    match mime {
+        "audio/mpeg" | "audio/mp3"                    => "mp3",
+        "audio/flac" | "audio/x-flac"                 => "flac",
+        "audio/ogg"  | "audio/vorbis"                 => "ogg",
+        "audio/wav"  | "audio/x-wav"                  => "wav",
+        "audio/mp4"  | "audio/m4a" | "audio/x-m4a"   => "m4a",
+        "audio/aac"                                   => "aac",
+        "audio/opus"                                  => "opus",
+        _                                             => "mp3",
+    }
+}

@@ -68,11 +68,12 @@
   - `playlistSlice` — `playlists: PlaylistMeta[]`, `currentCommitHash`; no-op until CAS/Commit layer is built
 - [ ] Implement `requestAnimationFrame` progress bar loop via `useRef` (no React re-renders)
 - [ ] Implement virtualized tracklist with `tanstack/react-virtual` (target: 10,000+ tracks)
-- [ ] Build player controls UI (play, pause, seek, skip, volume)
-- [ ] Build library view wired to SQLite metadata via Tauri invoke
+- [x] Build player controls UI — play/pause, seek bar with real duration, volume slider, skip, shuffle, loop, A·B markers; all wired to Tauri invoke commands
+- [x] Build library view wired to SQLite metadata via Tauri invoke — `library_get_all` populates tracklist and carousel with real tracks; artwork fetched via `track_get_artwork` (BLAKE3 CAS lookup)
 - [ ] Build basic playlist view rendering Tree manifest tracks
-- [x] Verify end-to-end audio playback on Desktop and iOS real device — `debug_play_test_track` async Tauri command (`#[cfg(debug_assertions)]`) embeds `tests/audio/test.mp3` via `include_bytes!`, writes to CAS, loads + plays via `spawn_blocking`; called from `App.tsx` (DEV only, 5 s delay)
-- [ ] Wire `MusicControls` buttons to audio invoke commands (play, pause, seek, volume)
+- [x] Verify end-to-end audio playback on Desktop and iOS real device
+- [x] Wire playback controls to audio invoke commands — `audio_play`, `audio_pause`, `audio_seek`, `audio_set_volume`, `track_play`; volume synced to backend on mount; backward seek fallback via decoder reload
+- [x] Debug ingest replaced with `read_dir` loop scanning `tests/audio/` at startup — supports MP3, FLAC, OGG, WAV, M4A, AAC; idempotent
 - [ ] Wire yt-dlp ingest UI (URL input → download → library refresh)
 
 ---
@@ -83,13 +84,13 @@
 - [ ] Extend Tree manifest schema to support per-track A/B timestamp metadata
 - [ ] Implement A/B seek logic in the native audio bridge (iOS)
 - [ ] Implement A/B seek logic in the native audio bridge (Android)
-- [ ] Build A/B loop UI controls in the player view
+- [x] Build A/B loop UI controls in the player view — draggable A/B markers on seek bar, per-track state saved in `trackAbPoints`
 
 ### Metadata Extraction
-- [ ] Integrate `id3` crate for reading tags from ingested MP3/FLAC files
-- [ ] Populate SQLite index with extracted title, artist, album, artwork hash
-- [ ] Handle missing or malformed tags gracefully with fallback values
-- [ ] Display extracted metadata in tracklist and player UI
+- [x] Integrate `id3` crate for reading tags from ingested MP3/FLAC files
+- [x] Populate SQLite index with extracted title, artist, album, artwork hash, duration — symphonia probes duration when TLEN frame absent; artwork extracted and stored in CAS; DB patched on re-ingest when fields are missing
+- [x] Handle missing or malformed tags gracefully with fallback values
+- [x] Display extracted metadata in tracklist and player UI — title, artist, album, duration, artwork all live from SQLite/CAS
 
 ### P2P Sync (LAN-First)
 - [ ] Integrate `mdns-sd` for local device discovery
@@ -184,15 +185,15 @@ Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). 
 
 ### Known bugs / remaining work
 
-- The seek bar in `PlayerControls` uses hardcoded `24:20` total duration — needs to be driven by actual track length
-- `PlayerControls` track info shows `TRACKS[0]` unconditionally — should follow `activeTrackId`
 - Rail git icon opens the commit graph modal but doesn't reset the highlighted rail icon when navigating away
-- Audio not wired — all controls are visual only
+- Tracklist still uses mock `TRACKS` data for ordering (real library loaded but not committed to `trackOrder` on shuffle/commit)
+- Playlist view not yet wired to real SQLite `playlist_get_all` / Tree manifest data
+- `track_ingest_files` Tauri command exists but no UI to invoke it — users can only ingest via `tests/audio/` debug loop
 
 ### Next steps
 
-1. Wire `PlayerControls` play/pause/seek/volume buttons to `invoke()` audio commands
-2. Replace hardcoded mock data with real SQLite reads via `library_get_all` / `playlist_get_all`
-3. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
+1. Replace hardcoded `TRACKS`/`PLAYLISTS` mock data with live `library_get_all` / `playlist_get_all` reads
+2. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
+3. Wire yt-dlp ingest UI in sidebar importer stub
 
-*Last updated: 2026-05-03. DaisyUI v5 + Tailwind v4 migration complete. Theme system centralized in `src/shared/themes.ts`. Mouse-based drag-to-reorder. Carousel respects play queue order and shuffle state. No audio wired yet.*
+*Last updated: 2026-05-04. Audio fully wired (play/pause/seek/volume/backward seek). Real track metadata and artwork from SQLite/CAS. Resizable sidebar, right panel, and carousel/tracklist split via `ResizeHandle`. Carousel hover-3d on center 3 cards only. All known audio and UI bugs from previous session resolved.*

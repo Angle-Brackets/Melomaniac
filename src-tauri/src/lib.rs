@@ -1,4 +1,5 @@
 mod audio;
+mod editor;
 mod stats;
 mod storage;
 
@@ -115,6 +116,10 @@ pub fn run() {
             storage::playlist_fork,
             storage::branch_create,
             storage::branch_commit,
+            editor::file_read_metadata,
+            editor::file_write_metadata,
+            editor::file_scan_directory,
+            editor::library_edit_track,
             stats::get_system_stats,
         ])
         .run(tauri::generate_context!())
