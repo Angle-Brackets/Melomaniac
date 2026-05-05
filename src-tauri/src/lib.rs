@@ -64,22 +64,29 @@ pub fn run() {
             let storage_state = tauri::async_runtime::block_on(storage::init_storage(app_data_dir))
                 .expect("failed to initialise storage");
 
-            // In debug builds, pre-ingest the bundled test track so the library
-            // is never empty during development.
+            // In debug builds, ingest every audio file in tests/audio/ so the
+            // library is never empty during development.
             #[cfg(debug_assertions)]
             {
-                const TEST_MP3: &[u8] = include_bytes!("../../tests/audio/test.mp3");
-                const TEST_MP3_2: &[u8] = include_bytes!("../../tests/audio/test2.mp3");
-                let cas = Arc::clone(&storage_state.cas);
-                let db = Arc::clone(&storage_state.db);
-                tauri::async_runtime::block_on(melomaniac_storage::ingest::ingest_bytes(
-                    TEST_MP3, "test", &cas, &db,
-                ))
-                .ok(); // idempotent — silently skip if already present
-                tauri::async_runtime::block_on(melomaniac_storage::ingest::ingest_bytes(
-                    TEST_MP3_2, "test2", &cas, &db,
-                ))
-                .ok(); // idempotent — silently skip if already present
+                let audio_exts = ["mp3", "flac", "ogg", "wav", "m4a", "aac"];
+                let test_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../tests/audio");
+                if let Ok(entries) = std::fs::read_dir(&test_dir) {
+                    let cas = Arc::clone(&storage_state.cas);
+                    let db  = Arc::clone(&storage_state.db);
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        let ext  = path.extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.to_ascii_lowercase());
+                        if ext.as_deref().map(|e| audio_exts.contains(&e)).unwrap_or(false) {
+                            tauri::async_runtime::block_on(
+                                melomaniac_storage::ingest::ingest_file(&path, &cas, &db),
+                            )
+                            .ok();
+                        }
+                    }
+                }
             }
 
             app.manage(storage_state);

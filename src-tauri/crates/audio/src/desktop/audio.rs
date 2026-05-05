@@ -254,12 +254,13 @@ fn handle_cmd(
 
                         let new_player = Player::connect_new(device_sink.mixer());
                         new_player.set_volume(*volume);
-                        if is_paused {
-                            new_player.pause();
-                        }
+                        new_player.pause();
                         new_player.append(source);
                         new_player.try_seek(Duration::from_millis(target))
                             .map_err(|e| AudioError::Playback(e.to_string()))?;
+                        if !is_paused {
+                            new_player.play();
+                        }
                         
                         *player = Some(new_player);
                         position_ms.store(target, Ordering::Relaxed);

@@ -22,6 +22,7 @@ import BranchModal from './components/BranchModal';
 import SettingsModal from './components/SettingsModal';
 import PlaylistSettingsPanel from './components/PlaylistSettingsPanel';
 import EditorView from './components/EditorView';
+import ResizeHandle from './components/ResizeHandle';
 
 export type { AppSettings };
 
@@ -54,6 +55,9 @@ export default function DesktopApp() {
 
   const [leftExpanded,     setLeftExpanded]     = useState(true);
   const [rightExpanded,    setRightExpanded]     = useState(true);
+  const [sidebarWidth,     setSidebarWidth]      = useState(220);
+  const [rightPanelWidth,  setRightPanelWidth]   = useState(220);
+  const [topPaneHeight,    setTopPaneHeight]      = useState(SETTING_DEFAULTS.carouselSize + 190);
   const [showCommitGraph,  setShowCommitGraph]   = useState(false);
   const [showSettings,     setShowSettings]      = useState(false);
   const [showBranchModal,  setShowBranchModal]   = useState(false);
@@ -106,6 +110,17 @@ export default function DesktopApp() {
   useEffect(() => {
     applyTheme(settings.theme, settings.accentHue);
   }, [settings.theme, settings.accentHue]);
+
+  // Keep top pane tall enough whenever carousel size changes
+  useEffect(() => {
+    setTopPaneHeight(h => Math.max(h, settings.carouselSize + 190));
+  }, [settings.carouselSize]);
+
+  // Sync initial volume to the audio backend on mount
+  useEffect(() => {
+    invoke('audio_set_volume', { volume }).catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Load real tracks from storage on mount ───────────────────────────────
   useEffect(() => {
@@ -172,21 +187,23 @@ export default function DesktopApp() {
     return () => { unlisten?.(); };
   }, []);
 
-  // ── Fetch artwork for the active track ────────────────────────────────────
-  // Depends on artwork_hash (not just activeTrackId) so it re-fires when
-  // library_get_all resolves and populates artwork_hash on the initial track.
-  const activeArtworkHash = playQueue.find(t => t.id === activeTrackId)?.artwork_hash ?? null;
+  // ── Artwork prefetch — loads a window around the current carousel position ──
+  // A ref tracks which hashes have been fetched/in-flight so we never
+  const fetchedHashesRef = useRef(new Set<string>());
   useEffect(() => {
-    const track = playQueue.find(t => t.id === activeTrackId);
-    if (!track?.artwork_hash || artworkUrls[track.hash]) return;
-    invoke<number[]>('track_get_artwork', { hash: track.hash })
-      .then(bytes => {
-        const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
-        setArtworkUrls(prev => ({ ...prev, [track.hash]: url }));
-      })
-      .catch(console.error); // log failures so they're visible in DevTools
+    for (const track of playQueue) {
+      if (!track?.artwork_hash) continue;
+      if (fetchedHashesRef.current.has(track.hash)) continue;
+      fetchedHashesRef.current.add(track.hash);
+      invoke<number[]>('track_get_artwork', { hash: track.hash })
+        .then(bytes => {
+          const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
+          setArtworkUrls(prev => ({ ...prev, [track.hash]: url }));
+        })
+        .catch(console.error);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTrackId, activeArtworkHash]);
+  }, [playQueue]);
 
   // ── Sync A·B handles on track change ──────────────────────────────────────
   useEffect(() => {
@@ -322,11 +339,15 @@ export default function DesktopApp() {
             onRailChange={handleRailChange}
             expanded={leftExpanded}
             onToggleExpanded={() => setLeftExpanded(p => !p)}
+            panelWidth={sidebarWidth}
             pinnedIds={pinnedIds}
             onTogglePin={togglePin}
             onOpenSettings={() => setShowSettings(true)}
             onAddToFolderClick={setFolderPopupItem}
           />
+          {leftExpanded && (
+            <ResizeHandle direction="h" onDelta={d => setSidebarWidth(w => Math.max(140, Math.min(400, w + d)))} />
+          )}
 
           {/* Center column */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
@@ -346,34 +367,37 @@ export default function DesktopApp() {
 
                 {activeTab === 'Tracks' && (
                   <>
-                    <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: 0 }}>
-                      <Carousel
-                        albums={carouselAlbums}
-                        activeIndex={carouselIdx}
-                        onIndexChange={idx => {
-                          const t = playQueue[idx];
-                          if (t) handleSelectTrack(t.id);
+                    <div style={{ height: topPaneHeight, flexShrink: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                      <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: 0 }}>
+                        <Carousel
+                          albums={carouselAlbums}
+                          activeIndex={carouselIdx}
+                          onIndexChange={idx => {
+                            const t = playQueue[idx];
+                            if (t) handleSelectTrack(t.id);
+                          }}
+                          size={settings.carouselSize}
+                        />
+                      </div>
+                      <PlayerControls
+                        track={playQueue.find(t => t.id === activeTrackId) ?? null}
+                        positionMs={positionMs}
+                        durationMs={durationMs}
+                        isPlaying={isPlaying} onPlayPause={handlePlayPause}
+                        isFav={isFav}         onFav={() => setIsFav(p => !p)}
+                        loopMode={loopMode}   onLoopCycle={handleLoopCycle}
+                        isShuffle={isShuffle} onShuffle={handleShuffle}
+                        onSeek={pct => {
+                          const ms = Math.floor(pct * durationMs);
+                          lastSeekTime.current = Date.now();
+                          setPositionMs(ms);
+                          invoke('audio_seek', { positionMs: ms }).catch(console.error);
                         }}
-                        size={settings.carouselSize}
+                        volume={volume}       onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+                        abA={abA} abB={abB}   onAbChange={handleAbChange}
                       />
                     </div>
-                    <PlayerControls
-                      track={playQueue.find(t => t.id === activeTrackId) ?? null}
-                      positionMs={positionMs}
-                      durationMs={durationMs}
-                      isPlaying={isPlaying} onPlayPause={handlePlayPause}
-                      isFav={isFav}         onFav={() => setIsFav(p => !p)}
-                      loopMode={loopMode}   onLoopCycle={handleLoopCycle}
-                      isShuffle={isShuffle} onShuffle={handleShuffle}
-                      onSeek={pct => {
-                        const ms = Math.floor(pct * durationMs);
-                        lastSeekTime.current = Date.now();
-                        setPositionMs(ms);
-                        invoke('audio_seek', { positionMs: ms }).catch(console.error);
-                      }}
-                      volume={volume}       onVolume={setVolume}
-                      abA={abA} abB={abB}   onAbChange={handleAbChange}
-                    />
+                    <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
                     <TrackList
                       tracks={trackOrder}
                       activeTrackId={activeTrackId}
@@ -401,10 +425,12 @@ export default function DesktopApp() {
           </div>
 
           {/* Right panel — collapsible */}
+          {rightExpanded && settings.showRightPanel && (
+            <ResizeHandle direction="h" onDelta={d => setRightPanelWidth(w => Math.max(160, Math.min(420, w - d)))} />
+          )}
           <div style={{
-            width: rightExpanded && settings.showRightPanel ? 220 : 0,
+            width: rightExpanded && settings.showRightPanel ? rightPanelWidth : 0,
             overflow: 'hidden',
-            transition: 'width 0.28s cubic-bezier(0.4,0,0.2,1)',
             flexShrink: 0, display: 'flex',
           }}>
             {settings.showRightPanel && (

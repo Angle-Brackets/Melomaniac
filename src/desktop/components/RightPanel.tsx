@@ -85,7 +85,7 @@ export default function RightPanel({ vibeText, onVibeChange, onCollapse }: Right
 
   return (
     <div style={{
-      width: 220, background: 'var(--bg-1)',
+      width: '100%', background: 'var(--bg-1)',
       borderLeft: '1px solid var(--border-0)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0,
     }}>

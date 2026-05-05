@@ -10,7 +10,7 @@ A cross-platform desktop music player built with **Tauri 2** + **React / TypeScr
 
 ### Core Engine
 
-- [x] **Desktop audio playback** (Linux · macOS · Windows) — rodio 0.22 + symphonia, dedicated audio thread, atomic position tracking
+- [x] **Desktop audio playback** (Linux · macOS · Windows) — rodio 0.22 + symphonia (`symphonia-all`), dedicated audio thread, atomic position tracking; supported formats: MP3, FLAC, OGG/Vorbis, WAV, M4A/AAC, ALAC, Opus, MKV/WebM
 - [x] **Content-addressable storage (CAS)** — BLAKE3 hashing, `objects/<xx>/<remaining-62>` layout, atomic blob writes, deduplication
 - [x] **SQLite library database** — tracks, plays/skips, playlists, branches, commits, commit parents; WAL mode + foreign keys; migrations via sqlx
 - [x] **Git-style playlist versioning** — playlists as repositories, branches as subplaylists, fork support, commit history walk

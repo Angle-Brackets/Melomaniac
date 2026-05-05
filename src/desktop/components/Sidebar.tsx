@@ -250,6 +250,7 @@ interface LibrarySidebarProps {
   onSelectPlaylist: (id: number) => void;
   activeRailItem: string; onRailChange: (item: string) => void;
   expanded: boolean; onToggleExpanded: () => void;
+  panelWidth?: number;
   pinnedIds: Set<number>; onTogglePin: (id: number) => void;
   onOpenSettings: () => void;
   onAddToFolderClick: (item: Playlist) => void;
@@ -257,7 +258,7 @@ interface LibrarySidebarProps {
 
 export default function LibrarySidebar({
   playlists, activePlaylistId, onSelectPlaylist,
-  activeRailItem, onRailChange, expanded, onToggleExpanded,
+  activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
   pinnedIds, onTogglePin, onOpenSettings, onAddToFolderClick,
 }: LibrarySidebarProps) {
   const [sectionsOpen, setSectionsOpen] = useState({ repos: true, importer: false });
@@ -290,11 +291,10 @@ export default function LibrarySidebar({
 
       {/* Library tree */}
       <div style={{
-        width: expanded ? 220 : 0,
+        width: expanded ? panelWidth : 0,
         background: 'var(--bg-1)',
         borderRight: expanded ? '1px solid var(--border-0)' : 'none',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        transition: 'width 0.28s cubic-bezier(0.4,0,0.2,1)',
         flexShrink: 0,
       }}>
         <div className="px-3 py-2 text-[10px] font-bold tracking-widest text-mm-t2 uppercase border-b border-mm-b0 shrink-0 whitespace-nowrap">

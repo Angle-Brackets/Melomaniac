@@ -5,13 +5,12 @@ interface AlbumArtProps {
   album: Album;
   size?: number;
   style?: React.CSSProperties;
+  tilt?: boolean;
 }
 
-export function AlbumArt({ album, size = 180, style = {} }: AlbumArtProps) {
-  return (
-    <div className="hover-3d" style={{ width: size, height: size, flexShrink: 0 }}>
-      {/* Content — receives the 3D transform from hover zones; style (e.g. boxShadow ring) goes here */}
-      <div style={{
+export function AlbumArt({ album, size = 180, style = {}, tilt = true }: AlbumArtProps) {
+  const inner = (
+    <div style={{
         width: size, height: size,
         borderRadius: 10,
         background: album.artworkUrl
@@ -39,7 +38,12 @@ export function AlbumArt({ album, size = 180, style = {} }: AlbumArtProps) {
           background: `radial-gradient(ellipse at 50% 0%, ${album.accent}44 0%, transparent 70%)`,
           pointerEvents: 'none',
         }} />
-      </div>
+    </div>
+  );
+  if (!tilt) return inner;
+  return (
+    <div className="hover-3d" style={{ width: size, height: size, flexShrink: 0 }}>
+      {inner}
       {/* 8 hover zones — DaisyUI hover-3d pattern */}
       <div /><div /><div /><div />
       <div /><div /><div /><div />
@@ -148,14 +152,14 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
     const abs    = Math.abs(offset);
     if (abs > halfVisible + 0.4) return null;
     const tx      = offset * slot;
-    const scale   = 1 - Math.min(abs, 2) * 0.155;
-    const ry      = -offset * 22;
+    const scale   = 1 - Math.min(abs, 2) * 0.19;
     const opacity = Math.max(0.18, 1 - abs * 0.28);
     const tz      = -Math.min(abs, 2) * 50;
     return {
-      transform: `translateX(${tx}px) scale(${scale}) rotateY(${ry}deg) translateZ(${tz}px)`,
+      transform: `translateX(${tx}px) scale(${scale}) translateZ(${tz}px)`,
       opacity,
       zIndex: Math.round(10 - abs),
+      tilt: abs <= 1,
     };
   };
 
@@ -190,6 +194,7 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
           const props = getCardProps(i);
           if (!props) return null;
           const isActive = Math.abs(i - position) < 0.5;
+          const { tilt, ...cardStyle } = props;
           return (
             <div
               key={i}
@@ -198,10 +203,10 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
                 position: 'absolute', left: '50%', marginLeft: -(size / 2),
                 cursor: 'pointer', willChange: 'transform',
                 backfaceVisibility: 'hidden',
-                ...props,
+                ...cardStyle,
               }}
             >
-              <AlbumArt album={album} size={size} style={{
+              <AlbumArt album={album} size={size} tilt={tilt} style={{
                 boxShadow: isActive
                   ? `0 8px 36px rgba(0,0,0,0.7), 0 0 0 2px var(--accent), 0 0 24px ${album.accent}44`
                   : '0 4px 16px rgba(0,0,0,0.5)',
