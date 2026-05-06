@@ -387,6 +387,66 @@ impl Database {
 
         Ok(history)
     }
+
+    /// Return the most recent commits across all branches, newest-first.
+    pub async fn get_recent_commits(&self, limit: usize) -> Result<Vec<CommitRecord>, StorageError> {
+        let rows = sqlx::query_as::<_, CommitRecord>(
+            "SELECT * FROM commits ORDER BY timestamp DESC LIMIT ?"
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool).await?;
+        Ok(rows)
+    }
+
+    // ── Artwork library ───────────────────────────────────────────────────────
+
+    /// Set the same artwork for an arbitrary list of track hashes in one transaction.
+    pub async fn set_artwork_for_tracks(&self, hashes: &[String], artwork_hash: &str) -> Result<(), StorageError> {
+        let mut tx = self.pool.begin().await?;
+        for hash in hashes {
+            sqlx::query("UPDATE tracks SET artwork_hash = ? WHERE hash = ?")
+                .bind(artwork_hash).bind(hash)
+                .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// All track hashes that reference a specific artwork blob.
+    pub async fn get_track_hashes_by_artwork(&self, artwork_hash: &str) -> Result<Vec<String>, StorageError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT hash FROM tracks WHERE artwork_hash = ?"
+        ).bind(artwork_hash).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(h,)| h).collect())
+    }
+
+    /// Swap every track that references `old_artwork_hash` to `new_artwork_hash`.
+    pub async fn replace_artwork_hash(&self, old_artwork_hash: &str, new_artwork_hash: &str) -> Result<(), StorageError> {
+        sqlx::query("UPDATE tracks SET artwork_hash = ? WHERE artwork_hash = ?")
+            .bind(new_artwork_hash).bind(old_artwork_hash)
+            .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Distinct artworks across all tracks — for the artwork library picker.
+    pub async fn get_artwork_library(&self) -> Result<Vec<ArtworkLibraryEntry>, StorageError> {
+        Ok(sqlx::query_as::<_, ArtworkLibraryEntry>(
+            "SELECT artwork_hash, album, artist, COUNT(*) as track_count
+             FROM tracks WHERE artwork_hash IS NOT NULL
+             GROUP BY artwork_hash ORDER BY album"
+        )
+        .fetch_all(&self.pool).await?)
+    }
+}
+
+// ── Artwork library entry ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub struct ArtworkLibraryEntry {
+    pub artwork_hash: String,
+    pub album:        Option<String>,
+    pub artist:       String,
+    pub track_count:  i64,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

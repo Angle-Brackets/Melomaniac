@@ -161,6 +161,73 @@ pub async fn edit_cas_track(
     Ok(new_hash)
 }
 
+/// Store artwork bytes as a standalone CAS blob and update the track's `artwork_hash`.
+/// Returns the new artwork hash.
+pub async fn set_cas_artwork(
+    track_hash:  &str,
+    image_bytes: Vec<u8>,
+    cas:         &Arc<CasStore>,
+    db:          &Arc<Database>,
+) -> Result<String, StorageError> {
+    let track = db.get_track(track_hash).await?
+        .ok_or_else(|| StorageError::BlobNotFound(track_hash.to_string()))?;
+    let artwork_hash = cas.write_blob(&image_bytes).await?;
+    db.update_artwork_hash(track_hash, &artwork_hash).await?;
+    let msg = format!("Update artwork: {}", track.title);
+    commit_branches_for_artwork(&[track_hash.to_string()], &msg, cas, db).await?;
+    Ok(artwork_hash)
+}
+
+/// Set the same artwork for an explicit list of track hashes.
+/// Writes the image blob once and bulk-updates the DB.
+pub async fn set_artwork_for_track_list(
+    hashes:      Vec<String>,
+    image_bytes: Vec<u8>,
+    cas:         &Arc<CasStore>,
+    db:          &Arc<Database>,
+) -> Result<(String, Vec<String>), StorageError> {
+    if hashes.is_empty() {
+        return Err(StorageError::Metadata("no tracks specified".into()));
+    }
+    let artwork_hash = cas.write_blob(&image_bytes).await?;
+    db.set_artwork_for_tracks(&hashes, &artwork_hash).await?;
+    let msg = if hashes.len() == 1 {
+        let title = db.get_track(&hashes[0]).await?.map(|t| t.title).unwrap_or_default();
+        format!("Update artwork: {title}")
+    } else {
+        format!("Update artwork: {} tracks", hashes.len())
+    };
+    commit_branches_for_artwork(&hashes, &msg, cas, db).await?;
+    Ok((artwork_hash, hashes))
+}
+
+/// Replace an existing artwork blob across all tracks that share it.
+/// Returns `(new_artwork_hash, affected_track_hashes)`.
+pub async fn replace_cas_artwork(
+    old_artwork_hash: &str,
+    image_bytes:      Vec<u8>,
+    cas:              &Arc<CasStore>,
+    db:               &Arc<Database>,
+) -> Result<(String, Vec<String>), StorageError> {
+    let affected = db.get_track_hashes_by_artwork(old_artwork_hash).await?;
+    let new_hash = cas.write_blob(&image_bytes).await?;
+    db.replace_artwork_hash(old_artwork_hash, &new_hash).await?;
+    let msg = format!("Replace artwork: {} track{}", affected.len(), if affected.len() == 1 { "" } else { "s" });
+    commit_branches_for_artwork(&affected, &msg, cas, db).await?;
+    Ok((new_hash, affected))
+}
+
+/// Embed artwork bytes into an audio file on disk (non-CAS, replaces any existing cover).
+pub async fn file_set_artwork(
+    path:        &Path,
+    image_bytes: Vec<u8>,
+) -> Result<(), StorageError> {
+    let path = path.to_path_buf();
+    tokio::task::spawn_blocking(move || embed_picture_in_file(&path, &image_bytes))
+        .await
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+}
+
 // ── Parallel tree patching ────────────────────────────────────────────────────
 
 async fn patch_trees_parallel(
@@ -264,6 +331,107 @@ async fn patch_single_branch(
     let record = CommitRecord {
         hash:      new_commit_hash.clone(),
         tree_hash: new_tree_hash,
+        timestamp,
+        device_id: "melomaniac-editor".to_string(),
+        message:   Some(commit_msg),
+    };
+    db.insert_commit(&record, &[head_commit.as_str()]).await?;
+
+    Ok(Some(BranchHeadUpdate { branch_id, new_commit_hash }))
+}
+
+// ── Artwork changelog commits ─────────────────────────────────────────────────
+//
+// Artwork changes don't rewrite audio blobs, so track hashes stay the same and
+// branch trees are unchanged.  We still create a commit on every branch that
+// contains at least one affected track so the change appears in playlist history.
+
+async fn commit_branches_for_artwork(
+    affected_hashes: &[String],
+    commit_msg:      &str,
+    cas:             &Arc<CasStore>,
+    db:              &Arc<Database>,
+) -> Result<(), StorageError> {
+    let branches = db.get_all_branches_with_heads().await?;
+
+    let mut set = tokio::task::JoinSet::new();
+    for (branch_id, head_commit) in branches {
+        let affected = affected_hashes.to_vec();
+        let msg      = commit_msg.to_string();
+        let cas      = Arc::clone(cas);
+        let db       = Arc::clone(db);
+        set.spawn(async move {
+            artwork_commit_single_branch(branch_id, head_commit, affected, msg, cas, db).await
+        });
+    }
+
+    let mut updates: Vec<BranchHeadUpdate> = Vec::new();
+    while let Some(result) = set.join_next().await {
+        match result {
+            Ok(Ok(Some(u))) => updates.push(u),
+            Ok(Ok(None))    => {}
+            Ok(Err(e))      => eprintln!("[editor] artwork commit error: {e}"),
+            Err(e)          => eprintln!("[editor] artwork commit task error: {e}"),
+        }
+    }
+
+    if !updates.is_empty() {
+        let pairs: Vec<(String, String)> = updates
+            .into_iter()
+            .map(|u| (u.branch_id, u.new_commit_hash))
+            .collect();
+        db.batch_update_branch_heads(&pairs).await?;
+    }
+
+    Ok(())
+}
+
+async fn artwork_commit_single_branch(
+    branch_id:       String,
+    head_commit:     String,
+    affected_hashes: Vec<String>,
+    commit_msg:      String,
+    cas:             Arc<CasStore>,
+    db:              Arc<Database>,
+) -> Result<Option<BranchHeadUpdate>, StorageError> {
+    let commit = match db.get_commit(&head_commit).await? {
+        Some(c) => c,
+        None    => return Ok(None),
+    };
+
+    // Only commit if this branch actually contains one of the affected tracks
+    let tree_bytes = cas.read_blob(&commit.tree_hash).await?;
+    let tree: serde_json::Value = serde_json::from_slice(&tree_bytes)?;
+    let tracks = match tree["tracks"].as_array() {
+        Some(t) => t,
+        None    => return Ok(None),
+    };
+    let in_branch = tracks.iter()
+        .filter_map(|e| e["hash"].as_str())
+        .any(|h| affected_hashes.iter().any(|a| a == h));
+    if !in_branch {
+        return Ok(None);
+    }
+
+    // Create a new commit pointing to the same tree (no track-order change)
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let commit_body = serde_json::json!({
+        "tree_hash": &commit.tree_hash,
+        "parent":    &head_commit,
+        "timestamp": timestamp,
+        "device_id": "melomaniac-editor",
+        "message":   &commit_msg,
+    }).to_string();
+
+    let new_commit_hash = cas.write_blob(commit_body.as_bytes()).await?;
+
+    let record = CommitRecord {
+        hash:      new_commit_hash.clone(),
+        tree_hash: commit.tree_hash,
         timestamp,
         device_id: "melomaniac-editor".to_string(),
         message:   Some(commit_msg),
@@ -506,6 +674,36 @@ fn default_tag_type(file_type: lofty::file::FileType) -> lofty::tag::TagType {
         FileType::Ape                      => TagType::Ape,
         _                                  => TagType::Id3v2,
     }
+}
+
+fn embed_picture_in_file(path: &Path, image_bytes: &[u8]) -> Result<(), StorageError> {
+    use lofty::prelude::*;
+    use lofty::probe::Probe;
+    use lofty::config::WriteOptions;
+    use lofty::picture::{Picture, PictureType, MimeType};
+
+    let mut tagged = Probe::open(path)
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+        .guess_file_type()
+        .map_err(|e| StorageError::Metadata(e.to_string()))?
+        .read()
+        .map_err(|e| StorageError::Metadata(e.to_string()))?;
+
+    if tagged.primary_tag().is_none() {
+        let tag_type = default_tag_type(tagged.file_type());
+        tagged.insert_tag(lofty::tag::Tag::new(tag_type));
+    }
+
+    let mime = if image_bytes.starts_with(b"\x89PNG") { MimeType::Png } else { MimeType::Jpeg };
+    let picture = Picture::new_unchecked(PictureType::CoverFront, Some(mime), None, image_bytes.to_vec());
+
+    if let Some(tag) = tagged.primary_tag_mut() {
+        tag.remove_picture_type(PictureType::CoverFront);
+        tag.push_picture(picture);
+    }
+
+    tagged.save_to_path(path, WriteOptions::default())
+        .map_err(|e| StorageError::Metadata(e.to_string()))
 }
 
 fn mime_to_ext(mime: &str) -> &'static str {

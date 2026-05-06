@@ -1,5 +1,6 @@
 mod audio;
 mod editor;
+mod network;
 mod stats;
 mod storage;
 
@@ -116,12 +117,21 @@ pub fn run() {
             storage::playlist_fork,
             storage::branch_create,
             storage::branch_commit,
+            storage::branch_get_history,
+            storage::get_recent_commits,
             editor::file_read_metadata,
             editor::file_write_metadata,
             editor::file_scan_directory,
             editor::library_read_metadata,
             editor::library_edit_track,
+            editor::library_set_artwork,
+            editor::library_set_artwork_for_tracks,
+            editor::library_replace_artwork,
+            editor::file_set_artwork,
+            storage::get_artwork_library,
+            storage::get_artwork_blob,
             stats::get_system_stats,
+            network::fetch_image_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

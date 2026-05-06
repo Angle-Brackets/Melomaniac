@@ -1,93 +1,149 @@
-import { useState } from 'react';
-import { COMMITS, BRANCH_COLS, BRANCH_COLORS } from '../data';
-import type { Commit } from '../data';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
-const NODE_H = 56;
-const PAD_L = 40;
-const COL_W = 22;
-const GRAPH_W = 110;
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-function getPos(idx: number, branch: string) {
-  return {
-    x: PAD_L + (BRANCH_COLS[branch] ?? 0) * COL_W,
-    y: 20 + idx * NODE_H,
-  };
+interface CommitRecord {
+  hash:      string;
+  tree_hash: string;
+  timestamp: number;
+  device_id: string;
+  message:   string | null;
 }
 
-function buildLines(commits: typeof COMMITS) {
-  const lines: JSX.Element[] = [];
-  commits.forEach((c, i) => {
-    const from = getPos(i, c.branch);
-    c.parents.forEach(ph => {
-      const pi = commits.findIndex(x => x.hash === ph);
-      if (pi === -1) return;
-      const to = getPos(pi, commits[pi].branch);
-      const curved = from.x !== to.x;
-      lines.push(
-        <path key={`${c.hash}-${ph}`}
-          d={curved
-            ? `M ${from.x} ${from.y} C ${from.x} ${(from.y + to.y) / 2}, ${to.x} ${(from.y + to.y) / 2}, ${to.x} ${to.y}`
-            : `M ${from.x} ${from.y} L ${to.x} ${to.y}`}
-          stroke={BRANCH_COLORS[c.branch] ?? 'var(--text-2)'}
-          strokeWidth="1.5" fill="none" opacity="0.5"
-          strokeDasharray={curved ? '3 2' : undefined}
-        />
-      );
-    });
-  });
-  return lines;
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const NODE_H = 54;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtTime(ts: number): string {
+  const d = new Date(ts * 1000);
+  const now = Date.now();
+  const diff = now - d.getTime();
+  if (diff < 60_000)     return 'just now';
+  if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function CommitDetail({ selected, onClose }: { selected: Commit; onClose: () => void }) {
+function shortHash(h: string) { return h.slice(0, 7); }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function CommitDetail({ commit, onClose }: { commit: CommitRecord; onClose: () => void }) {
   return (
-    <div className="w-[200px] shrink-0 bg-mm-2 border-l border-mm-b0 p-3 overflow-y-auto styled-scroll">
-      <div className="text-[9px] font-bold tracking-widest text-mm-t2 uppercase mb-2">Commit Detail</div>
-      {([['Hash', selected.hash], ['Branch', selected.branch], ['Author', selected.author], ['Time', selected.time]] as const).map(([k, v]) => (
-        <div key={k} className="mb-2">
-          <div className="text-[9px] text-mm-t2 mb-0.5">{k}</div>
-          <div className={`text-[11px] text-mm-t0 ${k === 'Hash' ? 'font-mono' : ''}`}>{v}</div>
+    <div style={{
+      width: 220, flexShrink: 0,
+      background: 'var(--bg-2)', borderLeft: '1px solid var(--border-0)',
+      padding: 14, overflowY: 'auto',
+      fontFamily: "'Outfit', sans-serif",
+    }}>
+      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--text-2)', textTransform: 'uppercase', marginBottom: 10 }}>
+        Commit Detail
+      </div>
+      {([
+        ['Hash',      shortHash(commit.hash)],
+        ['Tree',      shortHash(commit.tree_hash)],
+        ['Author',    commit.device_id],
+        ['Time',      new Date(commit.timestamp * 1000).toLocaleString()],
+      ] as [string, string][]).map(([k, v]) => (
+        <div key={k} style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 9, color: 'var(--text-2)', marginBottom: 2 }}>{k}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-0)', fontFamily: k === 'Hash' || k === 'Tree' ? "'JetBrains Mono', monospace" : undefined }}>
+            {v}
+          </div>
         </div>
       ))}
-      <div className="mb-2">
-        <div className="text-[9px] text-mm-t2 mb-0.5">Message</div>
-        <div className="text-[11px] text-mm-t0 leading-relaxed">{selected.msg}</div>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 9, color: 'var(--text-2)', marginBottom: 2 }}>Message</div>
+        <div style={{ fontSize: 11, color: 'var(--text-0)', lineHeight: 1.5 }}>
+          {commit.message ?? '(no message)'}
+        </div>
       </div>
-      <div className="flex flex-col gap-1.5 mt-3">
-        <button className="btn btn-ghost btn-xs border border-mm-b2 bg-mm-4 text-mm-accent-lit text-[10px]">
-          ↩ Revert to this commit
-        </button>
-        <button onClick={onClose} className="btn btn-ghost btn-xs text-mm-t1 text-[10px]">
-          ⎇ Checkout branch
-        </button>
-      </div>
+      <button
+        onClick={onClose}
+        style={{
+          marginTop: 4, width: '100%', padding: '5px 0',
+          background: 'var(--bg-4)', border: '1px solid var(--border-2)',
+          borderRadius: 4, fontSize: 10, color: 'var(--text-1)', cursor: 'pointer',
+        }}
+      >
+        Dismiss
+      </button>
     </div>
   );
 }
 
-function CommitList({ commits, selected, onSelect }: { commits: typeof COMMITS; selected: Commit | null; onSelect: (c: Commit | null) => void }) {
+function CommitList({ commits, selected, onSelect }: {
+  commits:  CommitRecord[];
+  selected: CommitRecord | null;
+  onSelect: (c: CommitRecord | null) => void;
+}) {
+  if (commits.length === 0) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: "'Outfit', sans-serif" }}>
+          No commits yet — edit a track to create the first one
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex-1 overflow-y-auto styled-scroll">
-      {commits.map(c => {
+    <div style={{ flex: 1, overflowY: 'auto' }} className="styled-scroll">
+      {commits.map((c, i) => {
         const isSel = selected?.hash === c.hash;
-        const color = BRANCH_COLORS[c.branch] ?? 'var(--text-2)';
+        const isFirst = i === 0;
         return (
-          <div key={c.hash} onClick={() => onSelect(isSel ? null : c)}
-            className={`px-3.5 py-2.5 border-b border-mm-b0 cursor-pointer flex flex-col justify-center transition-colors duration-100 ${isSel ? 'bg-mm-4' : 'hover:bg-mm-3'}`}
-            style={{ height: NODE_H }}
+          <div
+            key={c.hash}
+            onClick={() => onSelect(isSel ? null : c)}
+            style={{
+              height: NODE_H,
+              padding: '0 14px',
+              display: 'flex', flexDirection: 'column', justifyContent: 'center',
+              borderBottom: '1px solid var(--border-0)',
+              cursor: 'pointer',
+              background: isSel ? 'var(--bg-4)' : undefined,
+              transition: 'background 0.1s',
+            }}
+            onMouseEnter={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = 'var(--bg-3)'; }}
+            onMouseLeave={e => { if (!isSel) (e.currentTarget as HTMLElement).style.background = ''; }}
           >
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] rounded px-1.5 py-px" style={{ color, background: color + '18' }}>{c.hash}</span>
-              {c.tags.map(t => (
-                <span key={t} className="font-mono text-[9px] rounded px-1.5 py-px"
-                  style={{
-                    background: t === 'HEAD' ? 'var(--accent-dim)' : 'var(--bg-5)',
-                    color: t === 'HEAD' ? 'var(--accent-light)' : 'var(--text-2)',
-                  }}>{t}</span>
-              ))}
-              <span className="text-[10px] text-mm-t2 ml-auto">{c.time}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+                padding: '1px 5px', borderRadius: 3,
+                background: 'var(--accent-dim)', color: 'var(--accent-light)',
+              }}>
+                {shortHash(c.hash)}
+              </span>
+              {isFirst && (
+                <span style={{
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+                  padding: '1px 5px', borderRadius: 3,
+                  background: 'var(--bg-5)', color: 'var(--text-2)',
+                }}>
+                  HEAD
+                </span>
+              )}
+              <span style={{ fontSize: 10, color: 'var(--text-2)', marginLeft: 'auto', flexShrink: 0 }}>
+                {fmtTime(c.timestamp)}
+              </span>
             </div>
-            <div className={`text-[12px] mt-0.5 ${isSel ? 'text-mm-t0 font-medium' : 'text-mm-t1'}`}>{c.msg}</div>
-            <div className="text-[10px] text-mm-t2 mt-px">by {c.author}</div>
+            <div style={{
+              fontSize: 12, marginTop: 3,
+              color: isSel ? 'var(--text-0)' : 'var(--text-1)',
+              fontFamily: "'Outfit', sans-serif",
+              fontWeight: isSel ? 600 : undefined,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {c.message ?? '(no message)'}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 2, fontFamily: "'JetBrains Mono', monospace" }}>
+              {c.device_id}
+            </div>
           </div>
         );
       })}
@@ -95,69 +151,69 @@ function CommitList({ commits, selected, onSelect }: { commits: typeof COMMITS; 
   );
 }
 
-function SvgGraph({ commits, selected, onSelect }: { commits: typeof COMMITS; selected: Commit | null; onSelect: (c: Commit) => void }) {
-  const totalH = commits.length * NODE_H + 20;
-  const lines = buildLines(commits);
-  return (
-    <div className="shrink-0 overflow-y-auto bg-mm-0 styled-scroll" style={{ width: GRAPH_W }}>
-      <svg width={GRAPH_W} height={totalH} style={{ display: 'block' }}>
-        {lines}
-        {commits.map((c, i) => {
-          const { x, y } = getPos(i, c.branch);
-          const color = BRANCH_COLORS[c.branch] ?? 'var(--text-2)';
-          const isSel = selected?.hash === c.hash;
-          return (
-            <g key={c.hash} style={{ cursor: 'pointer' }} onClick={() => onSelect(c)}>
-              <circle cx={x} cy={y} r={isSel ? 8 : 6}
-                fill={isSel ? color : 'var(--bg-2)'}
-                stroke={color} strokeWidth={isSel ? 2.5 : 1.5} />
-              {c.tags.includes('HEAD') && (
-                <circle cx={x} cy={y} r={11} fill="none" stroke={color} strokeWidth="1" opacity="0.4" />
-              )}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
+// ── Hook ──────────────────────────────────────────────────────────────────────
+
+function useRecentCommits(limit = 200) {
+  const [commits, setCommits] = useState<CommitRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    invoke<CommitRecord[]>('get_recent_commits', { limit })
+      .then(setCommits)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [limit]);
+
+  return { commits, loading };
 }
 
 // ── Overlay modal version ──────────────────────────────────────────────────────
 export function CommitGraph({ onClose }: { onClose: () => void }) {
-  const [selected, setSelected] = useState<Commit | null>(null);
+  const [selected, setSelected] = useState<CommitRecord | null>(null);
+  const { commits, loading } = useRecentCommits();
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(8,6,4,0.82)', backdropFilter: 'blur(4px)' }}
+    <div
+      style={{
+        position: 'absolute', inset: 0, zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(8,6,4,0.82)', backdropFilter: 'blur(4px)',
+      }}
       onClick={onClose}
     >
-      <div onClick={e => e.stopPropagation()}
-        className="bg-mm-1 rounded-[10px] border border-mm-b2 flex flex-col overflow-hidden"
-        style={{ width: 680, maxHeight: 560, boxShadow: '0 24px 60px rgba(0,0,0,0.7)' }}
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 680, maxHeight: 560,
+          background: 'var(--bg-1)', borderRadius: 10, border: '1px solid var(--border-2)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
       >
-        {/* Header */}
-        <div className="px-4 py-2.5 flex items-center justify-between border-b border-mm-b0 shrink-0">
+        <div style={{
+          padding: '10px 16px', borderBottom: '1px solid var(--border-0)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        }}>
           <div>
-            <div className="text-sm font-bold text-mm-t0">Study Beats — Commit History</div>
-            <div className="text-[10px] text-mm-t2 font-mono mt-0.5">
-              upstream/study-beats · {COMMITS.length} commits · 2 branches
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)', fontFamily: "'Outfit', sans-serif" }}>
+              Commit History
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace", marginTop: 2 }}>
+              {loading ? 'Loading…' : `${commits.length} commits · all branches`}
             </div>
           </div>
-          <div className="flex gap-2 items-center">
-            {Object.entries(BRANCH_COLORS).map(([b, c]) => (
-              <div key={b} className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full" style={{ background: c }} />
-                <span className="text-[10px] text-mm-t2 font-mono">{b}</span>
-              </div>
-            ))}
-            <button onClick={onClose} className="btn btn-ghost btn-xs">Close</button>
-          </div>
+          <button
+            onClick={onClose}
+            style={{ padding: '4px 12px', background: 'var(--bg-4)', border: '1px solid var(--border-2)', borderRadius: 4, fontSize: 11, color: 'var(--text-1)', cursor: 'pointer' }}
+          >
+            Close
+          </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          <SvgGraph commits={COMMITS} selected={selected} onSelect={setSelected} />
-          <CommitList commits={COMMITS} selected={selected} onSelect={setSelected} />
-          {selected && <CommitDetail selected={selected} onClose={() => setSelected(null)} />}
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+          <CommitList commits={commits} selected={selected} onSelect={setSelected} />
+          {selected && <CommitDetail commit={selected} onClose={() => setSelected(null)} />}
         </div>
       </div>
     </div>
@@ -165,43 +221,31 @@ export function CommitGraph({ onClose }: { onClose: () => void }) {
 }
 
 // ── Inline version (for History tab) ─────────────────────────────────────────
-export function CommitGraphInline() {
-  const [selected, setSelected] = useState<Commit | null>(null);
-  const totalH = COMMITS.length * NODE_H + 20;
-  const lines = buildLines(COMMITS);
+export function CommitGraphInline({ refreshKey }: { refreshKey?: number }) {
+  const [selected, setSelected] = useState<CommitRecord | null>(null);
+  const [commits,  setCommits]  = useState<CommitRecord[]>([]);
+  const [loading,  setLoading]  = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    invoke<CommitRecord[]>('get_recent_commits', { limit: 200 })
+      .then(setCommits)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [refreshKey]);
+
+  if (loading) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: "'Outfit', sans-serif" }}>Loading…</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex-1 flex overflow-hidden">
-      <div className="shrink-0 overflow-y-auto bg-mm-0 border-r border-mm-b0 styled-scroll" style={{ width: GRAPH_W }}>
-        <div className="px-2.5 py-2 flex gap-2">
-          {Object.entries(BRANCH_COLORS).map(([b, c]) => (
-            <div key={b} className="flex items-center gap-0.5">
-              <div className="w-1.5 h-1.5 rounded-full" style={{ background: c }} />
-              <span className="text-[9px] text-mm-t2 font-mono">{b}</span>
-            </div>
-          ))}
-        </div>
-        <svg width={GRAPH_W} height={totalH} style={{ display: 'block' }}>
-          {lines}
-          {COMMITS.map((c, i) => {
-            const { x, y } = getPos(i, c.branch);
-            const color = BRANCH_COLORS[c.branch] ?? 'var(--text-2)';
-            const isSel = selected?.hash === c.hash;
-            return (
-              <g key={c.hash} style={{ cursor: 'pointer' }} onClick={() => setSelected(c)}>
-                <circle cx={x} cy={y} r={isSel ? 8 : 6}
-                  fill={isSel ? color : 'var(--bg-2)'}
-                  stroke={color} strokeWidth={isSel ? 2.5 : 1.5} />
-                {c.tags.includes('HEAD') && (
-                  <circle cx={x} cy={y} r={11} fill="none" stroke={color} strokeWidth="1" opacity="0.4" />
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-      <CommitList commits={COMMITS} selected={selected} onSelect={setSelected} />
-      {selected && <CommitDetail selected={selected} onClose={() => setSelected(null)} />}
+    <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <CommitList commits={commits} selected={selected} onSelect={setSelected} />
+      {selected && <CommitDetail commit={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }

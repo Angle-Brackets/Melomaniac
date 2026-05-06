@@ -5,8 +5,8 @@ pub mod indexer;
 pub mod ingest;
 
 pub use cas::CasStore;
-pub use db::{BranchRecord, CommitRecord, Database, PlaylistRecord, TrackRecord};
-pub use editor::{AudioMetadata, FileEntry, read_cas_metadata};
+pub use db::{ArtworkLibraryEntry, BranchRecord, CommitRecord, Database, PlaylistRecord, TrackRecord};
+pub use editor::{AudioMetadata, FileEntry, read_cas_metadata, set_cas_artwork, replace_cas_artwork, set_artwork_for_track_list, file_set_artwork};
 pub use indexer::{IndexerReport, Indexer};
 
 #[derive(Debug, thiserror::Error)]

@@ -3,8 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { homeDir } from '@tauri-apps/api/path';
 import type { Track } from '../data';
 import ResizeHandle from './ResizeHandle';
+import ArtworkModal from './ArtworkModal';
 import { IcoEditor, IcoDownload, IcoClose, IcoLibrary } from '../icons';
-import { FiSave, FiRotateCcw, FiPlusSquare, FiFolder, FiSearch } from 'react-icons/fi';
+import { FiSave, FiRotateCcw, FiPlusSquare, FiFolder, FiSearch, FiEdit2 } from 'react-icons/fi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -65,10 +66,11 @@ export interface TrackPatch {
 }
 
 export interface EditorViewProps {
-  track?:          Track;
-  tracks?:         Track[];
-  artworkUrls?:    Record<string, string>;
-  onTrackUpdated?: (oldHash: string, newHash: string, patch: TrackPatch) => void;
+  track?:             Track;
+  tracks?:            Track[];
+  artworkUrls?:       Record<string, string>;
+  onTrackUpdated?:    (oldHash: string, newHash: string, patch: TrackPatch) => void;
+  onArtworkUpdated?:  (affectedHashes: string[], newUrl: string) => void;
 }
 
 type BottomTab  = 'library' | 'filesystem' | 'download';
@@ -356,7 +358,7 @@ function ColHeaders({ cols }: { cols: { label: string; width: string | number }[
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function EditorView({
-  track, tracks = [], artworkUrls = {}, onTrackUpdated,
+  track, tracks = [], artworkUrls = {}, onTrackUpdated, onArtworkUpdated,
 }: EditorViewProps) {
 
   // ── Metadata editor state
@@ -368,6 +370,10 @@ export default function EditorView({
   const [isDirty,      setIsDirty]      = useState(false);
   const [isSaving,     setIsSaving]     = useState(false);
   const [saveMsg,      setSaveMsg]      = useState<{ ok: boolean; text: string } | null>(null);
+
+  // ── Artwork modal
+  const [artworkModalOpen, setArtworkModalOpen] = useState(false);
+  const [artHover,         setArtHover]         = useState(false);
 
   // ── Layout — bottom pane collapses to tab-bar only by default
   const [bottomTab,      setBottomTab]      = useState<BottomTab>('library');
@@ -567,6 +573,7 @@ export default function EditorView({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
 
       {/* ── Top pane: metadata editor — takes all remaining space ─────── */}
@@ -579,16 +586,33 @@ export default function EditorView({
           alignItems: 'center', flexShrink: 0,
           background: 'var(--bg-1)',
         }}>
-          {/* Artwork */}
-          <div style={{
-            width: 96, height: 96, flexShrink: 0, borderRadius: 10,
-            overflow: 'hidden', border: '1px solid var(--border-2)',
-            background: artworkUrl ? undefined : gradientFallback,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-          }}>
+          {/* Artwork — click to open artwork editor */}
+          <div
+            onClick={() => setArtworkModalOpen(true)}
+            onMouseEnter={() => setArtHover(true)}
+            onMouseLeave={() => setArtHover(false)}
+            style={{
+              width: 96, height: 96, flexShrink: 0, borderRadius: 10,
+              overflow: 'hidden', border: '1px solid var(--border-2)',
+              background: artworkUrl ? undefined : gradientFallback,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              position: 'relative', cursor: 'pointer',
+            }}
+          >
             {artworkUrl && (
               <img src={artworkUrl} alt="cover" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             )}
+            {/* Pencil overlay on hover */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: 'rgba(0,0,0,0.52)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: artHover ? 1 : 0,
+              transition: 'opacity 0.15s',
+              borderRadius: 10,
+            }}>
+              <FiEdit2 size={22} style={{ color: 'white' }} />
+            </div>
           </div>
 
           {/* Track info + buttons */}
@@ -1050,5 +1074,21 @@ export default function EditorView({
 
       </div>
     </div>
+
+    {/* ── Artwork modal ─────────────────────────────────────────────────── */}
+    {artworkModalOpen && (
+      <ArtworkModal
+        trackHash={loadedHash ?? undefined}
+        trackPath={loadedPath ?? undefined}
+        tracks={tracks}
+        onSaved={(newUrl, affectedHashes) => {
+          setArtworkModalOpen(false);
+          const hashes = affectedHashes ?? (loadedHash ? [loadedHash] : []);
+          if (hashes.length > 0) onArtworkUpdated?.(hashes, newUrl);
+        }}
+        onClose={() => setArtworkModalOpen(false)}
+      />
+    )}
+    </>
   );
 }

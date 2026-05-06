@@ -85,15 +85,15 @@ export default function TrackList({
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
 
-      {/* Uncommitted reorder banner */}
+      {/* Pending changes banner */}
       {hasUncommitted && (
         <div className="flex items-center justify-between px-3.5 py-1.5 bg-mm-accent-dim border-b border-mm-b2 shrink-0">
           <span className="text-[11px] text-mm-accent-lit">
-            ● Unsaved track reorder — commit to save to playlist history
+            ● Unsaved changes — commit to record in playlist history
           </span>
           <div className="flex gap-1.5">
             <button onClick={() => onReorder(null)} className="btn btn-ghost btn-xs">Discard</button>
-            <button onClick={onCommitChanges} className="btn btn-primary btn-xs">Commit reorder</button>
+            <button onClick={onCommitChanges} className="btn btn-primary btn-xs">Commit</button>
           </div>
         </div>
       )}

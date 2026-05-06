@@ -87,6 +87,7 @@ export default function DesktopApp() {
   const [volume,           setVolume]            = useState(0.72);
   const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
   const [gitToast,         setGitToast]          = useState<string | null>(null);
+  const [commitRefreshKey, setCommitRefreshKey]  = useState(0);
   const [showStats,        setShowStats]         = useState(false);
   const [appStats,         setAppStats]          = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
 
@@ -374,8 +375,23 @@ export default function DesktopApp() {
                   fetchedHashesRef.current.add(newHash);
                   fetchedHashesRef.current.delete(oldHash);
                   if (loadedHash === oldHash) setLoadedHash(newHash);
-                  setGitToast('Metadata saved · auto-committed to all branches');
+                  setGitToast('Metadata saved · committed to all branches');
                   setTimeout(() => setGitToast(null), 3000);
+                  setCommitRefreshKey(k => k + 1);
+                }}
+                onArtworkUpdated={(affectedHashes, newUrl) => {
+                  setArtworkUrls(prev => {
+                    const next = { ...prev };
+                    for (const h of affectedHashes) next[h] = newUrl;
+                    return next;
+                  });
+                  const n = affectedHashes.length;
+                  const msg = n === 1
+                    ? `Artwork updated · ${trackOrder.find(t => t.hash === affectedHashes[0])?.title ?? affectedHashes[0].slice(0, 6)}`
+                    : `Artwork updated · ${n} tracks`;
+                  setGitToast(msg);
+                  setTimeout(() => setGitToast(null), 3000);
+                  setCommitRefreshKey(k => k + 1);
                 }}
               />
             ) : (
@@ -438,7 +454,7 @@ export default function DesktopApp() {
 
                 {activeTab === 'History' && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <CommitGraphInline />
+                    <CommitGraphInline refreshKey={commitRefreshKey} />
                   </div>
                 )}
 

@@ -1,7 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use melomaniac_storage::{
-    BranchRecord, CasStore, CommitRecord, Database, Indexer, PlaylistRecord, TrackRecord,
+    ArtworkLibraryEntry, BranchRecord, CasStore, CommitRecord, Database, Indexer,
+    PlaylistRecord, TrackRecord,
 };
 use serde::Serialize;
 use tauri::State;
@@ -86,6 +87,23 @@ pub async fn track_get_artwork(
         .read_blob(&artwork_hash)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// All distinct artworks in the library — for the artwork picker grid.
+#[tauri::command]
+pub async fn get_artwork_library(
+    storage: State<'_, StorageState>,
+) -> Result<Vec<ArtworkLibraryEntry>, String> {
+    storage.db.get_artwork_library().await.map_err(|e| e.to_string())
+}
+
+/// Read a CAS blob by its artwork hash directly — used by the artwork picker thumbnails.
+#[tauri::command]
+pub async fn get_artwork_blob(
+    artwork_hash: String,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<u8>, String> {
+    storage.cas.read_blob(&artwork_hash).await.map_err(|e| e.to_string())
 }
 
 // ── Playlists ─────────────────────────────────────────────────────────────────
@@ -231,6 +249,39 @@ pub async fn branch_commit(
         .map_err(|e| e.to_string())?;
 
     Ok(commit_hash)
+}
+
+/// Return the most recent commits across all branches (newest-first).
+/// `limit` defaults to 200 when 0.
+#[tauri::command]
+pub async fn get_recent_commits(
+    limit:   usize,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<CommitRecord>, String> {
+    let cap = if limit == 0 { 200 } else { limit };
+    storage.db.get_recent_commits(cap).await.map_err(|e| e.to_string())
+}
+
+/// Walk the first-parent chain from a branch HEAD, returning up to `limit` commits.
+/// Pass `limit = 0` to get all commits (capped at 500 internally).
+#[tauri::command]
+pub async fn branch_get_history(
+    playlist_id: String,
+    branch_name: String,
+    limit:       usize,
+    storage:     State<'_, StorageState>,
+) -> Result<Vec<CommitRecord>, String> {
+    let branch = storage.db
+        .get_branch(&playlist_id, &branch_name)
+        .await.map_err(|e| e.to_string())?;
+    let head = match branch.and_then(|b| b.head_commit) {
+        Some(h) => h,
+        None    => return Ok(vec![]),
+    };
+    let cap = if limit == 0 { 500 } else { limit };
+    storage.db
+        .get_commit_history(&head, cap)
+        .await.map_err(|e| e.to_string())
 }
 
 // ── Initialisation helper ─────────────────────────────────────────────────────
