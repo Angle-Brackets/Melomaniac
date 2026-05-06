@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use melomaniac_storage::{
     editor::{read_metadata, scan_directory, write_metadata_to_file, edit_cas_track},
-    AudioMetadata, FileEntry,
+    read_cas_metadata, AudioMetadata, FileEntry,
 };
 use tauri::State;
 
@@ -31,6 +31,17 @@ pub async fn file_write_metadata(
 #[tauri::command]
 pub async fn file_scan_directory(path: String) -> Result<Vec<FileEntry>, String> {
     scan_directory(&PathBuf::from(&path))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Read all metadata from a CAS library track by its hash.
+#[tauri::command]
+pub async fn library_read_metadata(
+    hash:    String,
+    storage: State<'_, StorageState>,
+) -> Result<AudioMetadata, String> {
+    read_cas_metadata(&hash, &storage.cas, &storage.db)
         .await
         .map_err(|e| e.to_string())
 }

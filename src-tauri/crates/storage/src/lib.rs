@@ -6,7 +6,7 @@ pub mod ingest;
 
 pub use cas::CasStore;
 pub use db::{BranchRecord, CommitRecord, Database, PlaylistRecord, TrackRecord};
-pub use editor::{AudioMetadata, FileEntry};
+pub use editor::{AudioMetadata, FileEntry, read_cas_metadata};
 pub use indexer::{IndexerReport, Indexer};
 
 #[derive(Debug, thiserror::Error)]

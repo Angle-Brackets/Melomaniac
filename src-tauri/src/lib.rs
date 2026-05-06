@@ -119,6 +119,7 @@ pub fn run() {
             editor::file_read_metadata,
             editor::file_write_metadata,
             editor::file_scan_directory,
+            editor::library_read_metadata,
             editor::library_edit_track,
             stats::get_system_stats,
         ])

@@ -79,6 +79,33 @@ pub async fn scan_directory(path: &Path) -> Result<Vec<FileEntry>, StorageError>
         .map_err(|e| StorageError::Metadata(e.to_string()))?
 }
 
+/// Read metadata from a CAS library track (by hash).
+/// The blob has no file extension so it is written to a temp file first.
+pub async fn read_cas_metadata(
+    hash: &str,
+    cas:  &Arc<CasStore>,
+    db:   &Arc<Database>,
+) -> Result<AudioMetadata, StorageError> {
+    let track = db.get_track(hash).await?
+        .ok_or_else(|| StorageError::BlobNotFound(hash.to_string()))?;
+
+    let ext   = mime_to_ext(track.mime_type.as_deref().unwrap_or("audio/mpeg")).to_string();
+    let bytes = cas.read_blob(hash).await?;
+
+    let tmp = std::env::temp_dir()
+        .join(format!("melomaniac_read_{}.{}", uuid::Uuid::new_v4(), ext));
+
+    tokio::fs::write(&tmp, &bytes).await?;
+
+    let path = tmp.clone();
+    let result = tokio::task::spawn_blocking(move || read_metadata_sync(&path))
+        .await
+        .map_err(|e| StorageError::Metadata(e.to_string()))?;
+
+    tokio::fs::remove_file(&tmp).await.ok();
+    result
+}
+
 /// Edit a library track already in CAS:
 ///   1. Read the blob, apply new tags, compute new BLAKE3 hash.
 ///   2. Write the new blob to CAS.

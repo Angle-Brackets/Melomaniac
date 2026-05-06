@@ -352,7 +352,31 @@ export default function DesktopApp() {
           {/* Center column */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
             {railItem === 'editor' ? (
-              <EditorView track={TRACKS.find(t => t.id === (editorTrackId ?? activeTrackId ?? 1))} />
+              <EditorView
+                track={trackOrder.find(t => t.id === (editorTrackId ?? activeTrackId))}
+                artworkUrls={artworkUrls}
+                onTrackUpdated={(oldHash, newHash, patch) => {
+                  // Targeted in-place patch — only the one changed track
+                  setTrackOrder(prev => prev.map(t =>
+                    t.hash === oldHash
+                      ? { ...t, hash: newHash, title: patch.title, artist: patch.artist, album: patch.album }
+                      : t
+                  ));
+                  // Move artwork URL to the new hash (blob unchanged)
+                  setArtworkUrls(prev => {
+                    const url = prev[oldHash];
+                    if (!url) return prev;
+                    const next = { ...prev, [newHash]: url };
+                    delete next[oldHash];
+                    return next;
+                  });
+                  fetchedHashesRef.current.add(newHash);
+                  fetchedHashesRef.current.delete(oldHash);
+                  if (loadedHash === oldHash) setLoadedHash(newHash);
+                  setGitToast('Metadata saved · auto-committed to all branches');
+                  setTimeout(() => setGitToast(null), 3000);
+                }}
+              />
             ) : (
               <>
                 <PlaylistHeader
