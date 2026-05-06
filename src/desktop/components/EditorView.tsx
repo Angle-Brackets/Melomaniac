@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { homeDir } from '@tauri-apps/api/path';
 import type { Track } from '../data';
@@ -369,9 +369,12 @@ export default function EditorView({
   const [isSaving,     setIsSaving]     = useState(false);
   const [saveMsg,      setSaveMsg]      = useState<{ ok: boolean; text: string } | null>(null);
 
-  // ── Layout
-  const [topH,      setTopH]      = useState(340);
-  const [bottomTab, setBottomTab] = useState<BottomTab>('library');
+  // ── Layout — bottom pane collapses to tab-bar only by default
+  const [bottomTab,      setBottomTab]      = useState<BottomTab>('library');
+  const [bottomExpanded, setBottomExpanded] = useState(false);
+  const [bottomH,        setBottomH]        = useState(240);
+  // Tracks whether we've done the first filesystem scan so we only fire once
+  const hasScannedFsRef = useRef(false);
 
   // ── Library tab search
   const [libSearch, setLibSearch] = useState('');
@@ -402,25 +405,40 @@ export default function EditorView({
       });
   }, []);
 
+  // ── Auto-scan filesystem on first open of that tab ───────────────────────
+  useEffect(() => {
+    if (bottomTab === 'filesystem' && !hasScannedFsRef.current && scanPath) {
+      hasScannedFsRef.current = true;
+      scanDir(scanPath);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bottomTab, scanPath]);
+
   // ── Auto-load when the track prop changes ────────────────────────────────
   useEffect(() => {
     if (!track?.hash) return;
-    loadFromHash(track.hash);
+    loadFromHash(track.hash, track);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.hash]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  const loadFromHash = useCallback(async (hash: string) => {
+  // prefill: optional Track for instant badge + basic fields before the invoke resolves
+  const loadFromHash = useCallback(async (hash: string, prefill?: Pick<Track, 'title' | 'artist' | 'album'>) => {
+    if (!hash) return;
+    // Set the badge and basic fields immediately — don't wait for the invoke
+    setLoadedHash(hash);
+    setLoadedPath(null);
+    setIsDirty(false);
+    if (prefill) {
+      setForm(f => ({ ...f, title: prefill.title, artist: prefill.artist, album: prefill.album }));
+    }
     try {
       const meta = await invoke<AudioMetadata>('library_read_metadata', { hash });
       const f = metaToForm(meta);
       setBaseMeta(meta);
       setForm(f);
       setOriginalForm(f);
-      setLoadedHash(hash);
-      setLoadedPath(null);
-      setIsDirty(false);
     } catch (err) {
       console.error('library_read_metadata failed:', err);
     }
@@ -543,8 +561,8 @@ export default function EditorView({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
 
-      {/* ── Top pane: metadata editor ──────────────────────────────────── */}
-      <div style={{ height: topH, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ── Top pane: metadata editor — takes all remaining space ─────── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
         {/* ── Header: artwork + track identity + actions ─────────────── */}
         <div style={{
@@ -707,36 +725,38 @@ export default function EditorView({
         </div>
       </div>
 
-      {/* ── Resize handle ─────────────────────────────────────────────── */}
-      <ResizeHandle direction="v" onDelta={d => setTopH(h => Math.max(200, Math.min(640, h + d)))} />
+      {/* ── Bottom pane — collapses to tab bar only, expands on demand ── */}
+      <div style={{
+        flexShrink: 0,
+        height: bottomExpanded ? bottomH + 37 : 37,
+        display: 'flex', flexDirection: 'column',
+        borderTop: '1px solid var(--border-0)',
+        overflow: 'hidden',
+      }}>
 
-      {/* ── Bottom pane ────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-
-        {/* Tab bar + filesystem path input */}
+        {/* Tab bar + expand/collapse toggle + filesystem path */}
         <div style={{
           display: 'flex', alignItems: 'center',
-          borderBottom: '1px solid var(--border-0)',
           background: 'var(--bg-1)',
-          flexShrink: 0, height: 36,
+          flexShrink: 0, height: 37,
         }}>
-          <TabBtn active={bottomTab === 'library'}    onClick={() => setBottomTab('library')}>
+          <TabBtn active={bottomTab === 'library'}    onClick={() => { setBottomTab('library');    setBottomExpanded(true); }}>
             <IcoLibrary size={12} /> Library
           </TabBtn>
-          <TabBtn active={bottomTab === 'filesystem'} onClick={() => setBottomTab('filesystem')}>
+          <TabBtn active={bottomTab === 'filesystem'} onClick={() => { setBottomTab('filesystem'); setBottomExpanded(true); }}>
             <IcoEditor size={12} /> Filesystem
           </TabBtn>
-          <TabBtn active={bottomTab === 'download'}   onClick={() => setBottomTab('download')}>
+          <TabBtn active={bottomTab === 'download'}   onClick={() => { setBottomTab('download');   setBottomExpanded(true); }}>
             <IcoDownload size={12} /> Download
           </TabBtn>
 
           {/* Path bar — only visible on Filesystem tab */}
-          {bottomTab === 'filesystem' && (
+          {bottomTab === 'filesystem' && bottomExpanded && (
             <>
               <div style={{ width: 1, height: 16, background: 'var(--border-1)', margin: '0 8px', flexShrink: 0 }} />
               <form
                 onSubmit={e => { e.preventDefault(); scanDir(pathInput); }}
-                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, paddingRight: 12 }}
+                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}
               >
                 <input
                   value={pathInput}
@@ -765,10 +785,33 @@ export default function EditorView({
               </form>
             </>
           )}
+
+          {/* Expand / collapse toggle at far right */}
+          <div style={{ flex: 1 }} />
+          <button
+            onClick={() => setBottomExpanded(e => !e)}
+            title={bottomExpanded ? 'Collapse' : 'Expand'}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--text-2)', fontSize: 14, padding: '0 12px',
+              height: '100%', display: 'flex', alignItems: 'center',
+              flexShrink: 0,
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-0)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-2)'; }}
+          >
+            {bottomExpanded ? '▾' : '▴'}
+          </button>
         </div>
 
+        {/* Resize handle — only when expanded */}
+        {bottomExpanded && (
+          <ResizeHandle direction="v" onDelta={d => setBottomH(h => Math.max(120, Math.min(640, h - d)))} />
+        )}
+
+        {/* ── Tab content — only rendered when expanded ──────────────── */}
         {/* ── LIBRARY TAB ────────────────────────────────────────────── */}
-        {bottomTab === 'library' && (
+        {bottomExpanded && bottomTab === 'library' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <SearchBar value={libSearch} onChange={setLibSearch} placeholder="Search library…" />
             <ColHeaders cols={[
@@ -790,7 +833,7 @@ export default function EditorView({
                 return (
                   <div
                     key={t.hash}
-                    onClick={() => loadFromHash(t.hash)}
+                    onClick={() => loadFromHash(t.hash, t)}
                     style={{
                       display: 'grid',
                       gridTemplateColumns: '28px 1fr 150px 150px 50px',
@@ -831,7 +874,7 @@ export default function EditorView({
         )}
 
         {/* ── FILESYSTEM TAB ─────────────────────────────────────────── */}
-        {bottomTab === 'filesystem' && (
+        {bottomExpanded && bottomTab === 'filesystem' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <SearchBar value={fsSearch} onChange={setFsSearch} placeholder="Search files…" />
             <ColHeaders cols={[
@@ -912,7 +955,7 @@ export default function EditorView({
         )}
 
         {/* ── DOWNLOAD TAB ───────────────────────────────────────────── */}
-        {bottomTab === 'download' && (
+        {bottomExpanded && bottomTab === 'download' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '22px 22px' }}>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
