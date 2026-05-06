@@ -354,6 +354,7 @@ export default function DesktopApp() {
             {railItem === 'editor' ? (
               <EditorView
                 track={trackOrder.find(t => t.id === (editorTrackId ?? activeTrackId))}
+                tracks={trackOrder}
                 artworkUrls={artworkUrls}
                 onTrackUpdated={(oldHash, newHash, patch) => {
                   // Targeted in-place patch — only the one changed track

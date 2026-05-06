@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { homeDir } from '@tauri-apps/api/path';
 import type { Track } from '../data';
 import ResizeHandle from './ResizeHandle';
-import {
-  IcoEditor, IcoDownload, IcoClose,
-} from '../icons';
+import { IcoEditor, IcoDownload, IcoClose, IcoLibrary } from '../icons';
 import { FiSave, FiRotateCcw, FiPlusSquare, FiFolder, FiSearch } from 'react-icons/fi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -67,11 +66,12 @@ export interface TrackPatch {
 
 export interface EditorViewProps {
   track?:          Track;
+  tracks?:         Track[];
   artworkUrls?:    Record<string, string>;
   onTrackUpdated?: (oldHash: string, newHash: string, patch: TrackPatch) => void;
 }
 
-type BottomTab  = 'files' | 'download';
+type BottomTab  = 'library' | 'filesystem' | 'download';
 type DownloadFmt = 'flac' | 'mp3' | 'ogg';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ function metaToForm(m: AudioMetadata): MetaForm {
     composer:     m.composer     ?? '',
     comment:      m.comment      ?? '',
     lyrics:       m.lyrics       ?? '',
-    bpm:          m.bpm          != null ? String(m.bpm)          : '',
+    bpm:          m.bpm          != null ? String(m.bpm) : '',
     copyright:    m.copyright    ?? '',
   };
 }
@@ -119,7 +119,7 @@ function formToMeta(f: MetaForm, base: AudioMetadata): AudioMetadata {
     composer:     f.composer     || null,
     comment:      f.comment      || null,
     lyrics:       f.lyrics       || null,
-    bpm:          f.bpm          ? parseInt(f.bpm,          10) : null,
+    bpm:          f.bpm          ? parseInt(f.bpm, 10) : null,
     copyright:    f.copyright    || null,
   };
 }
@@ -140,42 +140,76 @@ function detectSource(url: string): { label: string; color: string } | null {
   if (!url) return null;
   if (/youtube\.com|youtu\.be/i.test(url))  return { label: 'YouTube',    color: '#ff4040' };
   if (/soundcloud\.com/i.test(url))         return { label: 'SoundCloud', color: '#f76e30' };
-  if (/bandcamp\.com/i.test(url))           return { label: 'Bandcamp',   color: '#5fa' };
+  if (/bandcamp\.com/i.test(url))           return { label: 'Bandcamp',   color: '#1da0c3' };
   if (/spotify\.com/i.test(url))            return { label: 'Spotify',    color: '#1db954' };
   if (/^https?:\/\//i.test(url))            return { label: 'URL',        color: 'var(--text-2)' };
   return null;
 }
 
-// ── Styled sub-components ─────────────────────────────────────────────────────
+// ── Design tokens (shared between sub-components) ─────────────────────────────
+
+const INPUT_STYLE: React.CSSProperties = {
+  background: 'var(--bg-1)',
+  border: '1px solid var(--border-1)',
+  borderRadius: 5,
+  padding: '6px 9px',
+  fontSize: 12,
+  color: 'var(--text-0)',
+  fontFamily: "'Outfit', sans-serif",
+  outline: 'none',
+  width: '100%',
+};
+
+const LABEL_STYLE: React.CSSProperties = {
+  fontSize: 11,
+  color: 'var(--text-2)',
+  fontFamily: "'Outfit', sans-serif",
+  fontWeight: 500,
+  marginBottom: 4,
+  display: 'block',
+};
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function SectionCard({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div style={{
+      background: 'var(--bg-3)',
+      border: '1px solid var(--border-1)',
+      borderRadius: 8,
+      padding: '10px 14px 14px',
+    }}>
+      <span style={{
+        display: 'block',
+        fontSize: 10, fontWeight: 700,
+        letterSpacing: '0.12em', textTransform: 'uppercase',
+        color: 'var(--text-3)',
+        fontFamily: "'Outfit', sans-serif",
+        marginBottom: 10,
+      }}>
+        {title}
+      </span>
+      {children}
+    </div>
+  );
+}
 
 function FieldInput({
-  label, value, onChange, placeholder, mono = false, wide = false,
+  label, value, onChange, placeholder, mono = false,
 }: {
   label: string; value: string; onChange: (v: string) => void;
-  placeholder?: string; mono?: boolean; wide?: boolean;
+  placeholder?: string; mono?: boolean;
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, gridColumn: wide ? '1 / -1' : undefined }}>
-      <label style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
-        {label}
-      </label>
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <label style={LABEL_STYLE}>{label}</label>
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
-        style={{
-          background: 'var(--bg-2)',
-          border: '1px solid var(--border-1)',
-          borderRadius: 4,
-          padding: '4px 7px',
-          fontSize: 12,
-          color: 'var(--text-0)',
-          fontFamily: mono ? "'JetBrains Mono', monospace" : "'Outfit', sans-serif",
-          outline: 'none',
-          width: '100%',
-        }}
-        onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
-        onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; }}
+        style={{ ...INPUT_STYLE, fontFamily: mono ? "'JetBrains Mono', monospace" : "'Outfit', sans-serif" }}
+        onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-dim)'; }}
+        onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; e.currentTarget.style.boxShadow = 'none'; }}
       />
     </div>
   );
@@ -193,15 +227,18 @@ function SmallBtn({
       disabled={disabled}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
-        padding: '4px 10px',
+        padding: '5px 11px',
         background: accent ? 'var(--accent-dim)' : 'var(--bg-4)',
         border: `1px solid ${accent ? 'var(--accent)' : 'var(--border-2)'}`,
         borderRadius: 5,
-        fontSize: 11, color: accent ? 'var(--accent-light)' : 'var(--text-1)',
+        fontSize: 12,
+        color: accent ? 'var(--accent-light)' : 'var(--text-1)',
         cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
+        opacity: disabled ? 0.45 : 1,
         fontFamily: "'Outfit', sans-serif",
+        fontWeight: 500,
         flexShrink: 0,
+        transition: 'background 0.12s, opacity 0.12s',
       }}
       onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = accent ? 'var(--accent)' : 'var(--bg-5)'; }}
       onMouseLeave={e => { if (!disabled) (e.currentTarget as HTMLElement).style.background = accent ? 'var(--accent-dim)' : 'var(--bg-4)'; }}
@@ -212,24 +249,117 @@ function SmallBtn({
 }
 
 function FormatBadge({ fmt }: { fmt: string }) {
-  const short = fmt.replace(/^(Mpeg|Flac|Vorbis|Mp4|Opus|Wav|Aiff|Ape)/i, m => m.toUpperCase()).slice(0, 5);
+  const short = fmt.replace(/Mpeg/i, 'MP3').replace(/Vorbis/i, 'OGG')
+    .replace(/Flac/i, 'FLAC').replace(/Mp4/i, 'M4A')
+    .replace(/Opus/i, 'OPUS').replace(/Wav/i, 'WAV')
+    .replace(/Aiff/i, 'AIFF').slice(0, 5).toUpperCase();
   return (
     <span style={{
-      padding: '1px 5px', borderRadius: 3,
+      padding: '2px 6px', borderRadius: 4,
       background: 'var(--bg-4)', border: '1px solid var(--border-2)',
-      fontSize: 9, color: 'var(--accent-light)',
+      fontSize: 10, color: 'var(--accent-light)',
       fontFamily: "'JetBrains Mono', monospace",
-      letterSpacing: '0.05em',
+      letterSpacing: '0.04em', fontWeight: 700,
     }}>
       {short}
     </span>
   );
 }
 
+function LibBadge() {
+  return (
+    <span style={{
+      padding: '2px 6px', borderRadius: 4,
+      background: 'var(--accent-dim)', border: '1px solid var(--accent)',
+      fontSize: 10, color: 'var(--accent-light)',
+      fontFamily: "'JetBrains Mono', monospace",
+      letterSpacing: '0.06em', fontWeight: 700,
+    }}>
+      LIBRARY
+    </span>
+  );
+}
+
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '0 15px', height: '100%',
+        background: 'transparent',
+        border: 'none',
+        borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+        color: active ? 'var(--text-0)' : 'var(--text-2)',
+        fontSize: 12, fontWeight: active ? 600 : 400,
+        cursor: 'pointer', flexShrink: 0,
+        fontFamily: "'Outfit', sans-serif",
+        transition: 'color 0.12s',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div style={{
+      padding: '7px 14px', borderBottom: '1px solid var(--border-0)',
+      display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+      background: 'var(--bg-1)',
+    }}>
+      <FiSearch size={13} style={{ color: 'var(--text-2)', flexShrink: 0 }} />
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder ?? 'Search…'}
+        style={{
+          flex: 1, background: 'transparent', border: 'none',
+          fontSize: 12, color: 'var(--text-1)', outline: 'none',
+          fontFamily: "'Outfit', sans-serif",
+        }}
+      />
+      {value && (
+        <button
+          onClick={() => onChange('')}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex', padding: 0 }}
+        >
+          <IcoClose size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ColHeaders({ cols }: { cols: { label: string; width: string | number }[] }) {
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: cols.map(c => typeof c.width === 'number' ? `${c.width}px` : c.width).join(' '),
+      padding: '0 14px', height: 28, flexShrink: 0,
+      borderBottom: '1px solid var(--border-0)',
+      background: 'var(--bg-0)',
+      alignItems: 'center', gap: 8,
+    }}>
+      {cols.map((c, i) => (
+        <span key={i} style={{
+          fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em',
+          color: 'var(--text-3)', fontFamily: "'Outfit', sans-serif", fontWeight: 600,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{c.label}</span>
+      ))}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: EditorViewProps) {
-  // ── File state
+export default function EditorView({
+  track, tracks = [], artworkUrls = {}, onTrackUpdated,
+}: EditorViewProps) {
+
+  // ── Metadata editor state
   const [loadedPath,   setLoadedPath]   = useState<string | null>(null);
   const [loadedHash,   setLoadedHash]   = useState<string | null>(null);
   const [baseMeta,     setBaseMeta]     = useState<AudioMetadata | null>(null);
@@ -240,23 +370,37 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
   const [saveMsg,      setSaveMsg]      = useState<{ ok: boolean; text: string } | null>(null);
 
   // ── Layout
-  const [topH,       setTopH]       = useState(300);
-  const [bottomTab,  setBottomTab]  = useState<BottomTab>('files');
+  const [topH,      setTopH]      = useState(340);
+  const [bottomTab, setBottomTab] = useState<BottomTab>('library');
 
-  // ── File browser
-  const [scanPath,   setScanPath]   = useState(() => {
-    // Start at home dir — Tauri doesn't give us an env on all platforms but JS can infer
-    return '/home';
-  });
-  const [fileEntries,  setFileEntries]  = useState<FileEntry[]>([]);
-  const [isScanning,   setIsScanning]   = useState(false);
-  const [fileSearch,   setFileSearch]   = useState('');
-  const [pathInput,    setPathInput]    = useState('/home');
+  // ── Library tab search
+  const [libSearch, setLibSearch] = useState('');
+
+  // ── Filesystem tab
+  const [scanPath,    setScanPath]    = useState('');
+  const [pathInput,   setPathInput]   = useState('');
+  const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
+  const [isScanning,  setIsScanning]  = useState(false);
+  const [fsSearch,    setFsSearch]    = useState('');
 
   // ── Download
-  const [dlUrl,    setDlUrl]    = useState('');
-  const [dlFmt,    setDlFmt]    = useState<DownloadFmt>('mp3');
+  const [dlUrl, setDlUrl] = useState('');
+  const [dlFmt, setDlFmt] = useState<DownloadFmt>('mp3');
   const source = detectSource(dlUrl);
+
+  // ── Resolve home dir on mount, initialise filesystem path ───────────────
+  useEffect(() => {
+    homeDir()
+      .then(home => {
+        const music = home.replace(/\/$/, '') + '/Music';
+        setScanPath(music);
+        setPathInput(music);
+      })
+      .catch(() => {
+        setScanPath('/home');
+        setPathInput('/home');
+      });
+  }, []);
 
   // ── Auto-load when the track prop changes ────────────────────────────────
   useEffect(() => {
@@ -265,19 +409,13 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.hash]);
 
-  // ── Scan initial dir on mount ────────────────────────────────────────────
-  useEffect(() => {
-    scanDir('/home');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   const loadFromHash = useCallback(async (hash: string) => {
     try {
       const meta = await invoke<AudioMetadata>('library_read_metadata', { hash });
-      setBaseMeta(meta);
       const f = metaToForm(meta);
+      setBaseMeta(meta);
       setForm(f);
       setOriginalForm(f);
       setLoadedHash(hash);
@@ -291,8 +429,8 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
   const loadFromPath = useCallback(async (path: string) => {
     try {
       const meta = await invoke<AudioMetadata>('file_read_metadata', { path });
-      setBaseMeta(meta);
       const f = metaToForm(meta);
+      setBaseMeta(meta);
       setForm(f);
       setOriginalForm(f);
       setLoadedPath(path);
@@ -304,6 +442,7 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
   }, []);
 
   const scanDir = useCallback(async (path: string) => {
+    if (!path) return;
     setIsScanning(true);
     try {
       const entries = await invoke<FileEntry[]>('file_scan_directory', { path });
@@ -339,17 +478,14 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
           album:  form.album  || 'Unknown Album',
         });
         setLoadedHash(newHash);
-        // Refresh metadata from the new hash
         const refreshed = await invoke<AudioMetadata>('library_read_metadata', { hash: newHash });
         setBaseMeta(refreshed);
-        const f = metaToForm(refreshed);
-        setOriginalForm(f);
+        setOriginalForm(metaToForm(refreshed));
       } else if (loadedPath) {
         await invoke('file_write_metadata', { path: loadedPath, metadata: meta });
         const refreshed = await invoke<AudioMetadata>('file_read_metadata', { path: loadedPath });
         setBaseMeta(refreshed);
-        const f = metaToForm(refreshed);
-        setOriginalForm(f);
+        setOriginalForm(metaToForm(refreshed));
       }
       setIsDirty(false);
       setSaveMsg({ ok: true, text: 'Saved' });
@@ -361,12 +497,8 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
     }
   };
 
-  const handleRevert = () => {
-    setForm(originalForm);
-    setIsDirty(false);
-  };
+  const handleRevert = () => { setForm(originalForm); setIsDirty(false); };
 
-  // Ingest the currently loaded filesystem file into the CAS library
   const handleIngest = async () => {
     if (!loadedPath) return;
     try {
@@ -380,14 +512,22 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const artworkUrl  = loadedHash ? (artworkUrls[loadedHash] ?? null) : null;
-  const displayName = loadedPath
-    ? loadedPath.split('/').pop() ?? loadedPath
-    : (loadedHash ? (form.title || loadedHash.slice(0, 12) + '…') : null);
+  const artworkUrl = loadedHash ? (artworkUrls[loadedHash] ?? null) : null;
+  const isLibTrack = !!loadedHash;
 
-  const filteredFiles = fileEntries.filter(e => {
-    if (!fileSearch) return true;
-    const q = fileSearch.toLowerCase();
+  const displayTitle  = form.title  || (loadedPath ? (loadedPath.split('/').pop() ?? '') : null);
+  const displayArtist = form.artist || null;
+  const displayAlbum  = form.album  || null;
+
+  const filteredLib = tracks.filter(t => {
+    if (!libSearch) return true;
+    const q = libSearch.toLowerCase();
+    return t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.album.toLowerCase().includes(q);
+  });
+
+  const filteredFs = fileEntries.filter(e => {
+    if (!fsSearch) return true;
+    const q = fsSearch.toLowerCase();
     return (
       e.filename.toLowerCase().includes(q) ||
       (e.title  ?? '').toLowerCase().includes(q) ||
@@ -396,10 +536,9 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
     );
   });
 
-  const isLibraryTrack = !!loadedHash;
+  const gradientFallback = 'radial-gradient(ellipse at 35% 35%, var(--bg-5) 0%, var(--bg-2) 100%)';
 
-  // ── Artwork gradient fallback ─────────────────────────────────────────────
-  const gradientFallback = 'radial-gradient(ellipse at 40% 40%, var(--bg-5) 0%, var(--bg-2) 100%)';
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
@@ -407,87 +546,87 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
       {/* ── Top pane: metadata editor ──────────────────────────────────── */}
       <div style={{ height: topH, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-        {/* Header row: artwork + file info + buttons */}
+        {/* ── Header: artwork + track identity + actions ─────────────── */}
         <div style={{
-          display: 'flex', gap: 14, padding: '12px 16px 10px',
+          display: 'flex', gap: 16, padding: '14px 18px 12px',
           borderBottom: '1px solid var(--border-0)',
-          alignItems: 'flex-start', flexShrink: 0,
+          alignItems: 'center', flexShrink: 0,
+          background: 'var(--bg-1)',
         }}>
           {/* Artwork */}
           <div style={{
-            width: 80, height: 80, flexShrink: 0, borderRadius: 8,
+            width: 96, height: 96, flexShrink: 0, borderRadius: 10,
             overflow: 'hidden', border: '1px solid var(--border-2)',
             background: artworkUrl ? undefined : gradientFallback,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
           }}>
             {artworkUrl && (
               <img src={artworkUrl} alt="cover" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             )}
           </div>
 
-          {/* File info + action buttons */}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
-            {/* Filename row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              {displayName ? (
-                <>
-                  <span style={{
-                    fontSize: 12, fontWeight: 600, color: 'var(--text-0)',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 280,
-                  }}>
-                    {displayName}
-                  </span>
+          {/* Track info + buttons */}
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {displayTitle ? (
+              <>
+                <div style={{
+                  fontSize: 16, fontWeight: 700, color: 'var(--text-0)',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  lineHeight: 1.3,
+                }}>
+                  {displayTitle}
+                </div>
+                {(displayArtist || displayAlbum) && (
+                  <div style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.3 }}>
+                    {[displayArtist, displayAlbum].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 2, flexWrap: 'wrap' }}>
                   {baseMeta && <FormatBadge fmt={baseMeta.format} />}
-                  {isLibraryTrack && (
-                    <span style={{
-                      fontSize: 9, padding: '1px 5px', borderRadius: 3,
-                      background: 'var(--accent-dim)', border: '1px solid var(--accent)',
-                      color: 'var(--accent-light)', fontFamily: "'JetBrains Mono', monospace",
-                      letterSpacing: '0.06em',
-                    }}>LIBRARY</span>
-                  )}
+                  {isLibTrack && <LibBadge />}
                   {baseMeta?.duration_ms ? (
-                    <span style={{ fontSize: 10, color: 'var(--text-2)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {fmtDuration(baseMeta.duration_ms)}
                     </span>
                   ) : null}
                   {baseMeta?.file_size ? (
-                    <span style={{ fontSize: 10, color: 'var(--text-3)' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {fmtSize(baseMeta.file_size)}
                     </span>
                   ) : null}
-                </>
-              ) : (
-                <span style={{ fontSize: 11, color: 'var(--text-3)', fontStyle: 'italic' }}>
-                  No file loaded — click a file below or select a library track
-                </span>
-              )}
-            </div>
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 13, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                Select a track from the library below, or open a file from your filesystem
+              </div>
+            )}
 
             {/* Action buttons */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
               <SmallBtn
-                icon={<FiSave size={11} />}
-                label={isSaving ? 'Saving…' : 'Save'}
+                icon={<FiSave size={12} />}
+                label={isSaving ? 'Saving…' : isDirty ? 'Save ●' : 'Save'}
                 onClick={handleSave}
-                accent disabled={!isDirty || isSaving || !displayName}
+                accent
+                disabled={!isDirty || isSaving || !displayTitle}
               />
               <SmallBtn
-                icon={<FiRotateCcw size={11} />}
+                icon={<FiRotateCcw size={12} />}
                 label="Revert"
                 onClick={handleRevert}
                 disabled={!isDirty}
               />
               {loadedPath && (
                 <SmallBtn
-                  icon={<FiPlusSquare size={11} />}
+                  icon={<FiPlusSquare size={12} />}
                   label="Ingest to Library"
                   onClick={handleIngest}
                 />
               )}
               {saveMsg && (
                 <span style={{
-                  fontSize: 10, color: saveMsg.ok ? 'var(--green)' : '#f87171',
+                  fontSize: 11, color: saveMsg.ok ? 'var(--green)' : '#f87171',
                   fontFamily: "'JetBrains Mono', monospace",
                 }}>
                   {saveMsg.ok ? '✓' : '✗'} {saveMsg.text}
@@ -497,130 +636,114 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
           </div>
         </div>
 
-        {/* Fields grid */}
+        {/* ── Field sections ──────────────────────────────────────────── */}
         <div style={{
-          flex: 1, overflowY: 'auto', padding: '10px 16px 10px',
-          display: 'flex', flexDirection: 'column', gap: 8,
+          flex: 1, overflowY: 'auto',
+          padding: '14px 18px 14px',
+          display: 'flex', flexDirection: 'column', gap: 10,
         }}>
-          {/* Row 1: Title, Artist */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <FieldInput label="Title"  value={form.title}  onChange={v => setField('title',  v)} />
-            <FieldInput label="Artist" value={form.artist} onChange={v => setField('artist', v)} />
-          </div>
 
-          {/* Row 2: Album, Album Artist */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <FieldInput label="Album"        value={form.album}        onChange={v => setField('album',        v)} />
-            <FieldInput label="Album Artist" value={form.album_artist} onChange={v => setField('album_artist', v)} />
-          </div>
+          {/* Identity */}
+          <SectionCard title="Identity">
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 14px' }}>
+              <FieldInput label="Title"        value={form.title}        onChange={v => setField('title',        v)} />
+              <FieldInput label="Artist"       value={form.artist}       onChange={v => setField('artist',       v)} />
+              <FieldInput label="Album"        value={form.album}        onChange={v => setField('album',        v)} />
+              <FieldInput label="Album Artist" value={form.album_artist} onChange={v => setField('album_artist', v)} />
+            </div>
+          </SectionCard>
 
-          {/* Row 3: Year, Track #, /, Total, Disc #, /, Total */}
-          <div style={{ display: 'grid', gridTemplateColumns: '80px 60px 60px 60px 60px', gap: 8 }}>
-            <FieldInput label="Year"  value={form.year}         onChange={v => setField('year',  v)} mono />
-            <FieldInput label="Track" value={form.track_number} onChange={v => setField('track_number', v)} mono />
-            <FieldInput label="/ Total" value={form.track_total} onChange={v => setField('track_total', v)} mono />
-            <FieldInput label="Disc"   value={form.disc_number} onChange={v => setField('disc_number',  v)} mono />
-            <FieldInput label="/ Total" value={form.disc_total} onChange={v => setField('disc_total',   v)} mono />
-          </div>
+          {/* Numbering */}
+          <SectionCard title="Numbering">
+            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr 1fr 1fr 1fr', gap: '10px 14px', alignItems: 'end' }}>
+              <FieldInput label="Year"       value={form.year}         onChange={v => setField('year',         v)} mono />
+              <FieldInput label="Track"      value={form.track_number} onChange={v => setField('track_number', v)} mono />
+              <FieldInput label="of (total)" value={form.track_total}  onChange={v => setField('track_total',  v)} mono />
+              <FieldInput label="Disc"       value={form.disc_number}  onChange={v => setField('disc_number',  v)} mono />
+              <FieldInput label="of (total)" value={form.disc_total}   onChange={v => setField('disc_total',   v)} mono />
+            </div>
+          </SectionCard>
 
-          {/* Row 4: Genre, BPM, Composer */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', gap: 8 }}>
-            <FieldInput label="Genre"    value={form.genre}    onChange={v => setField('genre',    v)} />
-            <FieldInput label="BPM"      value={form.bpm}      onChange={v => setField('bpm',      v)} mono />
-            <FieldInput label="Composer" value={form.composer} onChange={v => setField('composer', v)} />
-          </div>
+          {/* Detail */}
+          <SectionCard title="Detail">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', gap: '10px 14px' }}>
+                <FieldInput label="Genre"    value={form.genre}    onChange={v => setField('genre',    v)} />
+                <FieldInput label="BPM"      value={form.bpm}      onChange={v => setField('bpm',      v)} mono />
+                <FieldInput label="Composer" value={form.composer} onChange={v => setField('composer', v)} />
+              </div>
 
-          {/* Comment */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <label style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
-              Comment
-            </label>
-            <input
-              value={form.comment}
-              onChange={e => setField('comment', e.target.value)}
-              style={{
-                background: 'var(--bg-2)', border: '1px solid var(--border-1)',
-                borderRadius: 4, padding: '4px 7px',
-                fontSize: 12, color: 'var(--text-0)',
-                fontFamily: "'Outfit', sans-serif", outline: 'none', width: '100%',
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
-              onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; }}
-            />
-          </div>
+              <div>
+                <label style={LABEL_STYLE}>Comment</label>
+                <input
+                  value={form.comment}
+                  onChange={e => setField('comment', e.target.value)}
+                  style={INPUT_STYLE}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-dim)'; }}
+                  onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; e.currentTarget.style.boxShadow = 'none'; }}
+                />
+              </div>
 
-          {/* Lyrics */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minHeight: 70 }}>
-            <label style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
-              Lyrics
-            </label>
-            <textarea
-              value={form.lyrics}
-              onChange={e => setField('lyrics', e.target.value)}
-              rows={3}
-              style={{
-                background: 'var(--bg-2)', border: '1px solid var(--border-1)',
-                borderRadius: 4, padding: '5px 7px',
-                fontSize: 11, color: 'var(--text-1)',
-                fontFamily: "'JetBrains Mono', monospace",
-                outline: 'none', resize: 'vertical', width: '100%',
-                lineHeight: 1.55,
-              }}
-              onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
-              onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; }}
-            />
-          </div>
+              <div>
+                <label style={LABEL_STYLE}>Lyrics</label>
+                <textarea
+                  value={form.lyrics}
+                  onChange={e => setField('lyrics', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...INPUT_STYLE,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 11,
+                    resize: 'vertical',
+                    lineHeight: 1.6,
+                    color: 'var(--text-1)',
+                  }}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-dim)'; }}
+                  onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; e.currentTarget.style.boxShadow = 'none'; }}
+                />
+              </div>
+            </div>
+          </SectionCard>
         </div>
       </div>
 
       {/* ── Resize handle ─────────────────────────────────────────────── */}
-      <ResizeHandle direction="v" onDelta={d => setTopH(h => Math.max(180, Math.min(600, h + d)))} />
+      <ResizeHandle direction="v" onDelta={d => setTopH(h => Math.max(200, Math.min(640, h + d)))} />
 
-      {/* ── Bottom pane: file browser / downloader ─────────────────────── */}
+      {/* ── Bottom pane ────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
 
-        {/* Tab bar + path */}
+        {/* Tab bar + filesystem path input */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 0,
+          display: 'flex', alignItems: 'center',
           borderBottom: '1px solid var(--border-0)',
           background: 'var(--bg-1)',
-          flexShrink: 0, height: 34,
+          flexShrink: 0, height: 36,
         }}>
-          {/* Tabs */}
-          {(['files', 'download'] as BottomTab[]).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setBottomTab(tab)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                padding: '0 14px', height: '100%',
-                background: bottomTab === tab ? 'var(--bg-2)' : 'transparent',
-                border: 'none', borderBottom: bottomTab === tab ? '2px solid var(--accent)' : '2px solid transparent',
-                color: bottomTab === tab ? 'var(--text-0)' : 'var(--text-2)',
-                fontSize: 11, fontWeight: bottomTab === tab ? 600 : 400,
-                cursor: 'pointer', flexShrink: 0,
-                fontFamily: "'Outfit', sans-serif",
-              }}
-            >
-              {tab === 'files' ? <IcoEditor size={11} /> : <IcoDownload size={11} />}
-              {tab === 'files' ? 'Files' : 'Download'}
-            </button>
-          ))}
+          <TabBtn active={bottomTab === 'library'}    onClick={() => setBottomTab('library')}>
+            <IcoLibrary size={12} /> Library
+          </TabBtn>
+          <TabBtn active={bottomTab === 'filesystem'} onClick={() => setBottomTab('filesystem')}>
+            <IcoEditor size={12} /> Filesystem
+          </TabBtn>
+          <TabBtn active={bottomTab === 'download'}   onClick={() => setBottomTab('download')}>
+            <IcoDownload size={12} /> Download
+          </TabBtn>
 
-          {/* Path bar (files tab only) */}
-          {bottomTab === 'files' && (
+          {/* Path bar — only visible on Filesystem tab */}
+          {bottomTab === 'filesystem' && (
             <>
-              <div style={{ width: 1, height: 16, background: 'var(--border-1)', margin: '0 8px' }} />
+              <div style={{ width: 1, height: 16, background: 'var(--border-1)', margin: '0 8px', flexShrink: 0 }} />
               <form
                 onSubmit={e => { e.preventDefault(); scanDir(pathInput); }}
-                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, paddingRight: 10 }}
+                style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6, paddingRight: 12 }}
               >
                 <input
                   value={pathInput}
                   onChange={e => setPathInput(e.target.value)}
                   style={{
                     flex: 1, background: 'var(--bg-2)', border: '1px solid var(--border-1)',
-                    borderRadius: 4, padding: '3px 7px',
+                    borderRadius: 4, padding: '4px 8px',
                     fontSize: 11, color: 'var(--text-1)',
                     fontFamily: "'JetBrains Mono', monospace", outline: 'none',
                   }}
@@ -630,11 +753,11 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
                 <button
                   type="submit"
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    padding: '3px 9px', background: 'var(--bg-4)',
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '4px 10px', background: 'var(--bg-4)',
                     border: '1px solid var(--border-2)', borderRadius: 4,
                     fontSize: 11, color: 'var(--text-1)', cursor: 'pointer',
-                    fontFamily: "'Outfit', sans-serif",
+                    fontFamily: "'Outfit', sans-serif", flexShrink: 0,
                   }}
                 >
                   <FiFolder size={11} /> Browse
@@ -644,69 +767,103 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
           )}
         </div>
 
-        {/* ── FILES TAB ──────────────────────────────────────────────── */}
-        {bottomTab === 'files' && (
+        {/* ── LIBRARY TAB ────────────────────────────────────────────── */}
+        {bottomTab === 'library' && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {/* Search bar */}
-            <div style={{
-              padding: '7px 12px', borderBottom: '1px solid var(--border-0)',
-              display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0,
-              background: 'var(--bg-1)',
-            }}>
-              <FiSearch size={12} style={{ color: 'var(--text-2)', flexShrink: 0 }} />
-              <input
-                value={fileSearch}
-                onChange={e => setFileSearch(e.target.value)}
-                placeholder="Search files…"
-                style={{
-                  flex: 1, background: 'transparent', border: 'none',
-                  fontSize: 11, color: 'var(--text-1)', outline: 'none',
-                  fontFamily: "'Outfit', sans-serif",
-                }}
-              />
-              {fileSearch && (
-                <button
-                  onClick={() => setFileSearch('')}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', display: 'flex' }}
-                >
-                  <IcoClose size={11} />
-                </button>
+            <SearchBar value={libSearch} onChange={setLibSearch} placeholder="Search library…" />
+            <ColHeaders cols={[
+              { label: '',        width: 28 },
+              { label: 'Title',   width: '1fr' },
+              { label: 'Artist',  width: 150 },
+              { label: 'Album',   width: 150 },
+              { label: 'Dur',     width: 50 },
+            ]} />
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {filteredLib.length === 0 && (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-3)', fontSize: 12, fontStyle: 'italic' }}>
+                  {libSearch ? 'No tracks match your search' : 'No tracks in library yet — ingest some files to get started'}
+                </div>
               )}
+              {filteredLib.map((t, i) => {
+                const isActive = loadedHash === t.hash;
+                const thumb = artworkUrls[t.hash];
+                return (
+                  <div
+                    key={t.hash}
+                    onClick={() => loadFromHash(t.hash)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '28px 1fr 150px 150px 50px',
+                      padding: '0 14px', height: 36,
+                      alignItems: 'center', gap: 8,
+                      background: isActive ? 'var(--bg-4)' : i % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-1)',
+                      cursor: 'pointer',
+                      borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
+                    }}
+                    onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--bg-3)'; }}
+                    onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-1)'; }}
+                  >
+                    {/* Thumbnail */}
+                    <div style={{
+                      width: 22, height: 22, borderRadius: 3, flexShrink: 0, overflow: 'hidden',
+                      background: thumb ? undefined : gradientFallback,
+                      border: '1px solid var(--border-1)',
+                    }}>
+                      {thumb && <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                    </div>
+                    <span style={{ fontSize: 12, color: isActive ? 'var(--text-0)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.title}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.artist}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.album}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
+                      {fmtDuration(t.duration_ms)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
+          </div>
+        )}
 
-            {/* Column headers */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '24px 1fr 52px 130px 130px 52px 62px',
-              padding: '0 12px',
-              height: 26, flexShrink: 0,
-              borderBottom: '1px solid var(--border-0)',
-              background: 'var(--bg-0)',
-              alignItems: 'center', gap: 6,
-            }}>
-              {['', 'Filename', 'Format', 'Artist', 'Album', 'Dur', 'Size'].map((h, i) => (
-                <span key={i} style={{
-                  fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.07em',
-                  color: 'var(--text-3)',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{h}</span>
-              ))}
-            </div>
-
-            {/* File rows */}
+        {/* ── FILESYSTEM TAB ─────────────────────────────────────────── */}
+        {bottomTab === 'filesystem' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <SearchBar value={fsSearch} onChange={setFsSearch} placeholder="Search files…" />
+            <ColHeaders cols={[
+              { label: '',         width: 28 },
+              { label: 'Filename', width: '1fr' },
+              { label: 'Format',   width: 60 },
+              { label: 'Artist',   width: 130 },
+              { label: 'Album',    width: 130 },
+              { label: 'Dur',      width: 50 },
+              { label: 'Size',     width: 64 },
+            ]} />
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {isScanning && (
-                <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 11 }}>
-                  Scanning…
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>Scanning…</div>
+              )}
+              {!isScanning && fileEntries.length === 0 && !fsSearch && (
+                <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                    No audio files found in {scanPath || 'selected directory'}
+                  </span>
+                  <SmallBtn icon={<FiFolder size={11} />} label="Browse a folder" onClick={() => {
+                    const next = pathInput || scanPath;
+                    if (next) scanDir(next);
+                  }} />
                 </div>
               )}
-              {!isScanning && filteredFiles.length === 0 && (
-                <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 11, fontStyle: 'italic' }}>
-                  {fileSearch ? 'No files match your search' : `No audio files found in ${scanPath}`}
+              {!isScanning && filteredFs.length === 0 && fsSearch && (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: 12, fontStyle: 'italic' }}>
+                  No files match "{fsSearch}"
                 </div>
               )}
-              {!isScanning && filteredFiles.map((entry, i) => {
+              {!isScanning && filteredFs.map((entry, i) => {
                 const isActive = loadedPath === entry.path;
                 return (
                   <div
@@ -714,54 +871,37 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
                     onClick={() => loadFromPath(entry.path)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '24px 1fr 52px 130px 130px 52px 62px',
-                      padding: '0 12px',
-                      height: 32, alignItems: 'center', gap: 6,
-                      background: isActive ? 'var(--bg-4)' : i % 2 === 0 ? 'var(--bg-1)' : 'var(--bg-2)',
+                      gridTemplateColumns: '28px 1fr 60px 130px 130px 50px 64px',
+                      padding: '0 14px', height: 34,
+                      alignItems: 'center', gap: 8,
+                      background: isActive ? 'var(--bg-4)' : i % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-1)',
                       cursor: 'pointer',
                       borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
                     }}
                     onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = 'var(--bg-3)'; }}
-                    onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? 'var(--bg-1)' : 'var(--bg-2)'; }}
+                    onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLElement).style.background = i % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-1)'; }}
                   >
-                    {/* Icon */}
                     <div style={{
-                      width: 18, height: 18, borderRadius: 3, flexShrink: 0,
+                      width: 22, height: 22, borderRadius: 3, flexShrink: 0,
                       background: 'var(--bg-4)', border: '1px solid var(--border-2)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
-                      <IcoEditor size={9} style={{ color: 'var(--accent-dim)' }} />
+                      <IcoEditor size={10} style={{ color: 'var(--accent-dim)', opacity: 0.7 }} />
                     </div>
-                    {/* Filename */}
-                    <span style={{
-                      fontSize: 11, color: isActive ? 'var(--text-0)' : 'var(--text-1)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}>
+                    <span style={{ fontSize: 11, color: isActive ? 'var(--text-0)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'JetBrains Mono', monospace" }}>
                       {entry.filename}
                     </span>
-                    {/* Format */}
-                    <div><FormatBadge fmt={entry.format} /></div>
-                    {/* Artist */}
-                    <span style={{
-                      fontSize: 10, color: 'var(--text-2)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
+                    <div style={{ display: 'flex' }}><FormatBadge fmt={entry.format} /></div>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {entry.artist ?? '—'}
                     </span>
-                    {/* Album */}
-                    <span style={{
-                      fontSize: 10, color: 'var(--text-2)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {entry.album ?? '—'}
                     </span>
-                    {/* Duration */}
-                    <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {fmtDuration(entry.duration_ms)}
                     </span>
-                    {/* Size */}
-                    <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {fmtSize(entry.size_bytes)}
                     </span>
                   </div>
@@ -773,32 +913,25 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
 
         {/* ── DOWNLOAD TAB ───────────────────────────────────────────── */}
         {bottomTab === 'download' && (
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px' }}>
-            {/* URL row */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 14 }}>
-              <label style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
-                URL
-              </label>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '22px 22px' }}>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
+              <label style={LABEL_STYLE}>URL</label>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <input
                   value={dlUrl}
                   onChange={e => setDlUrl(e.target.value)}
-                  placeholder="Paste YouTube, SoundCloud, or Bandcamp URL…"
-                  style={{
-                    flex: 1, background: 'var(--bg-2)', border: '1px solid var(--border-1)',
-                    borderRadius: 5, padding: '6px 10px',
-                    fontSize: 12, color: 'var(--text-0)',
-                    fontFamily: "'Outfit', sans-serif", outline: 'none',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
-                  onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; }}
+                  placeholder="Paste a YouTube, SoundCloud, or Bandcamp URL…"
+                  style={{ ...INPUT_STYLE, flex: 1 }}
+                  onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-dim)'; }}
+                  onBlur={e  => { e.currentTarget.style.borderColor = 'var(--border-1)'; e.currentTarget.style.boxShadow = 'none'; }}
                 />
                 {source && (
                   <span style={{
-                    padding: '4px 10px', borderRadius: 5,
+                    padding: '5px 12px', borderRadius: 5,
                     background: 'var(--bg-4)', border: '1px solid var(--border-2)',
-                    fontSize: 11, color: source.color, flexShrink: 0,
-                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12, color: source.color, flexShrink: 0,
+                    fontFamily: "'JetBrains Mono', monospace", fontWeight: 600,
                   }}>
                     {source.label}
                   </span>
@@ -806,23 +939,20 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
               </div>
             </div>
 
-            {/* Format selector */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
-              <label style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
-                Format
-              </label>
-              <div style={{ display: 'flex', gap: 7 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 20 }}>
+              <label style={LABEL_STYLE}>Format</label>
+              <div style={{ display: 'flex', gap: 8 }}>
                 {(['flac', 'mp3', 'ogg'] as DownloadFmt[]).map(fmt => (
                   <button
                     key={fmt}
                     onClick={() => setDlFmt(fmt)}
                     style={{
-                      padding: '5px 14px', borderRadius: 5,
+                      padding: '6px 16px', borderRadius: 5,
                       background: dlFmt === fmt ? 'var(--accent-dim)' : 'var(--bg-3)',
                       border: `1px solid ${dlFmt === fmt ? 'var(--accent)' : 'var(--border-1)'}`,
                       color: dlFmt === fmt ? 'var(--accent-light)' : 'var(--text-2)',
-                      fontSize: 11, cursor: 'pointer',
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: 12, cursor: 'pointer', fontWeight: dlFmt === fmt ? 600 : 400,
+                      fontFamily: "'Outfit', sans-serif",
                     }}
                   >
                     {fmt === 'mp3' ? 'MP3 320k' : fmt.toUpperCase()}
@@ -831,39 +961,36 @@ export default function EditorView({ track, artworkUrls = {}, onTrackUpdated }: 
               </div>
             </div>
 
-            {/* Spotify notice */}
             {source?.label === 'Spotify' && (
               <div style={{
-                padding: '10px 14px', borderRadius: 6,
+                padding: '12px 16px', borderRadius: 7, marginBottom: 18,
                 background: 'var(--bg-3)', border: '1px solid var(--border-2)',
-                fontSize: 11, color: 'var(--text-2)',
-                marginBottom: 14,
+                fontSize: 12, color: 'var(--text-2)',
               }}>
                 <span style={{ color: '#1db954', fontWeight: 600 }}>Spotify</span> requires the librespot bridge — coming in P2.
               </div>
             )}
 
-            {/* Download button */}
             <button
               disabled
               title="yt-dlp backend not yet implemented — coming in P1"
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                padding: '8px 20px', borderRadius: 6,
+                display: 'inline-flex', alignItems: 'center', gap: 8,
+                padding: '9px 22px', borderRadius: 6,
                 background: 'var(--accent-dim)', border: '1px solid var(--accent)',
                 color: 'var(--accent-light)', fontSize: 13, fontWeight: 600,
-                cursor: 'not-allowed', opacity: 0.55,
+                cursor: 'not-allowed', opacity: 0.5,
                 fontFamily: "'Outfit', sans-serif",
               }}
             >
-              <IcoDownload size={14} />
-              Download
+              <IcoDownload size={14} /> Download
             </button>
-            <p style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 10, fontFamily: "'JetBrains Mono', monospace" }}>
-              yt-dlp backend · coming in P1 — on completion, track is auto-ingested into your library
+            <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+              yt-dlp backend — P1. Completed downloads are auto-ingested into your library.
             </p>
           </div>
         )}
+
       </div>
     </div>
   );
