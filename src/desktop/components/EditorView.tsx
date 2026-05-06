@@ -375,6 +375,8 @@ export default function EditorView({
   const [bottomH,        setBottomH]        = useState(240);
   // Tracks whether we've done the first filesystem scan so we only fire once
   const hasScannedFsRef = useRef(false);
+  // Counter to detect stale async metadata loads — each new load call gets a unique id
+  const loadIdRef = useRef(0);
 
   // ── Library tab search
   const [libSearch, setLibSearch] = useState('');
@@ -384,6 +386,7 @@ export default function EditorView({
   const [pathInput,   setPathInput]   = useState('');
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [isScanning,  setIsScanning]  = useState(false);
+  const [scanError,   setScanError]   = useState<string | null>(null);
   const [fsSearch,    setFsSearch]    = useState('');
 
   // ── Download
@@ -395,9 +398,9 @@ export default function EditorView({
   useEffect(() => {
     homeDir()
       .then(home => {
-        const music = home.replace(/\/$/, '') + '/Music';
-        setScanPath(music);
-        setPathInput(music);
+        const h = home.replace(/\/$/, '');
+        setScanPath(h);
+        setPathInput(h);
       })
       .catch(() => {
         setScanPath('/home');
@@ -417,36 +420,37 @@ export default function EditorView({
   // ── Auto-load when the track prop changes ────────────────────────────────
   useEffect(() => {
     if (!track?.hash) return;
-    loadFromHash(track.hash, track);
+    loadFromHash(track.hash);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [track?.hash]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   // prefill: optional Track for instant badge + basic fields before the invoke resolves
-  const loadFromHash = useCallback(async (hash: string, prefill?: Pick<Track, 'title' | 'artist' | 'album'>) => {
+  const loadFromHash = useCallback(async (hash: string) => {
     if (!hash) return;
-    // Set the badge and basic fields immediately — don't wait for the invoke
+    const myId = ++loadIdRef.current;
+    // Set the badge immediately — header falls back to currentTrack while the invoke is in-flight
     setLoadedHash(hash);
     setLoadedPath(null);
     setIsDirty(false);
-    if (prefill) {
-      setForm(f => ({ ...f, title: prefill.title, artist: prefill.artist, album: prefill.album }));
-    }
     try {
       const meta = await invoke<AudioMetadata>('library_read_metadata', { hash });
+      if (loadIdRef.current !== myId) return; // superseded by a newer load
       const f = metaToForm(meta);
       setBaseMeta(meta);
       setForm(f);
       setOriginalForm(f);
     } catch (err) {
-      console.error('library_read_metadata failed:', err);
+      if (loadIdRef.current === myId) console.error('library_read_metadata failed:', err);
     }
   }, []);
 
   const loadFromPath = useCallback(async (path: string) => {
+    const myId = ++loadIdRef.current;
     try {
       const meta = await invoke<AudioMetadata>('file_read_metadata', { path });
+      if (loadIdRef.current !== myId) return;
       const f = metaToForm(meta);
       setBaseMeta(meta);
       setForm(f);
@@ -455,20 +459,22 @@ export default function EditorView({
       setLoadedHash(null);
       setIsDirty(false);
     } catch (err) {
-      console.error('file_read_metadata failed:', err);
+      if (loadIdRef.current === myId) console.error('file_read_metadata failed:', err);
     }
   }, []);
 
   const scanDir = useCallback(async (path: string) => {
     if (!path) return;
     setIsScanning(true);
+    setScanError(null);
     try {
       const entries = await invoke<FileEntry[]>('file_scan_directory', { path });
       setFileEntries(entries);
       setScanPath(path);
       setPathInput(path);
-    } catch {
+    } catch (e) {
       setFileEntries([]);
+      setScanError(String(e));
     } finally {
       setIsScanning(false);
     }
@@ -530,12 +536,14 @@ export default function EditorView({
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
-  const artworkUrl = loadedHash ? (artworkUrls[loadedHash] ?? null) : null;
-  const isLibTrack = !!loadedHash;
+  const artworkUrl    = loadedHash ? (artworkUrls[loadedHash] ?? null) : null;
+  const isLibTrack    = !!loadedHash;
+  const currentTrack  = loadedHash ? tracks.find(t => t.hash === loadedHash) ?? null : null;
 
-  const displayTitle  = form.title  || (loadedPath ? (loadedPath.split('/').pop() ?? '') : null);
-  const displayArtist = form.artist || null;
-  const displayAlbum  = form.album  || null;
+  // Header display values: fall back to library DB name / filename when no tag is set in the file
+  const displayTitle  = form.title  || currentTrack?.title  || (loadedPath ? (loadedPath.split('/').pop() ?? '') : null);
+  const displayArtist = form.artist || currentTrack?.artist || null;
+  const displayAlbum  = form.album  || currentTrack?.album  || null;
 
   const filteredLib = tracks.filter(t => {
     if (!libSearch) return true;
@@ -833,7 +841,7 @@ export default function EditorView({
                 return (
                   <div
                     key={t.hash}
-                    onClick={() => loadFromHash(t.hash, t)}
+                    onClick={() => loadFromHash(t.hash)}
                     style={{
                       display: 'grid',
                       gridTemplateColumns: '28px 1fr 150px 150px 50px',
@@ -892,9 +900,15 @@ export default function EditorView({
               )}
               {!isScanning && fileEntries.length === 0 && !fsSearch && (
                 <div style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
-                    No audio files found in {scanPath || 'selected directory'}
-                  </span>
+                  {scanError ? (
+                    <span style={{ fontSize: 12, color: '#f87171', fontFamily: "'JetBrains Mono', monospace", textAlign: 'center', maxWidth: 420 }}>
+                      {scanError}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>
+                      No audio files found in {scanPath || 'selected directory'}
+                    </span>
+                  )}
                   <SmallBtn icon={<FiFolder size={11} />} label="Browse a folder" onClick={() => {
                     const next = pathInput || scanPath;
                     if (next) scanDir(next);
