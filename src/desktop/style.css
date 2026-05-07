@@ -200,3 +200,4 @@
   50%       { opacity: 0.5; }
 }
 .tl-context-menu { animation: fadeInScale 0.12s ease; }
+div:hover > .lib-delete-btn { opacity: 1 !important; }

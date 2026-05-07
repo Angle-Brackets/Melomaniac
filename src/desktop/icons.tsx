@@ -4,6 +4,7 @@
 export {
   FiMenu        as IcoMenu,
   FiDisc        as IcoLibrary,
+  FiMusic       as IcoMusicLib,
   FiClock       as IcoHistory,
   FiGitBranch   as IcoGit,
   FiDownload    as IcoDownload,

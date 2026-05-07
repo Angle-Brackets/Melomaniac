@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Playlist } from '../data';
 import {
-  IcoMenu, IcoLibrary, IcoHistory, IcoGit, IcoSync,
+  IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoGit, IcoSync,
   IcoEditor, IcoDownload, IcoMetrics, IcoSettings, IcoPin, IcoChevron,
 } from '../icons';
 
@@ -278,7 +278,8 @@ export default function LibrarySidebar({
         alignItems: 'center', padding: '8px 0', gap: 4, flexShrink: 0,
       }}>
         <RailIcon icon={<IcoMenu size={14} />}     title={expanded ? 'Collapse sidebar' : 'Expand sidebar'} onClick={onToggleExpanded} />
-        <RailIcon icon={<IcoLibrary size={14} />}  active={activeRailItem === 'library'} onClick={() => onRailChange('library')} title="Library — browse playlists & tracks" />
+        <RailIcon icon={<IcoLibrary size={14} />}   active={activeRailItem === 'playlists'} onClick={() => onRailChange('playlists')} title="Playlists — browse playlists & tracks" />
+        <RailIcon icon={<IcoMusicLib size={14} />}  active={activeRailItem === 'library'}   onClick={() => onRailChange('library')}   title="Library — all tracks on this machine" />
         <RailIcon icon={<IcoHistory size={14} />}  active={activeRailItem === 'history'} onClick={() => onRailChange('history')} title="Listening History — play log & skip stats" />
         <RailIcon icon={<IcoGit size={14} />}      active={activeRailItem === 'git'}     onClick={() => onRailChange('git')}     title="Commit Graph — playlist version history" />
         <RailIcon icon={<IcoSync size={14} />}     active={activeRailItem === 'sync'}    onClick={() => onRailChange('sync')}    title="Sync — push/pull with upstream remote" />
@@ -298,7 +299,7 @@ export default function LibrarySidebar({
         flexShrink: 0,
       }}>
         <div className="px-3 py-2 text-[10px] font-bold tracking-widest text-mm-t2 uppercase border-b border-mm-b0 shrink-0 whitespace-nowrap">
-          Library
+          Playlists
         </div>
 
         <div className="flex-1 overflow-y-auto styled-scroll">

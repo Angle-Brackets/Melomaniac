@@ -5,7 +5,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import type { Track } from '../data';
 import ResizeHandle from './ResizeHandle';
 import ArtworkModal from './ArtworkModal';
-import { IcoEditor, IcoDownload, IcoClose, IcoLibrary } from '../icons';
+import { IcoEditor, IcoDownload, IcoClose, IcoMusicLib } from '../icons';
 import { FiSave, FiRotateCcw, FiPlusSquare, FiFolder, FiSearch, FiEdit2 } from 'react-icons/fi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -72,6 +72,7 @@ export interface EditorViewProps {
   artworkUrls?:       Record<string, string>;
   onTrackUpdated?:    (oldHash: string, newHash: string, patch: TrackPatch) => void;
   onArtworkUpdated?:  (affectedHashes: string[], newUrl: string) => void;
+  onTrackDeleted?:    (hash: string) => void;
 }
 
 type BottomTab  = 'library' | 'filesystem' | 'download';
@@ -443,7 +444,7 @@ function DownloadRow({ job, onCancel }: { job: DownloadJob; onCancel: () => void
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function EditorView({
-  track, tracks = [], artworkUrls = {}, onTrackUpdated, onArtworkUpdated,
+  track, tracks = [], artworkUrls = {}, onTrackUpdated, onArtworkUpdated, onTrackDeleted,
 }: EditorViewProps) {
 
   // ── Metadata editor state
@@ -469,9 +470,10 @@ export default function EditorView({
   // Counter to detect stale async metadata loads — each new load call gets a unique id
   const loadIdRef = useRef(0);
 
-  // ── Library tab search + badges
-  const [libSearch,   setLibSearch]   = useState('');
-  const [strayHashes, setStrayHashes] = useState<Set<string>>(new Set());
+  // ── Library tab search + badges + delete
+  const [libSearch,       setLibSearch]       = useState('');
+  const [strayHashes,     setStrayHashes]     = useState<Set<string>>(new Set());
+  const [pendingDelete,   setPendingDelete]   = useState<string | null>(null);
   const nowSecs = Date.now() / 1000;
 
   useEffect(() => {
@@ -903,7 +905,7 @@ export default function EditorView({
           flexShrink: 0, height: 37,
         }}>
           <TabBtn active={bottomTab === 'library'}    onClick={() => { setBottomTab('library');    setBottomExpanded(true); }}>
-            <IcoLibrary size={12} /> Library
+            <IcoMusicLib size={12} /> Library
           </TabBtn>
           <TabBtn active={bottomTab === 'filesystem'} onClick={() => { setBottomTab('filesystem'); setBottomExpanded(true); }}>
             <IcoEditor size={12} /> Filesystem
@@ -982,6 +984,7 @@ export default function EditorView({
               { label: 'Artist',  width: 150 },
               { label: 'Album',   width: 150 },
               { label: 'Dur',     width: 50 },
+              { label: '',        width: 28 },
             ]} />
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {filteredLib.length === 0 && (
@@ -998,7 +1001,7 @@ export default function EditorView({
                     onClick={() => loadFromHash(t.hash)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: '28px 1fr 150px 150px 50px',
+                      gridTemplateColumns: '28px 1fr 150px 150px 50px 28px',
                       padding: '0 14px', height: 36,
                       alignItems: 'center', gap: 8,
                       background: isActive ? 'var(--bg-4)' : i % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-1)',
@@ -1044,6 +1047,29 @@ export default function EditorView({
                     <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
                       {fmtDuration(t.duration_ms)}
                     </span>
+                    <button
+                      title={pendingDelete === t.hash ? 'Click again to confirm delete' : 'Remove from library'}
+                      onClick={async e => {
+                        e.stopPropagation();
+                        if (pendingDelete === t.hash) {
+                          await invoke('library_remove_track', { hash: t.hash });
+                          onTrackDeleted?.(t.hash);
+                          setPendingDelete(null);
+                        } else {
+                          setPendingDelete(t.hash);
+                          setTimeout(() => setPendingDelete(p => p === t.hash ? null : p), 2500);
+                        }
+                      }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: pendingDelete === t.hash ? '#f87171' : 'var(--text-3)',
+                        opacity: pendingDelete === t.hash ? 1 : 0,
+                        fontSize: 13, padding: 0, width: 20, height: 20, borderRadius: 3,
+                        transition: 'color 0.15s, opacity 0.15s',
+                      }}
+                      className="lib-delete-btn"
+                    >✕</button>
                   </div>
                 );
               })}

@@ -16,6 +16,7 @@ use tauri::{Emitter, Manager};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<AudioEvent>();
 
@@ -113,6 +114,8 @@ pub fn run() {
             audio::track_play,
             storage::library_get_all,
             storage::library_set_favorite,
+            storage::library_import_folder,
+            storage::library_remove_track,
             storage::track_ingest_files,
             storage::track_get_artwork,
             storage::playlist_get_all,
@@ -122,6 +125,7 @@ pub fn run() {
             storage::branch_commit,
             storage::branch_get_history,
             storage::get_recent_commits,
+            storage::branch_append_tracks,
             editor::file_read_metadata,
             editor::file_write_metadata,
             editor::file_scan_directory,

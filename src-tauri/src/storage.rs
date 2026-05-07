@@ -52,6 +52,40 @@ pub async fn track_ingest_files(
     Ok(results)
 }
 
+/// Recursively scan a directory for audio files and ingest all of them.
+/// Returns the newly ingested (or already-present) TrackRecords.
+#[tauri::command]
+pub async fn library_import_folder(
+    folder: String,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<TrackRecord>, String> {
+    const AUDIO_EXTS: &[&str] = &["mp3", "flac", "ogg", "wav", "m4a", "aac", "opus"];
+    let mut paths: Vec<PathBuf> = Vec::new();
+
+    fn walk(dir: &std::path::Path, exts: &[&str], out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                walk(&p, exts, out);
+            } else if p.extension().and_then(|e| e.to_str()).map(|e| exts.contains(&e.to_ascii_lowercase().as_str())).unwrap_or(false) {
+                out.push(p);
+            }
+        }
+    }
+
+    walk(std::path::Path::new(&folder), AUDIO_EXTS, &mut paths);
+
+    let mut results = Vec::with_capacity(paths.len());
+    for p in &paths {
+        match melomaniac_storage::ingest::ingest_file(p, &storage.cas, &storage.db).await {
+            Ok(record) => results.push(record),
+            Err(e) => eprintln!("[import] skipped {}: {e}", p.display()),
+        }
+    }
+    Ok(results)
+}
+
 #[tauri::command]
 pub async fn library_set_favorite(
     hash: String,
@@ -63,6 +97,15 @@ pub async fn library_set_favorite(
         .set_favorited(&hash, favorited)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Remove a track from the library DB (the CAS blob is left intact for dedup safety).
+#[tauri::command]
+pub async fn library_remove_track(
+    hash: String,
+    storage: State<'_, StorageState>,
+) -> Result<(), String> {
+    storage.db.remove_track(&hash).await.map_err(|e| e.to_string())
 }
 
 /// Return the raw artwork bytes (JPEG or PNG) for a track.
@@ -248,6 +291,83 @@ pub async fn branch_commit(
     db.update_branch_head(&playlist_id, &branch_name, &commit_hash)
         .await
         .map_err(|e| e.to_string())?;
+
+    Ok(commit_hash)
+}
+
+/// Append tracks to a branch, deduplicating against existing entries, and commit.
+#[tauri::command]
+pub async fn branch_append_tracks(
+    playlist_id: String,
+    branch_name: String,
+    hashes:      Vec<String>,
+    storage:     State<'_, StorageState>,
+) -> Result<String, String> {
+    let db  = &storage.db;
+    let cas = &storage.cas;
+
+    // Load current tree (empty list if branch has no commits yet)
+    let existing: Vec<serde_json::Value> = match db
+        .get_branch(&playlist_id, &branch_name)
+        .await
+        .map_err(|e| e.to_string())?
+        .and_then(|b| b.head_commit)
+    {
+        None => vec![],
+        Some(commit_hash) => {
+            let commit_bytes = cas.read_blob(&commit_hash).await.map_err(|e| e.to_string())?;
+            let commit: serde_json::Value = serde_json::from_slice(&commit_bytes).map_err(|e| e.to_string())?;
+            let tree_hash = commit["tree_hash"].as_str().ok_or("missing tree_hash")?;
+            let tree_bytes = cas.read_blob(tree_hash).await.map_err(|e| e.to_string())?;
+            let tree: serde_json::Value = serde_json::from_slice(&tree_bytes).map_err(|e| e.to_string())?;
+            tree["tracks"].as_array().cloned().unwrap_or_default()
+        }
+    };
+
+    // Collect existing hashes to deduplicate
+    let existing_hashes: std::collections::HashSet<String> = existing
+        .iter()
+        .filter_map(|t| t["hash"].as_str().map(str::to_string))
+        .collect();
+
+    let mut tracks = existing;
+    for hash in &hashes {
+        if !existing_hashes.contains(hash) {
+            tracks.push(serde_json::json!({ "hash": hash, "ab_start_ms": null, "ab_end_ms": null }));
+        }
+    }
+
+    let tree_json = serde_json::json!({ "tracks": tracks }).to_string();
+    let n = hashes.len();
+    let message = Some(format!("Add {} track{}", n, if n == 1 { "" } else { "s" }));
+
+    // Reuse branch_commit logic directly
+    let tree_hash = cas.write_blob(tree_json.as_bytes()).await.map_err(|e| e.to_string())?;
+    let parent_hash = db.get_branch(&playlist_id, &branch_name)
+        .await.map_err(|e| e.to_string())?
+        .and_then(|b| b.head_commit);
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let commit_body = serde_json::json!({
+        "tree_hash": &tree_hash,
+        "parent":    &parent_hash,
+        "timestamp": timestamp,
+        "device_id": "desktop",
+        "message":   &message,
+    }).to_string();
+
+    let commit_hash = cas.write_blob(commit_body.as_bytes()).await.map_err(|e| e.to_string())?;
+    let record = melomaniac_storage::CommitRecord {
+        hash: commit_hash.clone(), tree_hash, timestamp,
+        device_id: "desktop".into(), message,
+    };
+    let parents: Vec<&str> = parent_hash.iter().map(String::as_str).collect();
+    db.insert_commit(&record, &parents).await.map_err(|e| e.to_string())?;
+    db.update_branch_head(&playlist_id, &branch_name, &commit_hash).await.map_err(|e| e.to_string())?;
 
     Ok(commit_hash)
 }

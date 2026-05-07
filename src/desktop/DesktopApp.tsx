@@ -22,6 +22,7 @@ import BranchModal from './components/BranchModal';
 import SettingsModal from './components/SettingsModal';
 import PlaylistSettingsPanel from './components/PlaylistSettingsPanel';
 import EditorView from './components/EditorView';
+import LibraryView from './components/LibraryView';
 import ResizeHandle from './components/ResizeHandle';
 import WindowResizeEdges from './components/WindowResizeEdges';
 
@@ -63,7 +64,7 @@ export default function DesktopApp() {
   const [showSettings,     setShowSettings]      = useState(false);
   const [showBranchModal,  setShowBranchModal]   = useState(false);
   const [activePlaylistId, setActivePlaylistId]  = useState(2);
-  const [railItem,         setRailItem]          = useState('library');
+  const [railItem,         setRailItem]          = useState('playlists');
   const [activeTab,        setActiveTab]         = useState('Tracks');
   const [pinnedIds,        setPinnedIds]         = useState(new Set([2]));
   const [trackOrder,       setTrackOrder]        = useState<Track[]>(TRACKS);
@@ -358,7 +359,13 @@ export default function DesktopApp() {
 
           {/* Center column */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
-            {railItem === 'editor' ? (
+            {railItem === 'library' ? (
+              <LibraryView
+                artworkUrls={artworkUrls}
+                onOpenInEditor={hash => { setEditorTrackId(trackOrder.find(t => t.hash === hash)?.id ?? null); setRailItem('editor'); }}
+                onTracksChanged={setTrackOrder}
+              />
+            ) : railItem === 'editor' ? (
               <EditorView
                 track={trackOrder.find(t => t.id === (editorTrackId ?? activeTrackId))}
                 tracks={trackOrder}
@@ -399,6 +406,7 @@ export default function DesktopApp() {
                   setTimeout(() => setGitToast(null), 3000);
                   setCommitRefreshKey(k => k + 1);
                 }}
+                onTrackDeleted={hash => setTrackOrder(prev => prev.filter(t => t.hash !== hash))}
               />
             ) : (
               <>
@@ -562,7 +570,7 @@ export default function DesktopApp() {
         )}
 
         {showCommitGraph && (
-          <CommitGraph onClose={() => { setShowCommitGraph(false); setRailItem('library'); }} />
+          <CommitGraph onClose={() => { setShowCommitGraph(false); setRailItem('playlists'); }} />
         )}
 
         {/* Git operation toast */}

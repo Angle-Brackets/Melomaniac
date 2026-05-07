@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::sync::Mutex;
-use sysinfo::{Pid, System};
+use sysinfo::System;
 use tauri::State;
 
 #[derive(Serialize)]
