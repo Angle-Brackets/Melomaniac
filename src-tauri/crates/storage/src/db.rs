@@ -138,6 +138,12 @@ impl Database {
         Ok(())
     }
 
+    pub async fn set_track_title(&self, hash: &str, title: &str) -> Result<(), StorageError> {
+        sqlx::query("UPDATE tracks SET title = ? WHERE hash = ?")
+            .bind(title).bind(hash).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn update_duration(&self, hash: &str, duration_ms: i64) -> Result<(), StorageError> {
         sqlx::query("UPDATE tracks SET duration_ms = ? WHERE hash = ?")
             .bind(duration_ms).bind(hash).execute(&self.pool).await?;

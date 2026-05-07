@@ -708,6 +708,18 @@ export default function EditorView({
     <>
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
 
+      {/* ── View title ── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 16px', borderBottom: '1px solid var(--border-0)',
+        background: 'var(--bg-1)', flexShrink: 0,
+      }}>
+        <IcoEditor size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', fontFamily: "'Outfit', sans-serif", letterSpacing: '0.04em' }}>
+          Editor
+        </span>
+      </div>
+
       {/* ── Top pane: metadata editor — takes all remaining space ─────── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 

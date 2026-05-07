@@ -145,14 +145,18 @@ async fn do_download(
         .sidecar("yt-dlp")
         .map_err(|e| e.to_string())?
         .args([
-            "--format",      "bestaudio",
-            "--output",      &tmp_template,
+            "--format",         "bestaudio[ext=m4a]/bestaudio",
+            "--extract-audio",
+            "--audio-format",   "m4a",    // produces M4A/AAC — lofty can read/write these tags
+            "--audio-quality",  "0",      // best quality; no re-encode when source is already AAC
+            "--output",         &tmp_template,
             "--newline",
-            "--js-runtimes", "node,deno",
+            "--js-runtimes",    "node,deno",
+            "--embed-metadata", // Write title/artist/album tags into the downloaded file
             // Print title and final path on separate labelled lines so we can
             // reliably parse them from the mixed stdout stream
-            "--print",       &format!("MELO_TITLE:%(title)s"),
-            "--print",       "after_move:MELO_PATH:%(filepath)s",
+            "--print",          "before_dl:MELO_TITLE:%(title)s",
+            "--print",          "after_move:MELO_PATH:%(filepath)s",
             url,
         ])
         .spawn()
@@ -169,11 +173,18 @@ async fn do_download(
             event = rx.recv() => {
                 match event {
                     Some(CommandEvent::Stdout(line)) => {
-                        if let Some(t) = parse_title(&line)    { title    = Some(t); }
+                        if let Some(t) = parse_title(&line) {
+                            title = Some(t.clone());
+                            // Patch immediately so the title shows in the UI before any % lines arrive
+                            if let Some(j) = mgr.patch(id, |j| j.title = Some(t.clone())) {
+                                app.emit("download://progress", ProgressPayload {
+                                    id: id.to_string(), pct: j.progress, status: "downloading".into(), title: j.title,
+                                }).ok();
+                            }
+                        }
                         if let Some(p) = parse_filepath(&line) { filepath = Some(p); }
                         if let Some(pct) = parse_pct(&line) {
-                            mgr.patch(id, |j| j.progress = pct);
-                            let t = mgr.jobs.lock().unwrap().get(id).and_then(|j| j.title.clone());
+                            let t = mgr.patch(id, |j| j.progress = pct).and_then(|j| j.title);
                             app.emit("download://progress", ProgressPayload {
                                 id: id.to_string(), pct, status: "downloading".into(), title: t,
                             }).ok();
@@ -199,8 +210,10 @@ async fn do_download(
         }
     }
 
-    let path = filepath.ok_or("yt-dlp did not report output path")?;
-    let title = title.unwrap_or_else(|| url.to_string());
+    let path  = filepath.ok_or("yt-dlp did not report output path")?;
+    // Prefer the title yt-dlp reported (%(title)s) over whatever the storage
+    // layer derives from the temp filename when no tags are embedded.
+    let title = title.filter(|t| !t.is_empty()).unwrap_or_else(|| url.to_string());
 
     // Ingest
     mgr.patch(id, |j| j.status = DownloadStatus::Ingesting);
@@ -227,8 +240,26 @@ async fn do_download(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Prefer the tag title from the file; fall back to what yt-dlp reported
-    let final_title = if record.title.is_empty() { title } else { record.title.clone() };
+    // Overwrite the DB title with the real video title from yt-dlp.
+    // ingest_bytes falls back to the temp filename when the audio file has no
+    // embedded title tag, so we always write the yt-dlp title when we have one.
+    if title.as_str() != url && !title.is_empty() {
+        storage.db.set_track_title(&record.hash, &title)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Prefer what yt-dlp printed via MELO_TITLE (the actual video title).
+    // If that wasn't captured, use the tag title embedded by --embed-metadata.
+    // Guard against record.title being our temp filename (no real tags present).
+    let record_title_ok = !record.title.is_empty() && !record.title.starts_with("melomaniac_");
+    let final_title = if title.as_str() != url {
+        title                          // yt-dlp MELO_TITLE — best source
+    } else if record_title_ok {
+        record.title.clone()           // embedded tag title from --embed-metadata
+    } else {
+        url.to_string()                // nothing better; show the source URL
+    };
     Ok((record.hash, final_title))
 }
 

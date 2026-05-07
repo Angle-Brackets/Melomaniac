@@ -715,6 +715,7 @@ fn mime_to_ext(mime: &str) -> &'static str {
         "audio/mp4"  | "audio/m4a" | "audio/x-m4a"   => "m4a",
         "audio/aac"                                   => "aac",
         "audio/opus"                                  => "opus",
+        "audio/webm" | "video/webm"                   => "webm",
         _                                             => "mp3",
     }
 }

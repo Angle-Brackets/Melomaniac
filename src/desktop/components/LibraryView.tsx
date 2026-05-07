@@ -8,6 +8,7 @@ import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
 import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay } from 'react-icons/fi';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import BulkEditPanel from './BulkEditPanel';
+import DownloadModal from './DownloadModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const [isImporting,       setIsImporting]       = useState(false);
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [showBulkEdit,      setShowBulkEdit]      = useState(false);
+  const [showDownload,      setShowDownload]      = useState(false);
   const [contextMenu,       setContextMenu]       = useState<{ x: number; y: number; hash: string } | null>(null);
   const [playingHash,       setPlayingHash]       = useState<string | null>(null);
 
@@ -284,6 +286,9 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           {records.length} tracks
         </span>
         <div style={{ flex: 1 }} />
+        <button onClick={() => setShowDownload(true)} style={{ ...importBtnStyle, borderColor: 'var(--accent)', color: 'var(--accent-light)' }}>
+          <IcoDownload size={12} /> Download
+        </button>
         <button onClick={importFiles} disabled={isImporting} style={importBtnStyle}>
           <FiFilePlus size={12} /> Import Files
         </button>
@@ -546,6 +551,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
       )}
 
       {/* ── Modals ── */}
+      {showDownload && <DownloadModal onClose={() => setShowDownload(false)} />}
       {showAddToPlaylist && (
         <AddToPlaylistModal
           count={selected.size}
