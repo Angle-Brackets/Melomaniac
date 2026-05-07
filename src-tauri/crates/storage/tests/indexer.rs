@@ -18,6 +18,8 @@ fn track(hash: &str) -> TrackRecord {
         duration_ms:  1000,
         favorited:    false,
         mime_type:    None,
+        ingested_at:  0,
+        source_url:   None,
     }
 }
 

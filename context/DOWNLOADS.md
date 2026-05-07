@@ -126,7 +126,7 @@ DownloadJob {
     url:        String,
     fmt:        DownloadFmt,   // Native | Flac | Mp3 | Ogg  (Native = Phase 1 only)
     status:     DownloadStatus,
-    progress:   f32,           // 0.0 – 1.0
+    progress:   f32,           // 0.0 – 1.0/re
     title:      Option<String>,
     error:      Option<String>,
 }

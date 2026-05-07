@@ -79,21 +79,21 @@ impl DownloadManager {
 
 // ── Progress parsing ──────────────────────────────────────────────────────────
 
-fn parse_pct(line: &[u8]) -> Option<f32> {
+pub(crate) fn parse_pct(line: &[u8]) -> Option<f32> {
     let s = std::str::from_utf8(line).ok()?.trim();
     let after = s.strip_prefix("[download]")?.trim();
     let pct_s = after.split('%').next()?.trim();
     pct_s.parse::<f32>().ok().map(|p| (p / 100.0).clamp(0.0, 1.0))
 }
 
-fn parse_title(line: &[u8]) -> Option<String> {
+pub(crate) fn parse_title(line: &[u8]) -> Option<String> {
     let s = std::str::from_utf8(line).ok()?.trim().to_string();
     // yt-dlp prints the title via --print before_dl:title on its own line
     // We mark those lines with a sentinel prefix to tell them apart
     s.strip_prefix("MELO_TITLE:").map(str::to_string)
 }
 
-fn parse_filepath(line: &[u8]) -> Option<String> {
+pub(crate) fn parse_filepath(line: &[u8]) -> Option<String> {
     let s = std::str::from_utf8(line).ok()?.trim();
     s.strip_prefix("MELO_PATH:").map(str::to_string)
 }
@@ -230,6 +230,66 @@ async fn do_download(
     // Prefer the tag title from the file; fall back to what yt-dlp reported
     let final_title = if record.title.is_empty() { title } else { record.title.clone() };
     Ok((record.hash, final_title))
+}
+
+// ── Tauri commands ────────────────────────────────────────────────────────────
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_pct_happy_path() {
+        let line = b"[download]  42.3% of ~1.00MiB at  1.00MiB/s ETA 00:00";
+        let pct = parse_pct(line).unwrap();
+        let expected = 42.3_f32 / 100.0;
+        assert!((pct - expected).abs() < 1e-4, "got {pct}");
+    }
+
+    #[test]
+    fn parse_pct_none_for_non_download_line() {
+        assert!(parse_pct(b"[info] Downloading video").is_none());
+        assert!(parse_pct(b"MELO_TITLE:some song").is_none());
+        assert!(parse_pct(b"").is_none());
+    }
+
+    #[test]
+    fn parse_pct_clamps_to_zero_one() {
+        // yt-dlp can emit values slightly over 100 — clamp to 1.0
+        let over = b"[download] 100.0% of ...";
+        assert_eq!(parse_pct(over), Some(1.0));
+
+        let zero = b"[download]   0.0% of ...";
+        assert_eq!(parse_pct(zero), Some(0.0));
+    }
+
+    #[test]
+    fn parse_title_happy_path() {
+        let line = b"MELO_TITLE:My Favourite Song";
+        assert_eq!(parse_title(line), Some("My Favourite Song".to_string()));
+    }
+
+    #[test]
+    fn parse_title_none_for_non_matching() {
+        assert!(parse_title(b"[download]  50.0%").is_none());
+        assert!(parse_title(b"MELO_PATH:/tmp/foo.m4a").is_none());
+        assert!(parse_title(b"").is_none());
+    }
+
+    #[test]
+    fn parse_filepath_happy_path() {
+        let line = b"MELO_PATH:/tmp/melomaniac_abc123.m4a";
+        assert_eq!(parse_filepath(line), Some("/tmp/melomaniac_abc123.m4a".to_string()));
+    }
+
+    #[test]
+    fn parse_filepath_none_for_non_matching() {
+        assert!(parse_filepath(b"[download]  50.0%").is_none());
+        assert!(parse_filepath(b"MELO_TITLE:some title").is_none());
+        assert!(parse_filepath(b"").is_none());
+    }
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────

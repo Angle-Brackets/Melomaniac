@@ -492,3 +492,103 @@ fn unix_now() -> i64 {
         .unwrap_or_default()
         .as_secs() as i64
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn mem_db() -> Database {
+        let db = Database::open(PathBuf::from(":memory:")).await.unwrap();
+        db.migrate().await.unwrap();
+        db
+    }
+
+    fn track(hash: &str) -> TrackRecord {
+        TrackRecord {
+            hash:         hash.to_string(),
+            title:        "T".to_string(),
+            artist:       "A".to_string(),
+            album:        None,
+            artwork_hash: None,
+            duration_ms:  1000,
+            favorited:    false,
+            mime_type:    None,
+            ingested_at:  0,
+            source_url:   None,
+        }
+    }
+
+    #[tokio::test]
+    async fn set_track_provenance_sets_ingested_at() {
+        let db = mem_db().await;
+        db.insert_track(&track("abc")).await.unwrap();
+        db.set_track_provenance("abc", 999, Some("https://example.com")).await.unwrap();
+
+        let r = db.get_track("abc").await.unwrap().unwrap();
+        assert_eq!(r.ingested_at, 999);
+    }
+
+    #[tokio::test]
+    async fn set_track_provenance_does_not_overwrite_ingested_at() {
+        let db = mem_db().await;
+        db.insert_track(&track("abc")).await.unwrap();
+        db.set_track_provenance("abc", 999, Some("https://first.com")).await.unwrap();
+        db.set_track_provenance("abc", 1234, Some("https://second.com")).await.unwrap();
+
+        let r = db.get_track("abc").await.unwrap().unwrap();
+        assert_eq!(r.ingested_at, 999);
+    }
+
+    #[tokio::test]
+    async fn set_track_provenance_source_url_not_overwritten() {
+        let db = mem_db().await;
+        db.insert_track(&track("abc")).await.unwrap();
+        db.set_track_provenance("abc", 1, Some("https://first.com")).await.unwrap();
+        db.set_track_provenance("abc", 2, Some("https://second.com")).await.unwrap();
+
+        let r = db.get_track("abc").await.unwrap().unwrap();
+        assert_eq!(r.source_url.as_deref(), Some("https://first.com"));
+    }
+
+    #[tokio::test]
+    async fn get_recent_commits_ordered_by_timestamp_desc() {
+        let db = mem_db().await;
+        let playlist = db.create_playlist("p", None).await.unwrap();
+        let branch = db.create_branch(&playlist.id, "feat", None).await.unwrap();
+
+        let c1 = CommitRecord { hash: "h1".into(), tree_hash: "t1".into(), timestamp: 100, device_id: "d".into(), message: None };
+        let c2 = CommitRecord { hash: "h2".into(), tree_hash: "t2".into(), timestamp: 200, device_id: "d".into(), message: None };
+        let c3 = CommitRecord { hash: "h3".into(), tree_hash: "t3".into(), timestamp: 150, device_id: "d".into(), message: None };
+
+        db.insert_commit(&c1, &[]).await.unwrap();
+        db.insert_commit(&c2, &[]).await.unwrap();
+        db.insert_commit(&c3, &[]).await.unwrap();
+        db.update_branch_head(&playlist.id, &branch.name, "h2").await.unwrap();
+
+        let recent = db.get_recent_commits(10).await.unwrap();
+        assert_eq!(recent[0].hash, "h2");
+        assert_eq!(recent[1].hash, "h3");
+        assert_eq!(recent[2].hash, "h1");
+    }
+
+    #[tokio::test]
+    async fn get_active_tree_hashes_returns_head_commit_tree_hashes() {
+        let db = mem_db().await;
+        let playlist = db.create_playlist("p", None).await.unwrap();
+
+        let c1 = CommitRecord { hash: "h1".into(), tree_hash: "tree-a".into(), timestamp: 1, device_id: "d".into(), message: None };
+        let c2 = CommitRecord { hash: "h2".into(), tree_hash: "tree-b".into(), timestamp: 2, device_id: "d".into(), message: None };
+
+        db.insert_commit(&c1, &[]).await.unwrap();
+        db.insert_commit(&c2, &[]).await.unwrap();
+
+        // c1 is not a branch HEAD — only the auto-created main branch, point it at c2
+        db.update_branch_head(&playlist.id, "main", "h2").await.unwrap();
+
+        let hashes = db.get_active_tree_hashes().await.unwrap();
+        assert!(hashes.contains(&"tree-b".to_string()));
+        assert!(!hashes.contains(&"tree-a".to_string()));
+    }
+}

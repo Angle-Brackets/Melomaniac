@@ -26,6 +26,8 @@ export type TrackRecord = {
   duration_ms:  number
   favorited:    boolean
   mime_type:    string | null
+  ingested_at:  number
+  source_url:   string | null
 }
 
 // BranchRecord mirrors the Rust BranchRecord. head_commit is null for an empty branch.
