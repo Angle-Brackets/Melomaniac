@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import type { AppSettings } from '../types';
 import { NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
@@ -128,6 +129,29 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                 />
                 <span className="font-mono text-[10px] text-mm-t2 w-8">{settings.carouselSize}px</span>
               </div>
+            </div>
+          </section>
+
+          {/* ── Integrations ── */}
+          <section>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Integrations</p>
+
+            {/* Discord enable toggle */}
+            <div className="flex items-center justify-between py-2 border-b border-mm-b0">
+              <div>
+                <span className="text-xs text-mm-t1">Discord Rich Presence</span>
+                <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Show now-playing in Discord status</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.discordEnabled}
+                onChange={e => {
+                  const enabled = e.target.checked;
+                  updateSetting('discordEnabled', enabled);
+                  invoke('discord_apply_settings', { enabled }).catch(console.error);
+                }}
+                className="toggle toggle-primary toggle-sm"
+              />
             </div>
           </section>
 

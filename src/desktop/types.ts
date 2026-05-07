@@ -9,4 +9,5 @@ export interface AppSettings {
   carouselSize: number;    // px, 120–240
   density: 'compact' | 'normal' | 'relaxed';
   defaultView: 'Tracks' | 'History';
+  discordEnabled: boolean;
 }

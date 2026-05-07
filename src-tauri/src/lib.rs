@@ -1,4 +1,5 @@
 mod audio;
+mod discord;
 mod downloader;
 mod editor;
 mod network;
@@ -96,6 +97,7 @@ pub fn run() {
 
             app.manage(storage_state);
             app.manage(Arc::new(DownloadManager::new()));
+            app.manage(discord::DiscordState::new());
             app.manage(stats::SystemState(std::sync::Mutex::new(
                 sysinfo::System::new(),
             )));
@@ -143,6 +145,9 @@ pub fn run() {
             downloader::download_enqueue,
             downloader::download_queue,
             downloader::download_cancel,
+            discord::discord_apply_settings,
+            discord::discord_set_activity,
+            discord::discord_clear_activity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

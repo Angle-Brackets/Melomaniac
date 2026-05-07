@@ -36,6 +36,7 @@ const SETTING_DEFAULTS: AppSettings = {
   carouselSize: 210,
   density: 'relaxed',
   defaultView: 'Tracks',
+  discordEnabled: false,
 };
 
 // Thin hook so the settings object stays in one place
@@ -139,6 +140,21 @@ export default function DesktopApp() {
     const unsub = listen('download://done', () => reloadLibrary());
     return () => { unsub.then(fn => fn()); };
   }, [reloadLibrary]);
+
+  // ── Discord Rich Presence ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!settings.discordEnabled) return;
+    const track = trackOrder.find(t => t.hash === loadedHash);
+    if (track) {
+      invoke('discord_set_activity', {
+        title:  track.title,
+        artist: track.artist,
+        album:  track.album ?? null,
+      }).catch(console.error);
+    } else {
+      invoke('discord_clear_activity').catch(console.error);
+    }
+  }, [loadedHash, settings.discordEnabled]);
 
   // ── Global Stats Listener ────────────────────────────────────────────────
   useEffect(() => {
