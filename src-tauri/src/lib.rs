@@ -1,4 +1,5 @@
 mod audio;
+mod downloader;
 mod editor;
 mod network;
 mod stats;
@@ -7,6 +8,7 @@ mod storage;
 use std::sync::Arc;
 
 use audio::AudioState;
+use downloader::DownloadManager;
 use melomaniac_audio::AudioEvent;
 use tauri::{Emitter, Manager};
 
@@ -92,6 +94,7 @@ pub fn run() {
             }
 
             app.manage(storage_state);
+            app.manage(Arc::new(DownloadManager::new()));
             app.manage(stats::SystemState(std::sync::Mutex::new(
                 sysinfo::System::new(),
             )));
@@ -130,8 +133,12 @@ pub fn run() {
             editor::file_set_artwork,
             storage::get_artwork_library,
             storage::get_artwork_blob,
+            storage::library_get_stray_tracks,
             stats::get_system_stats,
             network::fetch_image_url,
+            downloader::download_enqueue,
+            downloader::download_queue,
+            downloader::download_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

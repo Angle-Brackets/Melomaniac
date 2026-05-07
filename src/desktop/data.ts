@@ -20,6 +20,8 @@ export interface Track {
   added: string;
   length: string;
   albumRef: number;
+  ingested_at?: number;
+  source_url?:  string | null;
 }
 
 /** Shape returned by the `library_get_all` Tauri command (mirrors TrackRecord in Rust) */
@@ -32,6 +34,8 @@ export interface TrackRecord {
   duration_ms:  number;
   favorited:    boolean;
   mime_type:    string | null;
+  ingested_at:  number;
+  source_url:   string | null;
 }
 
 export interface Playlist {
@@ -97,6 +101,8 @@ export function trackRecordToTrack(r: TrackRecord, idx: number): Track {
     added:        '—',
     length:       fmtDuration(r.duration_ms),
     albumRef:     parseInt(r.hash[0], 16) % ALBUMS.length,
+    ingested_at:  r.ingested_at,
+    source_url:   r.source_url,
   };
 }
 

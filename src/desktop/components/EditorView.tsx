@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { homeDir } from '@tauri-apps/api/path';
 import type { Track } from '../data';
 import ResizeHandle from './ResizeHandle';
@@ -74,7 +75,17 @@ export interface EditorViewProps {
 }
 
 type BottomTab  = 'library' | 'filesystem' | 'download';
-type DownloadFmt = 'flac' | 'mp3' | 'ogg';
+
+type DownloadStatus = 'queued' | 'downloading' | 'ingesting' | 'done' | 'failed';
+
+interface DownloadJob {
+  id:       string;
+  url:      string;
+  status:   DownloadStatus;
+  progress: number;
+  title:    string | null;
+  error:    string | null;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -355,6 +366,80 @@ function ColHeaders({ cols }: { cols: { label: string; width: string | number }[
   );
 }
 
+// ── Download queue row ────────────────────────────────────────────────────────
+
+function DownloadRow({ job, onCancel }: { job: DownloadJob; onCancel: () => void }) {
+  const statusColor: Record<DownloadStatus, string> = {
+    queued:      'var(--text-3)',
+    downloading: 'var(--accent-light)',
+    ingesting:   '#a78bfa',
+    done:        '#4ade80',
+    failed:      '#f87171',
+  };
+  const label: Record<DownloadStatus, string> = {
+    queued:      'Queued',
+    downloading: `${Math.round(job.progress * 100)}%`,
+    ingesting:   'Ingesting…',
+    done:        'Done',
+    failed:      'Failed',
+  };
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 6,
+      padding: '10px 14px', borderRadius: 7,
+      background: 'var(--bg-3)', border: '1px solid var(--border-1)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{
+          flex: 1, fontSize: 12, fontWeight: 500,
+          color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {job.title ?? job.url}
+        </span>
+        <span style={{
+          fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+          color: statusColor[job.status], flexShrink: 0,
+        }}>
+          {label[job.status]}
+        </span>
+        {(job.status === 'queued' || job.status === 'downloading' || job.status === 'ingesting') && (
+          <button
+            onClick={onCancel}
+            title="Cancel"
+            style={{
+              background: 'none', border: 'none', padding: '2px 4px',
+              cursor: 'pointer', color: 'var(--text-3)', fontSize: 12, lineHeight: 1,
+              borderRadius: 3,
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      {(job.status === 'downloading' || job.status === 'ingesting') && (
+        <div style={{ height: 3, background: 'var(--bg-5)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: 2,
+            background: job.status === 'ingesting' ? '#a78bfa' : 'var(--accent)',
+            width: `${job.status === 'ingesting' ? 100 : job.progress * 100}%`,
+            transition: 'width 0.3s ease',
+            animation: job.status === 'ingesting' ? 'pulse 1.2s ease-in-out infinite' : 'none',
+          }} />
+        </div>
+      )}
+
+      {job.error && (
+        <span style={{ fontSize: 11, color: '#f87171', fontFamily: "'JetBrains Mono', monospace" }}>
+          {job.error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function EditorView({
@@ -384,8 +469,16 @@ export default function EditorView({
   // Counter to detect stale async metadata loads — each new load call gets a unique id
   const loadIdRef = useRef(0);
 
-  // ── Library tab search
-  const [libSearch, setLibSearch] = useState('');
+  // ── Library tab search + badges
+  const [libSearch,   setLibSearch]   = useState('');
+  const [strayHashes, setStrayHashes] = useState<Set<string>>(new Set());
+  const nowSecs = Date.now() / 1000;
+
+  useEffect(() => {
+    invoke<string[]>('library_get_stray_tracks')
+      .then(hashes => setStrayHashes(new Set(hashes)))
+      .catch(() => {});
+  }, [tracks]);
 
   // ── Filesystem tab
   const [scanPath,    setScanPath]    = useState('');
@@ -396,9 +489,46 @@ export default function EditorView({
   const [fsSearch,    setFsSearch]    = useState('');
 
   // ── Download
-  const [dlUrl, setDlUrl] = useState('');
-  const [dlFmt, setDlFmt] = useState<DownloadFmt>('mp3');
+  const [dlUrl,   setDlUrl]   = useState('');
+  const [dlQueue, setDlQueue] = useState<DownloadJob[]>([]);
   const source = detectSource(dlUrl);
+
+  // Subscribe to download events
+  useEffect(() => {
+    const unsubs = [
+      listen<{ id: string; pct: number; status: string; title: string | null }>('download://progress', ({ payload }) => {
+        setDlQueue(q => q.map(j =>
+          j.id === payload.id
+            ? { ...j, progress: payload.pct, status: payload.status as DownloadStatus, title: payload.title ?? j.title }
+            : j
+        ));
+      }),
+      listen<{ id: string; track_hash: string; title: string }>('download://done', ({ payload }) => {
+        setDlQueue(q => q.map(j =>
+          j.id === payload.id ? { ...j, status: 'done', progress: 1, title: payload.title } : j
+        ));
+      }),
+      listen<{ id: string; error: string }>('download://error', ({ payload }) => {
+        setDlQueue(q => q.map(j =>
+          j.id === payload.id ? { ...j, status: 'failed', error: payload.error } : j
+        ));
+      }),
+    ];
+    return () => { unsubs.forEach(p => p.then(fn => fn())); };
+  }, []);
+
+  const enqueueDl = useCallback(async () => {
+    const url = dlUrl.trim();
+    if (!url) return;
+    const id: string = await invoke('download_enqueue', { url });
+    const job: DownloadJob = { id, url, status: 'queued', progress: 0, title: null, error: null };
+    setDlQueue(q => [job, ...q]);
+    setDlUrl('');
+  }, [dlUrl]);
+
+  const cancelDl = useCallback(async (id: string) => {
+    await invoke('download_cancel', { id });
+  }, []);
 
   // ── Resolve home dir on mount, initialise filesystem path ───────────────
   useEffect(() => {
@@ -886,8 +1016,24 @@ export default function EditorView({
                     }}>
                       {thumb && <img src={thumb} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                     </div>
-                    <span style={{ fontSize: 12, color: isActive ? 'var(--text-0)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {t.title}
+                    <span style={{ fontSize: 12, color: isActive ? 'var(--text-0)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
+                      {!!t.ingested_at && t.ingested_at > 0 && (nowSecs - t.ingested_at) < 7 * 86400 && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', flexShrink: 0,
+                          padding: '1px 5px', borderRadius: 3,
+                          background: 'var(--accent-dim)', color: 'var(--accent-light)',
+                          border: '1px solid var(--accent)', fontFamily: "'JetBrains Mono', monospace",
+                        }}>NEW</span>
+                      )}
+                      {strayHashes.has(t.hash) && (
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', flexShrink: 0,
+                          padding: '1px 5px', borderRadius: 3,
+                          background: 'var(--bg-4)', color: 'var(--text-3)',
+                          border: '1px solid var(--border-2)', fontFamily: "'JetBrains Mono', monospace",
+                        }}>STRAY</span>
+                      )}
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {t.artist}
@@ -996,12 +1142,14 @@ export default function EditorView({
         {bottomExpanded && bottomTab === 'download' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '22px 22px' }}>
 
+            {/* URL row */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 18 }}>
               <label style={LABEL_STYLE}>URL</label>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <input
                   value={dlUrl}
                   onChange={e => setDlUrl(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && dlUrl.trim() && source?.label !== 'Spotify') enqueueDl(); }}
                   placeholder="Paste a YouTube, SoundCloud, or Bandcamp URL…"
                   style={{ ...INPUT_STYLE, flex: 1 }}
                   onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 2px var(--accent-dim)'; }}
@@ -1020,28 +1168,6 @@ export default function EditorView({
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 20 }}>
-              <label style={LABEL_STYLE}>Format</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {(['flac', 'mp3', 'ogg'] as DownloadFmt[]).map(fmt => (
-                  <button
-                    key={fmt}
-                    onClick={() => setDlFmt(fmt)}
-                    style={{
-                      padding: '6px 16px', borderRadius: 5,
-                      background: dlFmt === fmt ? 'var(--accent-dim)' : 'var(--bg-3)',
-                      border: `1px solid ${dlFmt === fmt ? 'var(--accent)' : 'var(--border-1)'}`,
-                      color: dlFmt === fmt ? 'var(--accent-light)' : 'var(--text-2)',
-                      fontSize: 12, cursor: 'pointer', fontWeight: dlFmt === fmt ? 600 : 400,
-                      fontFamily: "'Outfit', sans-serif",
-                    }}
-                  >
-                    {fmt === 'mp3' ? 'MP3 320k' : fmt.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {source?.label === 'Spotify' && (
               <div style={{
                 padding: '12px 16px', borderRadius: 7, marginBottom: 18,
@@ -1053,22 +1179,34 @@ export default function EditorView({
             )}
 
             <button
-              disabled
-              title="yt-dlp backend not yet implemented — coming in P1"
+              disabled={!dlUrl.trim() || source?.label === 'Spotify'}
+              onClick={enqueueDl}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8,
                 padding: '9px 22px', borderRadius: 6,
                 background: 'var(--accent-dim)', border: '1px solid var(--accent)',
                 color: 'var(--accent-light)', fontSize: 13, fontWeight: 600,
-                cursor: 'not-allowed', opacity: 0.5,
+                cursor: (!dlUrl.trim() || source?.label === 'Spotify') ? 'not-allowed' : 'pointer',
+                opacity: (!dlUrl.trim() || source?.label === 'Spotify') ? 0.45 : 1,
                 fontFamily: "'Outfit', sans-serif",
               }}
             >
               <IcoDownload size={14} /> Download
             </button>
-            <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 12, fontFamily: "'JetBrains Mono', monospace" }}>
-              yt-dlp backend — P1. Completed downloads are auto-ingested into your library.
-            </p>
+
+            {/* Queue */}
+            {dlQueue.length > 0 && (
+              <div style={{ marginTop: 24 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 10, fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  Queue — {dlQueue.filter(j => j.status === 'done').length}/{dlQueue.length} done
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {dlQueue.map(job => (
+                    <DownloadRow key={job.id} job={job} onCancel={() => cancelDl(job.id)} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

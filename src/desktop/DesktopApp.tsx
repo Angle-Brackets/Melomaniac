@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import './style.css';
 import { applyTheme, writeCustomHue, NAMED_THEMES } from '../shared/themes';
 import type { ThemeName } from '../shared/themes';
@@ -23,6 +23,7 @@ import SettingsModal from './components/SettingsModal';
 import PlaylistSettingsPanel from './components/PlaylistSettingsPanel';
 import EditorView from './components/EditorView';
 import ResizeHandle from './components/ResizeHandle';
+import WindowResizeEdges from './components/WindowResizeEdges';
 
 export type { AppSettings };
 
@@ -124,15 +125,19 @@ export default function DesktopApp() {
   }, []);
 
   // ── Load real tracks from storage on mount ───────────────────────────────
-  useEffect(() => {
+  const reloadLibrary = useCallback(() => {
     invoke<TrackRecord[]>('library_get_all')
-      .then(records => {
-        if (records.length > 0) {
-          setTrackOrder(records.map(trackRecordToTrack));
-        }
-      })
+      .then(records => { if (records.length > 0) setTrackOrder(records.map(trackRecordToTrack)); })
       .catch(console.error);
   }, []);
+
+  useEffect(() => { reloadLibrary(); }, []);
+
+  // ── Refresh library when a download completes ────────────────────────────
+  useEffect(() => {
+    const unsub = listen('download://done', () => reloadLibrary());
+    return () => { unsub.then(fn => fn()); };
+  }, [reloadLibrary]);
 
   // ── Global Stats Listener ────────────────────────────────────────────────
   useEffect(() => {
@@ -326,6 +331,7 @@ export default function DesktopApp() {
 
   return (
     <div className="desktop-root">
+      <WindowResizeEdges />
       <div className="app-window">
         <TitleBar />
 

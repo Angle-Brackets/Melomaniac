@@ -19,6 +19,10 @@ pub struct TrackRecord {
     /// NULL for pre-migration rows. Passed to iOS/Android as a format hint because
     /// CAS blob paths have no file extension.
     pub mime_type:    Option<String>,
+    /// Unix seconds timestamp of when this track was first ingested. 0 for pre-migration rows.
+    pub ingested_at:  i64,
+    /// Original source URL if downloaded, NULL for locally imported files.
+    pub source_url:   Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -86,6 +90,26 @@ impl Database {
         .bind(&r.hash).bind(&r.title).bind(&r.artist)
         .bind(&r.album).bind(&r.artwork_hash)
         .bind(r.duration_ms).bind(r.favorited).bind(&r.mime_type)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Set ingested_at + source_url on a track. Only writes ingested_at if it is
+    /// currently 0 (i.e. never set), so re-downloading the same track doesn't
+    /// reset its NEW badge timer.
+    pub async fn set_track_provenance(
+        &self,
+        hash:        &str,
+        ingested_at: i64,
+        source_url:  Option<&str>,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            "UPDATE tracks SET
+               ingested_at = CASE WHEN ingested_at = 0 THEN ? ELSE ingested_at END,
+               source_url  = COALESCE(source_url, ?)
+             WHERE hash = ?"
+        )
+        .bind(ingested_at).bind(source_url).bind(hash)
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -396,6 +420,17 @@ impl Database {
         .bind(limit as i64)
         .fetch_all(&self.pool).await?;
         Ok(rows)
+    }
+
+    /// All distinct tree_hashes referenced by current branch HEADs.
+    pub async fn get_active_tree_hashes(&self) -> Result<Vec<String>, StorageError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT c.tree_hash
+             FROM branches b
+             JOIN commits c ON c.hash = b.head_commit
+             WHERE b.head_commit IS NOT NULL"
+        ).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(h,)| h).collect())
     }
 
     // ── Artwork library ───────────────────────────────────────────────────────

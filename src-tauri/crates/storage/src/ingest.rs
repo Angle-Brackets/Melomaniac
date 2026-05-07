@@ -96,6 +96,8 @@ pub async fn ingest_bytes(
         duration_ms: tags.duration_ms,
         favorited: false,
         mime_type: Some(mime_type),
+        ingested_at: 0,
+        source_url: None,
     };
     db.insert_track(&record).await?;
 

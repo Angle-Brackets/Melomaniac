@@ -9,6 +9,7 @@ use tauri::State;
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
+#[derive(Clone)]
 pub struct StorageState {
     pub cas: Arc<CasStore>,
     pub db: Arc<Database>,
@@ -282,6 +283,38 @@ pub async fn branch_get_history(
     storage.db
         .get_commit_history(&head, cap)
         .await.map_err(|e| e.to_string())
+}
+
+/// Return hashes of tracks that are not referenced by any committed branch tree.
+/// These are "stray" — ingested but never added to a playlist.
+#[tauri::command]
+pub async fn library_get_stray_tracks(
+    storage: State<'_, StorageState>,
+) -> Result<Vec<String>, String> {
+    let tree_hashes = storage.db.get_active_tree_hashes().await.map_err(|e| e.to_string())?;
+
+    // Collect every track hash that appears in any active tree blob
+    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for tree_hash in &tree_hashes {
+        if let Ok(blob) = storage.cas.read_blob(tree_hash).await {
+            if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&blob) {
+                if let Some(arr) = val["tracks"].as_array() {
+                    for item in arr {
+                        if let Some(h) = item["hash"].as_str() {
+                            referenced.insert(h.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let all = storage.db.get_all_tracks().await.map_err(|e| e.to_string())?;
+    let stray: Vec<String> = all.into_iter()
+        .filter(|t| !referenced.contains(&t.hash))
+        .map(|t| t.hash)
+        .collect();
+    Ok(stray)
 }
 
 // ── Initialisation helper ─────────────────────────────────────────────────────
