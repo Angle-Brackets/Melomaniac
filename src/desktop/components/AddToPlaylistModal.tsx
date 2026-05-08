@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { PlaylistRecord } from '../../store/types';
 import { IcoClose } from '../icons';
+import { Select } from './Select';
 
 interface Props {
   count:    number;
@@ -76,15 +77,12 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel }: 
           {playlists.length === 0 ? (
             <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>No playlists yet</span>
           ) : (
-            <select
+            <Select
               value={selectedPl ?? ''}
-              onChange={e => { setSelectedPl(e.target.value); setSelectedBr('main'); }}
-              style={SELECT}
-            >
-              {playlists.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              options={playlists.map(p => ({ value: p.id, label: p.name }))}
+              onChange={v => { setSelectedPl(v); setSelectedBr('main'); }}
+              minWidth={200}
+            />
           )}
         </div>
 
@@ -92,15 +90,13 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel }: 
         {activePl && activePl.branches.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <label style={LABEL}>Branch</label>
-            <select
+            <Select
               value={selectedBr}
-              onChange={e => setSelectedBr(e.target.value)}
-              style={SELECT}
-            >
-              {activePl.branches.map(b => (
-                <option key={b.id} value={b.name}>{b.name}</option>
-              ))}
-            </select>
+              options={activePl.branches.map(b => ({ value: b.name, label: b.name }))}
+              onChange={setSelectedBr}
+              mono
+              minWidth={200}
+            />
           </div>
         )}
 
@@ -127,13 +123,6 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel }: 
 const LABEL: React.CSSProperties = {
   fontSize: 11, fontWeight: 600, color: 'var(--text-2)',
   textTransform: 'uppercase', letterSpacing: '0.07em',
-  fontFamily: "'Outfit', sans-serif",
-};
-
-const SELECT: React.CSSProperties = {
-  background: 'var(--bg-2)', border: '1px solid var(--border-1)',
-  borderRadius: 5, color: 'var(--text-1)', fontSize: 12,
-  padding: '6px 10px', outline: 'none', cursor: 'pointer',
   fontFamily: "'Outfit', sans-serif",
 };
 

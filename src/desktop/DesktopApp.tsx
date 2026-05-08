@@ -5,8 +5,8 @@ import type { ThemeName } from '../shared/themes';
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack } from './data';
-import type { Track, Playlist, TrackRecord } from './data';
+import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
+import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
 import type { AppSettings } from './types';
 
 import TitleBar from './components/TitleBar';
@@ -25,6 +25,9 @@ import EditorView from './components/EditorView';
 import LibraryView from './components/LibraryView';
 import ResizeHandle from './components/ResizeHandle';
 import WindowResizeEdges from './components/WindowResizeEdges';
+import NewPlaylistModal from './components/NewPlaylistModal';
+import CommitBar from './components/CommitBar';
+import PlaylistArtworkModal from './components/PlaylistArtworkModal';
 
 export type { AppSettings };
 
@@ -64,10 +67,16 @@ export default function DesktopApp() {
   const [showCommitGraph,  setShowCommitGraph]   = useState(false);
   const [showSettings,     setShowSettings]      = useState(false);
   const [showBranchModal,  setShowBranchModal]   = useState(false);
-  const [activePlaylistId, setActivePlaylistId]  = useState(2);
+  const [activePlaylistId, setActivePlaylistId]  = useState<string | null>(null);
+  const [activeBranch, setActiveBranch] = useState('main');
+  const [playlistRecords,  setPlaylistRecords]   = useState<PlaylistRecord[]>([]);
+  const [playlistTracks,   setPlaylistTracks]    = useState<Track[] | null>(null);
+  const [showNewPlaylist,  setShowNewPlaylist]   = useState(false);
+  const [showArtworkModal, setShowArtworkModal]  = useState(false);
+  const [pendingChanges,   setPendingChanges]    = useState<{ message: string; execute: () => Promise<void> }[]>([]);
   const [railItem,         setRailItem]          = useState('playlists');
   const [activeTab,        setActiveTab]         = useState('Tracks');
-  const [pinnedIds,        setPinnedIds]         = useState(new Set([2]));
+  const [pinnedIds,        setPinnedIds]         = useState<Set<string>>(new Set());
   const [trackOrder,       setTrackOrder]        = useState<Track[]>(TRACKS);
   const [hasUncommitted,   setHasUncommitted]    = useState(false);
   const [abA,              setAbA]               = useState(0.2);
@@ -94,7 +103,9 @@ export default function DesktopApp() {
   const [showStats,        setShowStats]         = useState(false);
   const [appStats,         setAppStats]          = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
 
-  const playlist = PLAYLISTS[1];
+  const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
+  // Fall back to first mock for the playlist header when no real playlist is selected
+  const playlistForHeader = activePlaylist ?? null;
 
   // Effective play order: shuffled queue when active, otherwise the playlist order
   const playQueue = useMemo(
@@ -141,6 +152,37 @@ export default function DesktopApp() {
     return () => { unsub.then(fn => fn()); };
   }, [reloadLibrary]);
 
+  // ── Load real playlists from backend ─────────────────────────────────────
+  const reloadPlaylists = useCallback(() => {
+    invoke<PlaylistRecord[]>('playlist_get_all')
+      .then(setPlaylistRecords)
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => { reloadPlaylists(); }, []);
+
+  // ── Reset branch when switching playlists ────────────────────────────────
+  useEffect(() => {
+    if (!activePlaylist) return;
+    const hasCurrent = activePlaylist.branches.some(b => b.name === activeBranch);
+    if (!hasCurrent) {
+      const fallback = activePlaylist.branches.find(b => b.name === 'main') ?? activePlaylist.branches[0];
+      if (fallback) setActiveBranch(fallback.name);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlaylistId]);
+
+  // ── Load tracks for the active playlist ──────────────────────────────────
+  useEffect(() => {
+    if (!activePlaylistId) { setPlaylistTracks(null); return; }
+    invoke<TrackRecord[]>('playlist_get_tracks', {
+      playlistId:  activePlaylistId,
+      branchName: activeBranch,
+    })
+      .then(records => setPlaylistTracks(records.map(trackRecordToTrack)))
+      .catch(() => setPlaylistTracks([]));
+  }, [activePlaylistId, activeBranch]);
+
   // ── Discord Rich Presence ─────────────────────────────────────────────────
   useEffect(() => {
     if (!settings.discordEnabled) return;
@@ -161,6 +203,19 @@ export default function DesktopApp() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F12') {
         setShowStats(p => !p);
+      }
+      // Dev-only: Ctrl+Shift+Backspace wipes all playlists and commit history
+      if (import.meta.env.DEV && e.ctrlKey && e.shiftKey && e.key === 'Backspace') {
+        invoke('dev_reset_playlists')
+          .then(() => {
+            setPlaylistRecords([]);
+            setActivePlaylistId(null);
+            setPlaylistTracks(null);
+            setPendingChanges([]);
+            setGitToast('Dev reset: all playlists cleared');
+            setTimeout(() => setGitToast(null), 2400);
+          })
+          .catch(console.error);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -228,6 +283,23 @@ export default function DesktopApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playQueue]);
 
+  // ── Load artwork for the active playlist branch ───────────────────────────
+  useEffect(() => {
+    if (!activePlaylist) return;
+    const key = `pl_${activePlaylist.id}::${activeBranch}`;
+    if (artworkUrls[key]) return;
+    invoke<number[]>('playlist_get_artwork', { playlistId: activePlaylist.id, branchName: activeBranch })
+      .then(bytes => {
+        const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
+        setArtworkUrls(prev => ({ ...prev, [key]: url }));
+      })
+      .catch(() => {
+        // Branch has no artwork — mark as empty so we don't retry
+        setArtworkUrls(prev => ({ ...prev, [key]: '' }));
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlaylist?.id, activeBranch]);
+
   // ── Sync A·B handles on track change ──────────────────────────────────────
   useEffect(() => {
     const pts = trackAbPoints[activeTrackId];
@@ -236,7 +308,7 @@ export default function DesktopApp() {
   }, [activeTrackId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const togglePin = (id: number) => setPinnedIds(prev => {
+  const togglePin = (id: string) => setPinnedIds(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
@@ -356,9 +428,9 @@ export default function DesktopApp() {
 
           {/* Sidebar */}
           <LibrarySidebar
-            playlists={PLAYLISTS}
+            playlists={playlistRecords.length > 0 ? playlistRecords.map(playlistRecordToPlaylist) : PLAYLISTS}
             activePlaylistId={activePlaylistId}
-            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab('Tracks'); }}
+            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab('Tracks'); setRailItem('playlists'); }}
             activeRailItem={railItem}
             onRailChange={handleRailChange}
             expanded={leftExpanded}
@@ -368,6 +440,7 @@ export default function DesktopApp() {
             onTogglePin={togglePin}
             onOpenSettings={() => setShowSettings(true)}
             onAddToFolderClick={setFolderPopupItem}
+            onNewPlaylist={() => setShowNewPlaylist(true)}
           />
           {leftExpanded && (
             <ResizeHandle direction="h" onDelta={d => setSidebarWidth(w => Math.max(140, Math.min(400, w + d)))} />
@@ -427,13 +500,18 @@ export default function DesktopApp() {
             ) : (
               <>
                 <PlaylistHeader
-                  playlist={playlist}
+                  playlist={playlistForHeader}
+                  artworkUrl={artworkUrls[`pl_${activePlaylist?.id}::${activeBranch}`] || null}
+                  activeBranch={activeBranch}
+                  onBranchChange={name => { setActiveBranch(name); setCommitRefreshKey(k => k + 1); }}
                   onGitAction={handleGitAction}
                   activeTab={activeTab}
                   onTabChange={setActiveTab}
-                  isPinned={pinnedIds.has(playlist.id)}
-                  onTogglePin={() => togglePin(playlist.id)}
+                  isPinned={activePlaylistId ? pinnedIds.has(activePlaylistId) : false}
+                  onTogglePin={() => { if (activePlaylistId) togglePin(activePlaylistId); }}
                   onNewBranch={() => setShowBranchModal(true)}
+                  onEditArtwork={() => setShowArtworkModal(true)}
+                  onBranchesChanged={reloadPlaylists}
                 />
 
                 {activeTab === 'Tracks' && (
@@ -470,10 +548,10 @@ export default function DesktopApp() {
                     </div>
                     <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
                     <TrackList
-                      tracks={trackOrder}
+                      tracks={playlistTracks ?? trackOrder}
                       activeTrackId={activeTrackId}
                       onSelect={handleSelectTrack}
-                      onReorder={handleReorder}
+                      onReorder={playlistTracks ? null : handleReorder}
                       hasUncommitted={hasUncommitted}
                       onCommitChanges={handleCommitReorder}
                       onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
@@ -484,12 +562,32 @@ export default function DesktopApp() {
 
                 {activeTab === 'History' && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <CommitGraphInline refreshKey={commitRefreshKey} />
+                    <CommitGraphInline
+                      playlistId={activePlaylistId}
+                      branchName={activeBranch}
+                      refreshKey={commitRefreshKey}
+                      onBranchCreated={(name, pid) => {
+                        reloadPlaylists();
+                        if (pid === activePlaylistId) {
+                          setActiveBranch(name);
+                        }
+                        setCommitRefreshKey(k => k + 1);
+                      }}
+                      onRevertTo={(_hash, pid) => {
+                        setCommitRefreshKey(k => k + 1);
+                        const resolvedId = pid ?? activePlaylistId;
+                        if (resolvedId) {
+                          invoke<TrackRecord[]>('playlist_get_tracks', {
+                            playlistId: resolvedId, branchName: activeBranch,
+                          }).then(r => setPlaylistTracks(r.map(trackRecordToTrack))).catch(console.error);
+                        }
+                      }}
+                    />
                   </div>
                 )}
 
                 {activeTab === 'Settings' && (
-                  <PlaylistSettingsPanel playlist={playlist} />
+                  <PlaylistSettingsPanel playlist={playlistForHeader} />
                 )}
               </>
             )}
@@ -565,13 +663,64 @@ export default function DesktopApp() {
           />
         )}
 
-        {showBranchModal && (
+        {showArtworkModal && activePlaylist && (
+          <PlaylistArtworkModal
+            playlistId={activePlaylist.id}
+            branchName={activeBranch}
+            currentArtworkUrl={artworkUrls[`pl_${activePlaylist.id}::${activeBranch}`] || null}
+            onSaved={(newUrl) => {
+              const key = `pl_${activePlaylist.id}::${activeBranch}`;
+              setArtworkUrls(prev => ({ ...prev, [key]: newUrl }));
+              reloadPlaylists();
+              setShowArtworkModal(false);
+              setGitToast('Playlist artwork updated');
+              setTimeout(() => setGitToast(null), 2400);
+            }}
+            onClose={() => setShowArtworkModal(false)}
+          />
+        )}
+
+        {showNewPlaylist && (
+          <NewPlaylistModal
+            onClose={() => setShowNewPlaylist(false)}
+            onCreate={(playlist) => {
+              setPlaylistRecords(prev => [...prev, playlist]);
+              setActivePlaylistId(playlist.id);
+              setRailItem('playlists');
+              setShowNewPlaylist(false);
+            }}
+          />
+        )}
+
+        {pendingChanges.length > 0 && activePlaylistId && (
+          <CommitBar
+            changes={pendingChanges}
+            onCommit={async (edited) => {
+              for (let i = 0; i < edited.length; i++) {
+                pendingChanges[i] && await pendingChanges[i].execute();
+              }
+              setPendingChanges([]);
+              // Reload playlist tracks after commit
+              invoke<TrackRecord[]>('playlist_get_tracks', {
+                playlistId: activePlaylistId, branchName: activeBranch,
+              }).then(r => setPlaylistTracks(r.map(trackRecordToTrack))).catch(console.error);
+            }}
+            onDiscard={() => setPendingChanges([])}
+          />
+        )}
+
+        {showBranchModal && activePlaylist && (
           <BranchModal
+            playlistId={activePlaylist.id}
+            playlistName={activePlaylist.name}
+            branchName={activeBranch}
             onClose={() => setShowBranchModal(false)}
-            onCreateBranch={(name, fromHash) => {
-              handleGitAction('branch');
-              setGitToast(`Branch '${name}' created from ${fromHash}`);
-              setTimeout(() => setGitToast(null), 3000);
+            onCreate={name => {
+              reloadPlaylists();
+              setActiveBranch(name);
+              setCommitRefreshKey(k => k + 1);
+              setGitToast(`Branch '${name}' created`);
+              setTimeout(() => setGitToast(null), 2400);
             }}
           />
         )}

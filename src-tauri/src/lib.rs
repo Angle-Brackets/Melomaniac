@@ -62,10 +62,13 @@ pub fn run() {
 
             app.manage(AudioState { bridge });
 
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data dir");
+            let app_data_dir = {
+                let base = app.path().app_data_dir().expect("failed to resolve app data dir");
+                // Debug builds use an isolated subdirectory so manual testing
+                // never pollutes the real library or playlist history.
+                #[cfg(debug_assertions)] { base.join("dev") }
+                #[cfg(not(debug_assertions))] { base }
+            };
 
             let storage_state = tauri::async_runtime::block_on(storage::init_storage(app_data_dir))
                 .expect("failed to initialise storage");
@@ -148,6 +151,19 @@ pub fn run() {
             discord::discord_apply_settings,
             discord::discord_set_activity,
             discord::discord_clear_activity,
+            storage::playlist_get_tracks,
+            storage::playlist_remove_track,
+            storage::playlist_reorder_tracks,
+            storage::playlist_rename,
+            storage::playlist_set_artwork,
+            storage::playlist_get_artwork,
+            storage::playlist_delete,
+            storage::branch_delete,
+            storage::branch_rename,
+            storage::branch_revert_to,
+            storage::playlist_get_graph,
+            #[cfg(debug_assertions)]
+            storage::dev_reset_playlists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -199,5 +199,9 @@
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.5; }
 }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
 .tl-context-menu { animation: fadeInScale 0.12s ease; }
 div:hover > .lib-delete-btn { opacity: 1 !important; }

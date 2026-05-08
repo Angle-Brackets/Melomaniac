@@ -10,7 +10,7 @@ interface TrackListProps {
   tracks:          Track[];
   activeTrackId:   number;
   onSelect:        (id: number) => void;
-  onReorder:       (newOrder: Track[] | null) => void;
+  onReorder:       ((newOrder: Track[] | null) => void) | null;
   hasUncommitted:  boolean;
   onCommitChanges: () => void;
   onEditTrack:     (id: number) => void;
@@ -66,7 +66,7 @@ export default function TrackList({
         const next = [...tracks];
         const [moved] = next.splice(dragIdx, 1);
         next.splice(target, 0, moved);
-        onReorder(next);
+        onReorder?.(next);
       }
       dropIdxRef.current = null;
       setDragIdx(null);
@@ -92,7 +92,7 @@ export default function TrackList({
             ● Unsaved changes — commit to record in playlist history
           </span>
           <div className="flex gap-1.5">
-            <button onClick={() => onReorder(null)} className="btn btn-ghost btn-xs">Discard</button>
+            <button onClick={() => onReorder?.(null)} className="btn btn-ghost btn-xs">Discard</button>
             <button onClick={onCommitChanges} className="btn btn-primary btn-xs">Commit</button>
           </div>
         </div>

@@ -39,7 +39,7 @@ export interface TrackRecord {
 }
 
 export interface Playlist {
-  id: number;
+  id: string;
   name: string;
   version: string | null;
   commit: string | null;
@@ -48,6 +48,39 @@ export interface Playlist {
   pinned: boolean;
   pull?: boolean;
   children?: Playlist[];
+}
+
+// ── Backend mirror types (snake_case, match Rust structs) ─────────────────────
+
+export interface BranchRecord {
+  id:          string;
+  playlist_id: string;
+  name:        string;
+  head_commit: string | null;
+}
+
+/** Shape returned by `playlist_get_all` / `playlist_create` / `playlist_fork`. */
+export interface PlaylistRecord {
+  id:           string;
+  name:         string;
+  description:  string | null;
+  created_at:   number;
+  forked_from:  string | null;
+  artwork_hash: string | null;
+  branches:     BranchRecord[];
+}
+
+export function playlistRecordToPlaylist(r: PlaylistRecord): Playlist {
+  const main = r.branches.find(b => b.name === 'main') ?? r.branches[0];
+  return {
+    id:      r.id,
+    name:    r.name,
+    version: null,
+    commit:  main?.head_commit?.slice(0, 7) ?? null,
+    synced:  null,
+    branch:  main?.name ?? 'main',
+    pinned:  false,
+  };
 }
 
 export interface Commit {
@@ -107,16 +140,9 @@ export function trackRecordToTrack(r: TrackRecord, idx: number): Track {
 }
 
 export const PLAYLISTS: Playlist[] = [
-  { id: 1, name: "Cozy Melodies",  version: "1.5", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },
-  { id: 2, name: "Study Beats",    version: "3.0", commit: "4fa9b0", synced: "2h ago", branch: "main", pull: true, pinned: true },
-  { id: 3, name: "Lo-Fi Lounge",   version: "2.1", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },
-  {
-    id: 4, name: "Gaming Sessions", version: null, commit: null, synced: null, branch: null, pinned: false,
-    children: [
-      { id: 5, name: "Chill Games", version: null, commit: "4fa9b0", synced: "2h ago", branch: "main", pinned: false },
-      { id: 6, name: "Fast Pace",   version: null, commit: "4fa9b0", synced: "2h ago", branch: "main", pinned: false },
-    ],
-  },
+  { id: "mock-1", name: "Cozy Melodies",  version: "1.5", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },
+  { id: "mock-2", name: "Study Beats",    version: "3.0", commit: "4fa9b0", synced: "2h ago", branch: "main", pull: true, pinned: true },
+  { id: "mock-3", name: "Lo-Fi Lounge",   version: "2.1", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },
 ];
 
 export const COMMITS: Commit[] = [

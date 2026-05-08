@@ -33,11 +33,11 @@
 - [x] Fix rodio Symphonia decoder RandomAccessNotSupported error on backward seek by implementing decoder reload fallback
 
 ### yt-dlp Ingestion Wrapper
-- [ ] Implement `std::process::Command` wrapper around `yt-dlp` binary
-- [ ] Support audio-only download with format selection (FLAC/MP3)
-- [ ] Implement error handling for failed or changed yt-dlp formats
+- [x] Implement `std::process::Command` wrapper around `yt-dlp` binary (`src-tauri/src/downloader.rs`)
+- [x] Support audio-only download with format selection — M4A via `--extract-audio --audio-format m4a --audio-quality 0`
+- [x] Implement error handling for failed downloads — `download://error` events surfaced in UI
 - [ ] Bundle or document yt-dlp binary update strategy for end users
-- [ ] Expose ingest command to frontend via Tauri invoke
+- [x] Expose ingest command to frontend via Tauri invoke — `download_enqueue`, `download_queue`, `download_cancel`
 
 ### Content-Addressable Storage (CAS) Model
 - [x] Implement `blake3` file hashing for ingested audio and image files (`crates/storage/src/cas.rs` — `CasStore::hash`)
@@ -70,11 +70,11 @@
 - [ ] Implement virtualized tracklist with `tanstack/react-virtual` (target: 10,000+ tracks)
 - [x] Build player controls UI — play/pause, seek bar with real duration, volume slider, skip, shuffle, loop, A·B markers; all wired to Tauri invoke commands
 - [x] Build library view wired to SQLite metadata via Tauri invoke — `library_get_all` populates tracklist and carousel with real tracks; artwork fetched via `track_get_artwork` (BLAKE3 CAS lookup)
-- [ ] Build basic playlist view rendering Tree manifest tracks
+- [ ] Build basic playlist view rendering Tree manifest tracks — `playlist_get_all` / `playlist_create` Tauri commands exist; UI not yet wired
 - [x] Verify end-to-end audio playback on Desktop and iOS real device
 - [x] Wire playback controls to audio invoke commands — `audio_play`, `audio_pause`, `audio_seek`, `audio_set_volume`, `track_play`; volume synced to backend on mount; backward seek fallback via decoder reload
 - [x] Debug ingest replaced with `read_dir` loop scanning `tests/audio/` at startup — supports MP3, FLAC, OGG, WAV, M4A, AAC; idempotent
-- [ ] Wire yt-dlp ingest UI (URL input → download → library refresh)
+- [x] Wire yt-dlp ingest UI — Download modal in Library header; progress bars per item; live title from yt-dlp `before_dl:` hook; library auto-refreshes on completion
 
 ---
 
@@ -187,13 +187,23 @@ Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). 
 
 - Rail git icon opens the commit graph modal but doesn't reset the highlighted rail icon when navigating away
 - Tracklist still uses mock `TRACKS` data for ordering (real library loaded but not committed to `trackOrder` on shuffle/commit)
-- Playlist view not yet wired to real SQLite `playlist_get_all` / Tree manifest data
-- `track_ingest_files` Tauri command exists but no UI to invoke it — users can only ingest via `tests/audio/` debug loop
+- Playlist view not yet wired to real SQLite `playlist_get_all` / Tree manifest data — sidebar shows mock playlists only
+
+### Completed since 2026-05-04
+
+- Phase 2 bulk actions wired: `AddToPlaylistModal`, `BulkEditPanel` in `LibraryView`
+- Phase 3 Library polish: column resizing (persistent via localStorage), sort persistence, right-click context menu, inline double-click playback
+- Import Files / Import Folder buttons fixed (`dialog:allow-open` capability was missing)
+- Editor view title bar added
+- Download modal added to Library header (progress per item, live yt-dlp title)
+- Fixed downloaded track titles showing temp UUID filename — `before_dl:MELO_TITLE:` hook + `set_track_title` DB write
+- Fixed metadata editing for downloaded tracks — forced M4A output; added `webm` case to `mime_to_ext`
+- Discord Rich Presence — hardcoded app ID `1501840436703268934`, on/off toggle in Settings, "Listening to" activity type
 
 ### Next steps
 
-1. Replace hardcoded `TRACKS`/`PLAYLISTS` mock data with live `library_get_all` / `playlist_get_all` reads
-2. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
-3. Wire yt-dlp ingest UI in sidebar importer stub
+1. **Playlist creation** — wire `playlist_create` / `playlist_get_all` to sidebar; replace mock `PLAYLISTS` data with live reads; allow adding tracks to a playlist
+2. Replace mock `TRACKS` in `trackOrder` with a stable live source (currently `reloadLibrary` populates it correctly but only on mount)
+3. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
 
-*Last updated: 2026-05-04. Audio fully wired (play/pause/seek/volume/backward seek). Real track metadata and artwork from SQLite/CAS. Resizable sidebar, right panel, and carousel/tracklist split via `ResizeHandle`. Carousel hover-3d on center 3 cards only. All known audio and UI bugs from previous session resolved.*
+*Last updated: 2026-05-07.*

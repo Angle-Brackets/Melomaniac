@@ -27,11 +27,13 @@ pub struct TrackRecord {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistRecord {
-    pub id:          String,
-    pub name:        String,
-    pub description: Option<String>,
-    pub created_at:  i64,
-    pub forked_from: Option<String>,
+    pub id:           String,
+    pub name:         String,
+    pub description:  Option<String>,
+    pub created_at:   i64,
+    pub forked_from:  Option<String>,
+    /// Cached from the latest commit's tree blob; the blob is authoritative.
+    pub artwork_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -241,6 +243,7 @@ impl Database {
             description: description.map(str::to_string),
             created_at: now,
             forked_from: None,
+            artwork_hash: None,
         })
     }
 
@@ -276,6 +279,7 @@ impl Database {
             description: None,
             created_at: now,
             forked_from: Some(source_id.to_string()),
+            artwork_hash: None,
         })
     }
 
@@ -295,10 +299,36 @@ impl Database {
         Ok(())
     }
 
+    /// Update the SQL cache columns from the latest committed tree blob's meta section.
+    /// Called by the indexer after any commit or sync.
+    pub async fn update_playlist_cache(
+        &self,
+        id:           &str,
+        name:         &str,
+        description:  Option<&str>,
+        artwork_hash: Option<&str>,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            "UPDATE playlists SET name = ?, description = ?, artwork_hash = ? WHERE id = ?"
+        )
+        .bind(name).bind(description).bind(artwork_hash).bind(id)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn delete_playlist(&self, id: &str) -> Result<(), StorageError> {
         // ON DELETE CASCADE removes all branches automatically
         sqlx::query("DELETE FROM playlists WHERE id = ?")
             .bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Wipe all playlists, branches, and commits. Used only in dev/test resets.
+    pub async fn reset_playlist_history(&self) -> Result<(), StorageError> {
+        sqlx::query("DELETE FROM commit_parents").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM commits").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM branches").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM playlists").execute(&self.pool).await?;
         Ok(())
     }
 
@@ -343,6 +373,18 @@ impl Database {
         .bind(playlist_id).bind(name).fetch_optional(&self.pool).await?)
     }
 
+    pub async fn delete_branch(&self, playlist_id: &str, name: &str) -> Result<(), StorageError> {
+        sqlx::query("DELETE FROM branches WHERE playlist_id = ? AND name = ?")
+            .bind(playlist_id).bind(name).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn rename_branch(&self, playlist_id: &str, old_name: &str, new_name: &str) -> Result<(), StorageError> {
+        sqlx::query("UPDATE branches SET name = ? WHERE playlist_id = ? AND name = ?")
+            .bind(new_name).bind(playlist_id).bind(old_name).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn update_branch_head(
         &self,
         playlist_id: &str,
@@ -381,6 +423,14 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    pub async fn get_commit_parents(&self, hash: &str) -> Result<Vec<String>, StorageError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT parent_hash FROM commit_parents WHERE commit_hash = ? ORDER BY rowid"
+        )
+        .bind(hash).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(h,)| h).collect())
     }
 
     pub async fn get_commit(&self, hash: &str) -> Result<Option<CommitRecord>, StorageError> {

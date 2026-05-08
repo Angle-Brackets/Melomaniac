@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use crate::{CasStore, Database, StorageError};
+use crate::{CasStore, Database, StorageError, TreeBlob};
 
 pub struct IndexerReport {
     pub stale_removed:  usize,
@@ -42,6 +42,40 @@ impl<'a> Indexer<'a> {
         }
 
         Ok(IndexerReport { stale_removed, orphan_blobs })
+    }
+
+    /// Rebuild the SQL cache columns (name, description, artwork_hash) for every
+    /// playlist from its latest committed tree blob. Called on startup and after sync.
+    pub async fn rebuild_playlist_caches(&self) -> Result<(), StorageError> {
+        let playlists = self.db.get_all_playlists().await?;
+        for playlist in playlists {
+            let branches = self.db.get_branches(&playlist.id).await?;
+
+            // Prefer main branch; fall back to first branch with a commit.
+            let head_commit = branches.iter()
+                .find(|b| b.name == "main")
+                .or_else(|| branches.iter().find(|b| b.head_commit.is_some()))
+                .and_then(|b| b.head_commit.clone());
+
+            let Some(commit_hash) = head_commit else { continue; };
+
+            let Ok(commit_bytes) = self.cas.read_blob(&commit_hash).await else { continue; };
+            let Ok(commit) = serde_json::from_slice::<serde_json::Value>(&commit_bytes) else { continue; };
+            let Some(tree_hash) = commit["tree_hash"].as_str() else { continue; };
+
+            let Ok(tree_bytes) = self.cas.read_blob(tree_hash).await else { continue; };
+            let Ok(tree) = TreeBlob::from_bytes(&tree_bytes) else { continue; };
+
+            if tree.meta.name.is_empty() { continue; }
+
+            self.db.update_playlist_cache(
+                &playlist.id,
+                &tree.meta.name,
+                tree.meta.description.as_deref(),
+                tree.meta.artwork_hash.as_deref(),
+            ).await?;
+        }
+        Ok(())
     }
 
     /// Walk the CAS objects directory and return all blob hashes found.

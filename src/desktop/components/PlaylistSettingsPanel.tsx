@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import type { Playlist } from '../data';
+import type { PlaylistRecord } from '../data';
 
-export default function PlaylistSettingsPanel({ playlist }: { playlist: Playlist }) {
+export default function PlaylistSettingsPanel({ playlist }: { playlist: PlaylistRecord | null }) {
+  const branch = playlist?.branches[0];
   const [upstream, setUpstream] = useState(
     `github.com/you/${(playlist?.name ?? '').toLowerCase().replace(/ /g, '-')}`
   );
@@ -12,11 +13,11 @@ export default function PlaylistSettingsPanel({ playlist }: { playlist: Playlist
         <div className="text-[10px] font-bold tracking-widest text-mm-t2 uppercase mb-2.5">Playlist Settings</div>
 
         {([
-          ['Name', playlist?.name],
-          ['Version', `v${playlist?.version}`],
-          ['Branch', playlist?.branch ?? 'main'],
-          ['Last commit', playlist?.commit ?? '—'],
-        ] as const).map(([k, v]) => (
+          ['Name', playlist?.name ?? '—'],
+          ['Branches', `${playlist?.branches.length ?? 0}`],
+          ['Branch', branch?.name ?? 'main'],
+          ['Last commit', branch?.head_commit?.slice(0, 7) ?? '—'],
+        ] as [string, string][]).map(([k, v]) => (
           <div key={k} className="flex items-center justify-between py-2 border-b border-mm-b0">
             <span className="text-[12px] text-mm-t2">{k}</span>
             <span className={`text-[12px] text-mm-t0 ${k === 'Last commit' ? 'font-mono' : ''}`}>{v}</span>

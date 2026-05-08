@@ -70,8 +70,8 @@ interface AddToFolderPopupProps {
   item: Playlist;
   folders: FolderItem[];
   onClose: () => void;
-  onAddToFolder: (itemId: number, folderId: number) => void;
-  onCreateFolder: (name: string, itemId: number) => void;
+  onAddToFolder: (itemId: string, folderId: number) => void;
+  onCreateFolder: (name: string, itemId: string) => void;
 }
 
 export function AddToFolderPopup({ item, folders, onClose, onAddToFolder, onCreateFolder }: AddToFolderPopupProps) {
@@ -132,9 +132,9 @@ export function AddToFolderPopup({ item, folders, onClose, onAddToFolder, onCrea
 
 // ── Playlist row ──────────────────────────────────────────────────────────────
 interface PlaylistRowProps {
-  item: Playlist; activeId: number; depth: number;
-  onSelect: (id: number) => void; defaultOpen?: boolean;
-  pinnedIds: Set<number>; onTogglePin: (id: number) => void;
+  item: Playlist; activeId: string | null; depth: number;
+  onSelect: (id: string) => void; defaultOpen?: boolean;
+  pinnedIds: Set<string>; onTogglePin: (id: string) => void;
   onAddToFolderClick: (item: Playlist) => void; synced: boolean;
 }
 
@@ -246,20 +246,21 @@ function CollapsibleSection({ label, open, onToggle, children }: {
 
 // ── LibrarySidebar ────────────────────────────────────────────────────────────
 interface LibrarySidebarProps {
-  playlists: Playlist[]; activePlaylistId: number;
-  onSelectPlaylist: (id: number) => void;
+  playlists: Playlist[]; activePlaylistId: string | null;
+  onSelectPlaylist: (id: string) => void;
   activeRailItem: string; onRailChange: (item: string) => void;
   expanded: boolean; onToggleExpanded: () => void;
   panelWidth?: number;
-  pinnedIds: Set<number>; onTogglePin: (id: number) => void;
+  pinnedIds: Set<string>; onTogglePin: (id: string) => void;
   onOpenSettings: () => void;
   onAddToFolderClick: (item: Playlist) => void;
+  onNewPlaylist: () => void;
 }
 
 export default function LibrarySidebar({
   playlists, activePlaylistId, onSelectPlaylist,
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
-  pinnedIds, onTogglePin, onOpenSettings, onAddToFolderClick,
+  pinnedIds, onTogglePin, onOpenSettings, onAddToFolderClick, onNewPlaylist,
 }: LibrarySidebarProps) {
   const [sectionsOpen, setSectionsOpen] = useState({ repos: true, importer: false });
   const toggle = (k: keyof typeof sectionsOpen) => setSectionsOpen(s => ({ ...s, [k]: !s[k] }));
@@ -298,8 +299,13 @@ export default function LibrarySidebar({
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
         flexShrink: 0,
       }}>
-        <div className="px-3 py-2 text-[10px] font-bold tracking-widest text-mm-t2 uppercase border-b border-mm-b0 shrink-0 whitespace-nowrap">
-          Playlists
+        <div className="px-3 py-2 border-b border-mm-b0 shrink-0 flex items-center justify-between">
+          <span className="text-[10px] font-bold tracking-widest text-mm-t2 uppercase whitespace-nowrap">Playlists</span>
+          <button
+            onClick={onNewPlaylist}
+            title="New playlist"
+            className="btn btn-ghost btn-xs btn-square text-mm-t2 hover:text-mm-accent"
+          >+</button>
         </div>
 
         <div className="flex-1 overflow-y-auto styled-scroll">
