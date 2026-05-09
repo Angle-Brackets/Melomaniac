@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
-import type { AppSettings } from './types';
+import type { AppSettings, ShuffleMode } from './types';
 
 import TitleBar from './components/TitleBar';
 import LibrarySidebar, { AddToFolderPopup } from './components/Sidebar';
@@ -31,9 +31,46 @@ import PlaylistArtworkModal from './components/PlaylistArtworkModal';
 import ForkPlaylistModal from './components/ForkPlaylistModal';
 import MergeBranchModal from './components/MergeBranchModal';
 import MiniPlayer from './components/MiniPlayer';
+import QueuePanel from './components/QueuePanel';
 import { FiPlay, FiPause } from 'react-icons/fi';
 
 export type { AppSettings };
+
+// ── Shuffle algorithms ────────────────────────────────────────────────────────
+function fisherYates<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function balancedShuffle(tracks: import('./data').Track[]): import('./data').Track[] {
+  const groups = new Map<string, import('./data').Track[]>();
+  for (const t of tracks) {
+    const key = t.artist || '?';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(t);
+  }
+  const shuffledGroups = [...groups.values()].map(g => fisherYates(g));
+  const n = tracks.length;
+  const result: { track: import('./data').Track; pos: number }[] = [];
+  for (const group of shuffledGroups) {
+    const spacing = n / group.length;
+    const offset = Math.random() * spacing;
+    group.forEach((t, i) => {
+      result.push({ track: t, pos: offset + i * spacing + (Math.random() - 0.5) * spacing * 0.4 });
+    });
+  }
+  result.sort((a, b) => a.pos - b.pos);
+  return result.map(r => r.track);
+}
+
+function buildShuffledQueue(tracks: import('./data').Track[], mode: ShuffleMode): import('./data').Track[] {
+  if (mode === 'balanced') return balancedShuffle(tracks);
+  return fisherYates(tracks); // fisher-yates and random both produce a permutation; random re-rolls on every advance
+}
 
 // ── Default settings ──────────────────────────────────────────────────────────
 const SETTING_DEFAULTS: AppSettings = {
@@ -45,6 +82,7 @@ const SETTING_DEFAULTS: AppSettings = {
   defaultView: 'Tracks',
   discordEnabled: false,
   commitAuthor: '',
+  shuffleMode: 'fisher-yates',
 };
 
 const SETTINGS_KEY = 'melomaniac.settings';
@@ -99,10 +137,10 @@ export default function DesktopApp() {
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
   const [trackOrder, setTrackOrder] = useState<Track[]>(TRACKS);
   const [hasUncommitted, setHasUncommitted] = useState(false);
-  const [abA, setAbA] = useState(0.2);
-  const [abB, setAbB] = useState(0.7);
+  const [abA, setAbA] = useState(0);
+  const [abB, setAbB] = useState(1);
   const [loopMode, setLoopMode] = useState<LoopMode>('off');
-  const [trackAbPoints, setTrackAbPoints] = useState<Record<number, { a: number; b: number }>>({ 1: { a: 0.2, b: 0.7 } });
+  const [trackAbPoints, setTrackAbPoints] = useState<Record<number, { a: number; b: number }>>({});
   const [folderPopupItem, setFolderPopupItem] = useState<Playlist | null>(null);
   const [folders, setFolders] = useState([{ id: 4, name: 'Gaming Sessions' }]);
   const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
@@ -118,6 +156,8 @@ export default function DesktopApp() {
   const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
   const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
+  const [manualQueue, setManualQueue] = useState<Track[]>([]);
+  const [showQueue, setShowQueue] = useState(false);
   const [vibeText, setVibeText] = useState('chill ambient music for focus');
   const [gitToast, setGitToast] = useState<string | null>(null);
   const [commitRefreshKey, setCommitRefreshKey] = useState(0);
@@ -146,6 +186,31 @@ export default function DesktopApp() {
     [playQueue, artworkUrls],
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
+
+  // ── Stale-closure ref — updated synchronously each render so event handlers
+  //    always read current values without being recreated.
+  const sr = useRef({
+    loopMode, playQueue, activeQueue, loadedHash, manualQueue,
+    abA, abB, durationMs, positionMs, activeTrackId,
+    isShuffle, shuffleMode: settings.shuffleMode,
+  });
+  sr.current.loopMode    = loopMode;
+  sr.current.playQueue   = playQueue;
+  sr.current.activeQueue = activeQueue;
+  sr.current.loadedHash  = loadedHash;
+  sr.current.manualQueue = manualQueue;
+  sr.current.abA         = abA;
+  sr.current.abB         = abB;
+  sr.current.durationMs  = durationMs;
+  sr.current.positionMs  = positionMs;
+  sr.current.activeTrackId  = activeTrackId;
+  sr.current.isShuffle      = isShuffle;
+  sr.current.shuffleMode    = settings.shuffleMode;
+
+  // Refs that hold the latest skip handlers so the audio event listener can
+  // call them without stale closures.
+  const skipNextRef = useRef<() => void>(() => {});
+  const skipPrevRef = useRef<() => void>(() => {});
 
   // ── Theme effect — all palette logic lives in shared/themes.ts ──────────
   useEffect(() => {
@@ -289,26 +354,91 @@ export default function DesktopApp() {
       | { DurationKnown: number }
       | { Error: string };
 
+    const loadTrack = (track: Track) => {
+      setActiveTrackId(track.id);
+      setLoadedHash(track.hash);
+      setDurationMs(track.duration_ms);
+      setPositionMs(0);
+      setIsPlaying(true);
+      invoke('track_play', { hash: track.hash }).catch(console.error);
+    };
+
     let unlisten: (() => void) | undefined;
     listen<AudioPayload>('audio://event', ({ payload }) => {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
-        // Ignore stale ticks for 600ms after a seek to prevent snap-back
+        const posMs = payload.PositionChanged;
         if (Date.now() - lastSeekTime.current > 600) {
-          setPositionMs(payload.PositionChanged);
+          setPositionMs(posMs);
+          // ── A·B loop enforcement ──────────────────────────────────────────
+          const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
+          if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+            const aMs = Math.floor(a * dur);
+            lastSeekTime.current = Date.now();
+            setPositionMs(aMs);
+            invoke('audio_seek', { positionMs: aMs }).catch(console.error);
+          }
         }
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
         if (payload.DurationKnown > 0) setDurationMs(payload.DurationKnown);
       }
       if (payload === 'TrackEnded') {
-        setIsPlaying(false);
         setPositionMs(0);
+        const { loopMode: lm, loadedHash: lh, abA: a, durationMs: dur } = sr.current;
+
+        if (lm === 'one') {
+          if (lh) invoke('track_play', { hash: lh }).catch(console.error);
+          setIsPlaying(true);
+          return;
+        }
+        if (lm === 'ab') {
+          const aMs = Math.floor(a * dur);
+          lastSeekTime.current = Date.now();
+          setPositionMs(aMs);
+          invoke('audio_seek', { positionMs: aMs }).catch(console.error);
+          invoke('audio_play').catch(console.error);
+          setIsPlaying(true);
+          return;
+        }
+
+        // loopMode 'off' — auto-advance
+        const { manualQueue: mq, playQueue: pq, activeQueue: aq,
+                isShuffle: shuffle, shuffleMode: sm, activeTrackId: atid } = sr.current;
+
+        if (mq.length > 0) {
+          const [next, ...rest] = mq;
+          setManualQueue(rest);
+          loadTrack(next);
+          return;
+        }
+
+        let idx = pq.findIndex(t => t.hash === lh);
+        if (idx === -1) idx = pq.findIndex(t => t.id === atid);
+
+        const nextIdx = idx + 1;
+        if (nextIdx >= pq.length) {
+          // End of queue — reshuffle or wrap
+          if (shuffle && aq.length > 0) {
+            const newQ = buildShuffledQueue(aq, sm);
+            if (newQ.length > 1 && newQ[0].hash === lh) [newQ[0], newQ[1]] = [newQ[1], newQ[0]];
+            setShuffledQueue(newQ);
+            loadTrack(newQ[0]);
+          } else {
+            const first = pq[0];
+            if (first) loadTrack(first);
+          }
+        } else {
+          loadTrack(pq[nextIdx]);
+        }
       }
-      if (payload === 'RemotePlay') setIsPlaying(true);
+      if (payload === 'RemotePlay')  setIsPlaying(true);
       if (payload === 'RemotePause') setIsPlaying(false);
       if (payload === 'RemoteTogglePlayPause') setIsPlaying(p => !p);
+      if (payload === 'RemoteNextTrack')     skipNextRef.current();
+      if (payload === 'RemotePreviousTrack') skipPrevRef.current();
     }).then(fn => { unlisten = fn; });
     return () => { unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Artwork prefetch — loads a window around the current carousel position ──
@@ -350,7 +480,7 @@ export default function DesktopApp() {
   useEffect(() => {
     const pts = trackAbPoints[activeTrackId];
     if (pts) { setAbA(pts.a); setAbB(pts.b); }
-    else { setAbA(0.2); setAbB(0.7); }
+    else { setAbA(0); setAbB(1); }
   }, [activeTrackId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -375,14 +505,30 @@ export default function DesktopApp() {
     if (shuffledQueue) { setShuffledQueue(null); setIsShuffle(false); }
   };
 
+  const toast = (msg: string, ms = 1800) => {
+    setGitToast(msg);
+    setTimeout(() => setGitToast(null), ms);
+  };
+
+  // off → fisher-yates → balanced → random → off
   const handleShuffle = () => {
     if (!isShuffle) {
-      const shuffled = [...activeQueue].sort(() => Math.random() - 0.5);
-      setShuffledQueue(shuffled);
+      updateSetting('shuffleMode', 'fisher-yates');
+      setShuffledQueue(buildShuffledQueue(activeQueue, 'fisher-yates'));
       setIsShuffle(true);
+      toast('Shuffle: True Shuffle');
+    } else if (settings.shuffleMode === 'fisher-yates') {
+      updateSetting('shuffleMode', 'balanced');
+      setShuffledQueue(buildShuffledQueue(activeQueue, 'balanced'));
+      toast('Shuffle: Balanced');
+    } else if (settings.shuffleMode === 'balanced') {
+      updateSetting('shuffleMode', 'random');
+      setShuffledQueue(buildShuffledQueue(activeQueue, 'random'));
+      toast('Shuffle: Random');
     } else {
       setShuffledQueue(null);
       setIsShuffle(false);
+      toast('Shuffle: Off');
     }
   };
 
@@ -516,10 +662,24 @@ export default function DesktopApp() {
   };
 
   const handleSkipNext = () => {
-    const idx = playQueue.findIndex(t => t.hash === loadedHash);
-    if (idx === -1) return;
-    const next = playQueue[(idx + 1) % playQueue.length];
-    if (!next) return;
+    // Manual queue takes priority
+    if (manualQueue.length > 0) {
+      const [next, ...rest] = manualQueue;
+      setManualQueue(rest);
+      setActiveTrackId(next.id);
+      invoke('track_play', { hash: next.hash }).catch(console.error);
+      setIsPlaying(true);
+      setLoadedHash(next.hash);
+      setDurationMs(next.duration_ms);
+      setPositionMs(0);
+      return;
+    }
+    const q = playQueue;
+    let idx = q.findIndex(t => t.hash === loadedHash);
+    if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
+    if (q.length === 0) return;
+    const nextIdx = (idx + 1) % q.length;
+    const next = q[nextIdx];
     setActiveTrackId(next.id);
     invoke('track_play', { hash: next.hash }).catch(console.error);
     setIsPlaying(true);
@@ -527,12 +687,22 @@ export default function DesktopApp() {
     setDurationMs(next.duration_ms);
     setPositionMs(0);
   };
+  skipNextRef.current = handleSkipNext;
 
   const handleSkipPrev = () => {
-    const idx = playQueue.findIndex(t => t.hash === loadedHash);
-    if (idx === -1) return;
-    const prev = playQueue[(idx - 1 + playQueue.length) % playQueue.length];
-    if (!prev) return;
+    // Restart current track if more than 3 s in — reload is more reliable than seek-to-0
+    if (positionMs > 3000 && loadedHash) {
+      invoke('track_play', { hash: loadedHash }).catch(console.error);
+      setPositionMs(0);
+      setIsPlaying(true);
+      return;
+    }
+    const q = playQueue;
+    let idx = q.findIndex(t => t.hash === loadedHash);
+    if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
+    if (q.length === 0) return;
+    const prevIdx = (idx - 1 + q.length) % q.length;
+    const prev = q[prevIdx];
     setActiveTrackId(prev.id);
     invoke('track_play', { hash: prev.hash }).catch(console.error);
     setIsPlaying(true);
@@ -540,6 +710,7 @@ export default function DesktopApp() {
     setDurationMs(prev.duration_ms);
     setPositionMs(0);
   };
+  skipPrevRef.current = handleSkipPrev;
 
   const handlePlayPause = () => {
     const track = playQueue.find(t => t.id === activeTrackId);
@@ -697,7 +868,8 @@ export default function DesktopApp() {
                         onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
                         isFav={isFav} onFav={() => setIsFav(p => !p)}
                         loopMode={loopMode} onLoopCycle={handleLoopCycle}
-                        isShuffle={isShuffle} onShuffle={handleShuffle}
+                        isShuffle={isShuffle} shuffleMode={settings.shuffleMode} onShuffle={handleShuffle}
+                        showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
                         onSeek={pct => {
                           const ms = Math.floor(pct * durationMs);
                           lastSeekTime.current = Date.now();
@@ -727,6 +899,8 @@ export default function DesktopApp() {
                         setGitToast('Select tracks in the library, then use "Add to Playlist"');
                         setTimeout(() => setGitToast(null), 3000);
                       } : undefined}
+                      onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
+                      onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
                       density={settings.density}
                     />
                   </>
@@ -801,6 +975,19 @@ export default function DesktopApp() {
           )}
         </div>
 
+        {/* Queue panel */}
+        {showQueue && (
+          <QueuePanel
+            playQueue={playQueue}
+            manualQueue={manualQueue}
+            loadedHash={loadedHash}
+            artworkUrls={artworkUrls}
+            onRemoveManual={idx => setManualQueue(q => q.filter((_, i) => i !== idx))}
+            onClearManual={() => setManualQueue([])}
+            onClose={() => setShowQueue(false)}
+          />
+        )}
+
         {/* Mini player */}
         {loadedHash && !miniPlayerCollapsed && (
           <MiniPlayer
@@ -822,6 +1009,7 @@ export default function DesktopApp() {
               invoke('audio_seek', { positionMs: ms }).catch(console.error);
             }}
             onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+            showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
             onCollapse={() => setMiniPlayerCollapsed(true)}
             onStop={() => {
               invoke('audio_stop').catch(console.error);
@@ -1016,7 +1204,7 @@ export default function DesktopApp() {
         {/* Git operation toast */}
         {gitToast && (
           <div style={{
-            position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)',
+            position: 'absolute', bottom: loadedHash ? 92 : 30, left: '50%', transform: 'translateX(-50%)',
             background: 'var(--bg-5)', border: '1px solid var(--border-2)',
             borderRadius: 6, padding: '7px 14px',
             fontSize: 11, color: 'var(--accent-light)',

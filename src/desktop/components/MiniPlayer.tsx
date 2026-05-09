@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 import type { Track } from '../data';
 import type { LoopMode } from './PlayerControls';
-import { IcoPlay, IcoPause, IcoNext, IcoPrev, IcoVolume, IcoLoop } from '../icons';
+import { IcoPlay, IcoPause, IcoNext, IcoPrev, IcoVolume, IcoLoop, IcoQueue } from '../icons';
 
 interface MiniPlayerProps {
   track:       Track | null;
@@ -17,6 +17,8 @@ interface MiniPlayerProps {
   onLoopCycle: () => void;
   onSeek:      (pct: number) => void;
   onVolume:    (vol: number) => void;
+  showQueue:   boolean;
+  onQueueToggle: () => void;
   onCollapse:  () => void;
   onStop:      () => void;
 }
@@ -24,7 +26,7 @@ interface MiniPlayerProps {
 export default function MiniPlayer({
   track, artworkUrl, isPlaying, positionMs, durationMs,
   loopMode, volume, onPlayPause, onSkipNext, onSkipPrev,
-  onLoopCycle, onSeek, onVolume, onCollapse, onStop,
+  onLoopCycle, onSeek, onVolume, showQueue, onQueueToggle, onCollapse, onStop,
 }: MiniPlayerProps) {
   const seekPct   = durationMs > 0 ? positionMs / durationMs : 0;
   const seekRef   = useRef<HTMLDivElement>(null);
@@ -131,8 +133,15 @@ export default function MiniPlayer({
           </button>
         </div>
 
-        {/* Right — loop + volume */}
+        {/* Right — queue + loop + volume */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+          <button
+            className={`btn btn-ghost btn-square btn-sm ${showQueue ? 'text-primary' : ''}`}
+            onClick={onQueueToggle}
+            title="Queue"
+          >
+            <IcoQueue size={14} />
+          </button>
           <button
             className={`btn btn-ghost btn-square btn-sm ${loopMode !== 'off' ? 'text-primary' : ''}`}
             onClick={onLoopCycle}

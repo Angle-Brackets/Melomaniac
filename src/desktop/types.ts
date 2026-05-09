@@ -1,6 +1,8 @@
 import type { ThemeName } from '../shared/themes';
 export type { ThemeName };
 
+export type ShuffleMode = 'fisher-yates' | 'balanced' | 'random';
+
 // App-wide settings persisted in memory (no disk storage yet)
 export interface AppSettings {
   theme: ThemeName;
@@ -11,4 +13,5 @@ export interface AppSettings {
   defaultView: 'Tracks' | 'History';
   discordEnabled: boolean;
   commitAuthor: string;
+  shuffleMode: ShuffleMode;
 }

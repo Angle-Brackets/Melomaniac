@@ -20,13 +20,15 @@ interface TrackListProps {
   artworkUrls: Record<string, string>;
   onRemoveTrack?: (hash: string) => void;
   onAddTracks?: () => void;
+  onPlayNext?: (track: Track) => void;
+  onAddToQueue?: (track: Track) => void;
   density?: 'compact' | 'normal' | 'relaxed';
 }
 
 export default function TrackList({
   tracks, activeTrackId, loadedHash, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
-  onRemoveTrack, onAddTracks, density = 'relaxed',
+  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = 'relaxed',
 }: TrackListProps) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -213,7 +215,26 @@ export default function TrackList({
                 <FiEdit2 size={12} /> Open in Editor
               </button>
             </li>
-            <li><button className="text-mm-t2">Add to queue</button></li>
+            {onPlayNext && (
+              <li>
+                <button
+                  className="flex items-center gap-2 text-mm-t1"
+                  onClick={e => { e.stopPropagation(); onPlayNext(t); setMenuTrackId(null); }}
+                >
+                  Play next
+                </button>
+              </li>
+            )}
+            {onAddToQueue && (
+              <li>
+                <button
+                  className="flex items-center gap-2 text-mm-t1"
+                  onClick={e => { e.stopPropagation(); onAddToQueue(t); setMenuTrackId(null); }}
+                >
+                  Add to queue
+                </button>
+              </li>
+            )}
             {onRemoveTrack && (
               <>
                 <li className="divider my-0" />
