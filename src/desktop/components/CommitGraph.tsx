@@ -156,9 +156,14 @@ function computeLayout(commits: GraphNode[]): RowLayout[] {
     // Incoming line to circle (top half)
     if (!isNew) lines.push({ x1: lx(myLane), y1: 0, x2: lx(myLane), y2: HALF, col: myColor, lane: myLane });
 
-    // Outgoing lines to parents (bottom half)
-    for (const p of parentLanes)
-      lines.push({ x1: lx(myLane), y1: HALF, x2: lx(p.lane), y2: NODE_H, col: myColor, lane: myLane });
+    // Outgoing lines to parents (bottom half).
+    // First parent continues in this commit's color; additional parents (merge sources)
+    // use the source lane's color so the branch line stays its own color up to the diamond.
+    for (let pi = 0; pi < parentLanes.length; pi++) {
+      const p = parentLanes[pi];
+      const lineCol = pi === 0 ? myColor : (colors[p.lane] ?? myColor);
+      lines.push({ x1: lx(myLane), y1: HALF, x2: lx(p.lane), y2: NODE_H, col: lineCol, lane: myLane });
+    }
 
     const maxLane = Math.max(
       myLane,
@@ -262,7 +267,7 @@ function CommitDetail({ row, playlistId, branchName, onClose, onBranchCreated, o
       <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div>
           <div style={labelStyle}>Message</div>
-          <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5, fontFamily: "'Outfit', sans-serif" }}>
+          <div style={{ fontSize: 12, color: 'var(--text-0)', lineHeight: 1.5, fontFamily: "'Outfit', sans-serif", whiteSpace: 'pre-wrap' }}>
             {commit.message ?? <em style={{ color: 'var(--text-3)' }}>no message</em>}
           </div>
         </div>
@@ -479,14 +484,26 @@ function GraphPanel({ initPlaylistId, initBranch, refreshKey, onBranchCreated, o
                           strokeLinecap="round"
                         />
                       ))}
-                      <circle
-                        cx={row.dotCx} cy={row.dotCy}
-                        r={isSel ? DOT_R + 1.5 : DOT_R}
-                        fill={row.color}
-                        stroke={isSel ? '#fff' : 'var(--bg-1)'}
-                        strokeWidth={isSel ? 2 : 1.5}
-                        style={{ filter: isSel ? `drop-shadow(0 0 5px ${row.color})` : undefined }}
-                      />
+                      {row.commit.parents.length > 1 ? (
+                        <rect
+                          x={row.dotCx - DOT_R * 0.9} y={row.dotCy - DOT_R * 0.9}
+                          width={DOT_R * 1.8} height={DOT_R * 1.8}
+                          transform={`rotate(45,${row.dotCx},${row.dotCy})`}
+                          fill={row.color}
+                          stroke={isSel ? '#fff' : 'var(--bg-1)'}
+                          strokeWidth={isSel ? 2 : 1.5}
+                          style={{ filter: isSel ? `drop-shadow(0 0 5px ${row.color})` : undefined }}
+                        />
+                      ) : (
+                        <circle
+                          cx={row.dotCx} cy={row.dotCy}
+                          r={isSel ? DOT_R + 1.5 : DOT_R}
+                          fill={row.color}
+                          stroke={isSel ? '#fff' : 'var(--bg-1)'}
+                          strokeWidth={isSel ? 2 : 1.5}
+                          style={{ filter: isSel ? `drop-shadow(0 0 5px ${row.color})` : undefined }}
+                        />
+                      )}
                     </svg>
                   </div>
 
@@ -496,6 +513,11 @@ function GraphPanel({ initPlaylistId, initBranch, refreshKey, onBranchCreated, o
                       <span className="badge badge-xs font-mono" style={{ background: row.color + '25', color: row.color, border: 'none', flexShrink: 0, fontSize: 9 }}>
                         {shortHash(row.commit.hash)}
                       </span>
+                      {row.commit.parents.length > 1 && (
+                        <span className="badge badge-xs" style={{ background: 'var(--bg-5)', color: 'var(--text-2)', border: 'none', flexShrink: 0, fontSize: 8, fontFamily: "'Outfit', sans-serif" }}>
+                          ⋈ merge
+                        </span>
+                      )}
                       {row.commit.refs.map(ref => (
                         <span key={ref} className="badge badge-xs font-mono" style={{ background: 'var(--accent-dim)', color: 'var(--accent-light)', border: 'none', flexShrink: 0, fontSize: 8 }}>
                           ⎇ {ref}

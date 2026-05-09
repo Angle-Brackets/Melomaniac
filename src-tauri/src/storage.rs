@@ -217,11 +217,34 @@ pub async fn playlist_fork(
         .fork_playlist(&source_id, &new_name)
         .await
         .map_err(|e| e.to_string())?;
-    let branches = storage
-        .db
-        .get_branches(&playlist.id)
-        .await
-        .map_err(|e| e.to_string())?;
+
+    // Stamp the new name into every branch's tree so future load_tree calls
+    // get the fork's name instead of the original's.
+    let source_name = storage.db.get_playlist(&source_id).await
+        .ok().flatten()
+        .map(|p| p.name)
+        .unwrap_or_else(|| source_id.clone());
+    let short_commit = playlist.forked_at_commit.as_deref()
+        .map(|h| &h[..h.len().min(7)])
+        .unwrap_or("unknown");
+    let fork_msg = format!("Forked from {} @ {}", source_name, short_commit);
+
+    let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+    for branch in &branches {
+        let mut tree = load_tree(&storage, &playlist.id, &branch.name).await?;
+        tree.meta.name = new_name.clone();
+        let json = tree.to_json().map_err(|e| e.to_string())?;
+        write_commit(&storage, &playlist.id, &branch.name, &json, Some(fork_msg.clone())).await?;
+    }
+
+    storage.db.update_playlist_cache(
+        &playlist.id,
+        &new_name,
+        playlist.description.as_deref(),
+        playlist.artwork_hash.as_deref(),
+    ).await.map_err(|e| e.to_string())?;
+
+    let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
     Ok(PlaylistWithBranches { playlist, branches })
 }
 
@@ -299,6 +322,50 @@ async fn write_commit(
     };
     let parents: Vec<&str> = parent_hash.iter().map(String::as_str).collect();
     db.insert_commit(&record, &parents).await.map_err(|e| e.to_string())?;
+    db.update_branch_head(playlist_id, branch_name, &commit_hash).await.map_err(|e| e.to_string())?;
+
+    Ok(commit_hash)
+}
+
+/// Write a commit with an explicit parent list — used for merge commits (two parents).
+async fn write_commit_explicit(
+    storage:     &StorageState,
+    playlist_id: &str,
+    branch_name: &str,
+    tree_json:   &str,
+    parents:     &[String],
+    message:     Option<String>,
+) -> Result<String, String> {
+    let db  = &storage.db;
+    let cas = &storage.cas;
+
+    let tree_hash = cas.write_blob(tree_json.as_bytes()).await.map_err(|e| e.to_string())?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let first_parent = parents.first();
+    let commit_body = serde_json::json!({
+        "tree_hash": &tree_hash,
+        "parent":    first_parent,
+        "timestamp": timestamp,
+        "device_id": "desktop",
+        "message":   &message,
+    }).to_string();
+
+    let commit_hash = cas.write_blob(commit_body.as_bytes()).await.map_err(|e| e.to_string())?;
+
+    let record = CommitRecord {
+        hash: commit_hash.clone(),
+        tree_hash,
+        timestamp,
+        device_id: "desktop".into(),
+        message,
+    };
+    let parent_refs: Vec<&str> = parents.iter().map(String::as_str).collect();
+    db.insert_commit(&record, &parent_refs).await.map_err(|e| e.to_string())?;
     db.update_branch_head(playlist_id, branch_name, &commit_hash).await.map_err(|e| e.to_string())?;
 
     Ok(commit_hash)
@@ -579,24 +646,51 @@ pub async fn branch_append_tracks(
     message:     Option<String>,
     storage:     State<'_, StorageState>,
 ) -> Result<String, String> {
-    let mut tree = load_tree(&storage, &playlist_id, &branch_name).await?;
+    append_tracks_inner(&storage, &playlist_id, &branch_name, &hashes, message).await
+}
+
+async fn append_tracks_inner(
+    storage:     &StorageState,
+    playlist_id: &str,
+    branch_name: &str,
+    hashes:      &[String],
+    message:     Option<String>,
+) -> Result<String, String> {
+    let mut tree = load_tree(storage, playlist_id, branch_name).await?;
 
     let existing_hashes: std::collections::HashSet<String> =
         tree.tracks.iter().map(|e| e.hash.clone()).collect();
 
-    for hash in &hashes {
+    let mut added_titles: Vec<String> = Vec::new();
+    for hash in hashes {
         if !existing_hashes.contains(hash) {
             tree.tracks.push(melomaniac_storage::TrackEntry {
                 hash: hash.clone(),
                 ..Default::default()
             });
+            let title = storage.db.get_track(hash).await
+                .ok().flatten()
+                .map(|t| t.title)
+                .unwrap_or_else(|| hash[..hash.len().min(7)].to_string());
+            added_titles.push(title);
         }
     }
 
-    let n = hashes.len();
-    let auto_msg = format!("Add {} track{}", n, if n == 1 { "" } else { "s" });
+    // No-op if every hash was already present
+    if added_titles.is_empty() {
+        return head_commit(storage, playlist_id, branch_name).await;
+    }
+
+    let auto_msg = match added_titles.len() {
+        1 => format!("Add: {}", added_titles[0]),
+        _ => {
+            let mut lines = vec!["Add tracks:".to_string()];
+            lines.extend(added_titles.iter().map(|t| format!("• {t}")));
+            lines.join("\n")
+        }
+    };
     let json = tree.to_json().map_err(|e| e.to_string())?;
-    write_commit(&storage, &playlist_id, &branch_name, &json, Some(message.unwrap_or(auto_msg))).await
+    write_commit(storage, playlist_id, branch_name, &json, Some(message.unwrap_or(auto_msg))).await
 }
 
 /// Return the most recent commits across all branches (newest-first).
@@ -782,6 +876,78 @@ pub async fn library_get_stray_tracks(
     Ok(stray)
 }
 
+/// Merge one branch into another, writing a two-parent merge commit.
+///
+/// `strategy`:
+///   - `"union"`        — keep target order, append tracks from source not already present
+///   - `"intersection"` — keep only tracks present in both branches
+#[tauri::command]
+pub async fn branch_merge(
+    playlist_id:   String,
+    target_branch: String,
+    source_branch: String,
+    strategy:      String,
+    message:       Option<String>,
+    storage:       State<'_, StorageState>,
+) -> Result<String, String> {
+    merge_branches_inner(&storage, &playlist_id, &target_branch, &source_branch, &strategy, message).await
+}
+
+async fn merge_branches_inner(
+    storage:       &StorageState,
+    playlist_id:   &str,
+    target_branch: &str,
+    source_branch: &str,
+    strategy:      &str,
+    message:       Option<String>,
+) -> Result<String, String> {
+    use std::collections::HashSet;
+
+    if target_branch == source_branch {
+        return Err("source and target branch must be different".into());
+    }
+
+    let target_tree = load_tree(storage, playlist_id, target_branch).await?;
+    let source_tree = load_tree(storage, playlist_id, source_branch).await?;
+
+    let target_head = head_commit(storage, playlist_id, target_branch).await?;
+    let source_head = head_commit(storage, playlist_id, source_branch).await?;
+
+    if target_head == source_head {
+        return Err("branches are already at the same commit — nothing to merge".into());
+    }
+
+    let mut merged_tree = target_tree.clone();
+
+    let target_hashes: HashSet<String> = target_tree.tracks.iter().map(|t| t.hash.clone()).collect();
+    let source_hashes: HashSet<String> = source_tree.tracks.iter().map(|t| t.hash.clone()).collect();
+
+    merged_tree.tracks = match strategy {
+        "intersection" => target_tree.tracks.into_iter()
+            .filter(|t| source_hashes.contains(&t.hash))
+            .collect(),
+        _ => {
+            let mut merged = target_tree.tracks;
+            for track in source_tree.tracks {
+                if !target_hashes.contains(&track.hash) {
+                    merged.push(track);
+                }
+            }
+            merged
+        }
+    };
+
+    let auto_msg = format!("Merge '{}' into '{}'", source_branch, target_branch);
+    let msg = message.unwrap_or(auto_msg);
+    let json = merged_tree.to_json().map_err(|e| e.to_string())?;
+
+    write_commit_explicit(
+        storage, playlist_id, target_branch, &json,
+        &[target_head, source_head],
+        Some(msg),
+    ).await
+}
+
 // ── Initialisation helper ─────────────────────────────────────────────────────
 
 pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageState, String> {
@@ -806,4 +972,330 @@ pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageSta
     indexer.rebuild_playlist_caches().await.map_err(|e| e.to_string())?;
 
     Ok(StorageState { cas, db })
+}
+
+// ── Dev seeding (debug builds only) ──────────────────────────────────────────
+
+/// Recreate the "DevelopmentOnly" playlist from scratch with `track_hashes` on
+/// the `main` branch.  Called once at app startup in debug builds so the carousel
+/// and playback UI always have a real playlist to exercise.
+///
+/// The playlist is deleted and re-created every launch — it is a pure UI test
+/// fixture and its commit history intentionally does not accumulate.
+#[cfg(debug_assertions)]
+pub async fn dev_seed_dev_playlist(
+    storage:      &StorageState,
+    track_hashes: &[String],
+) -> Result<(), String> {
+    use melomaniac_storage::{TrackEntry, TreeBlob};
+
+    // Wipe any previous DevelopmentOnly playlist so history never accumulates.
+    let existing = storage.db.get_all_playlists().await.map_err(|e| e.to_string())?;
+    for pl in existing {
+        if pl.name == "DevelopmentOnly" {
+            storage.db.delete_playlist(&pl.id).await.map_err(|e| e.to_string())?;
+        }
+    }
+
+    let pl = storage.db
+        .create_playlist("DevelopmentOnly", None)
+        .await.map_err(|e| e.to_string())?;
+
+    let mut tree = TreeBlob::new("DevelopmentOnly");
+    tree.tracks = track_hashes.iter()
+        .map(|h| TrackEntry { hash: h.clone(), ..Default::default() })
+        .collect();
+    let json = tree.to_json().map_err(|e| e.to_string())?;
+
+    // Single commit — this is the entire "history" for this playlist.
+    write_commit(
+        storage, &pl.id, "main", &json,
+        Some(format!(
+            "DevelopmentOnly: {} tracks from tests/audio/",
+            track_hashes.len()
+        )),
+    ).await?;
+
+    Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use melomaniac_storage::TrackRecord;
+
+    // ── Fixtures ──────────────────────────────────────────────────────────────
+
+    async fn setup() -> (StorageState, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cas = Arc::new(CasStore::new(tmp.path().join("objects")));
+        let db  = Arc::new(
+            Database::open(PathBuf::from(":memory:"))
+                .await
+                .expect("open db"),
+        );
+        db.migrate().await.expect("migrate");
+        (StorageState { cas, db }, tmp)
+    }
+
+    fn track_record(hash: &str, title: &str) -> TrackRecord {
+        TrackRecord {
+            hash:         hash.to_string(),
+            title:        title.to_string(),
+            artist:       "Artist".to_string(),
+            album:        None,
+            artwork_hash: None,
+            duration_ms:  3000,
+            favorited:    false,
+            mime_type:    None,
+            ingested_at:  0,
+            source_url:   None,
+        }
+    }
+
+    /// Create a playlist with a committed empty tree, return its id.
+    async fn new_playlist(storage: &StorageState, name: &str) -> String {
+        let pl = storage.db.create_playlist(name, None).await.expect("create_playlist");
+        let tree = TreeBlob::new(name);
+        let json = tree.to_json().expect("json");
+        write_commit(storage, &pl.id, "main", &json, Some("Initial commit".into()))
+            .await.expect("initial commit");
+        pl.id
+    }
+
+    // ── branch_append_tracks ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn append_adds_new_tracks_and_commits() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("aaa", "Song A")).await.unwrap();
+        let h1 = append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+
+        let tree = load_tree(&storage, &pid, "main").await.unwrap();
+        assert_eq!(tree.tracks.len(), 1);
+        assert_eq!(tree.tracks[0].hash, "aaa");
+
+        // HEAD advanced
+        let h2 = head_commit(&storage, &pid, "main").await.unwrap();
+        assert_eq!(h1, h2);
+    }
+
+    #[tokio::test]
+    async fn append_noop_on_all_duplicates() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("aaa", "Song A")).await.unwrap();
+        append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+        let head_before = head_commit(&storage, &pid, "main").await.unwrap();
+
+        // Adding the same hash again — must be a no-op (no new commit)
+        append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+        let head_after = head_commit(&storage, &pid, "main").await.unwrap();
+
+        assert_eq!(head_before, head_after, "duplicate add must not create a new commit");
+    }
+
+    #[tokio::test]
+    async fn append_partial_dedup_only_adds_new() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("aaa", "Song A")).await.unwrap();
+        storage.db.insert_track(&track_record("bbb", "Song B")).await.unwrap();
+        append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+
+        // Add both — only bbb should be new
+        append_tracks_inner(&storage, &pid, "main",
+            &["aaa".to_string(), "bbb".to_string()], None)
+            .await.unwrap();
+
+        let tree = load_tree(&storage, &pid, "main").await.unwrap();
+        assert_eq!(tree.tracks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn append_single_track_message() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+        storage.db.insert_track(&track_record("aaa", "Song A")).await.unwrap();
+        append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+
+        let head = head_commit(&storage, &pid, "main").await.unwrap();
+        let commit = storage.db.get_commit(&head).await.unwrap().unwrap();
+        let msg = commit.message.as_deref().unwrap_or("");
+        assert_eq!(msg, "Add: Song A");
+    }
+
+    #[tokio::test]
+    async fn append_multi_track_message_uses_bullets() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+        storage.db.insert_track(&track_record("aaa", "Song A")).await.unwrap();
+        storage.db.insert_track(&track_record("bbb", "Song B")).await.unwrap();
+        append_tracks_inner(&storage, &pid, "main",
+            &["aaa".to_string(), "bbb".to_string()], None)
+            .await.unwrap();
+
+        let head = head_commit(&storage, &pid, "main").await.unwrap();
+        let commit = storage.db.get_commit(&head).await.unwrap().unwrap();
+        let msg = commit.message.as_deref().unwrap_or("");
+        assert!(msg.contains("Add tracks:"), "expected header, got: {msg}");
+        assert!(msg.contains("• Song A"),    "expected bullet A, got: {msg}");
+        assert!(msg.contains("• Song B"),    "expected bullet B, got: {msg}");
+    }
+
+    // ── merge_branches_inner ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn merge_union_appends_source_unique_tracks() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("aaa", "On Main")).await.unwrap();
+        storage.db.insert_track(&track_record("bbb", "On Feature")).await.unwrap();
+
+        // Seed main with "aaa"
+        append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+
+        // Create feature branch and add "bbb"
+        storage.db.create_branch(&pid, "feature", None).await.unwrap();
+        let feature_tree_json = {
+            let mut t = load_tree(&storage, &pid, "main").await.unwrap();
+            t.tracks.clear();
+            t.tracks.push(melomaniac_storage::TrackEntry { hash: "bbb".to_string(), ..Default::default() });
+            t.to_json().unwrap()
+        };
+        write_commit(&storage, &pid, "feature", &feature_tree_json, Some("Add bbb".into()))
+            .await.unwrap();
+
+        // Merge feature → main (union)
+        merge_branches_inner(&storage, &pid, "main", "feature", "union", None)
+            .await.unwrap();
+
+        let tree = load_tree(&storage, &pid, "main").await.unwrap();
+        let hashes: Vec<_> = tree.tracks.iter().map(|t| t.hash.as_str()).collect();
+        assert!(hashes.contains(&"aaa"), "main's own track should remain");
+        assert!(hashes.contains(&"bbb"), "feature's unique track should be appended");
+        assert_eq!(hashes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn merge_union_no_duplicates_for_shared_tracks() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("aaa", "Shared")).await.unwrap();
+
+        // Both branches have "aaa"
+        append_tracks_inner(&storage, &pid, "main", &["aaa".to_string()], None)
+            .await.unwrap();
+
+        storage.db.create_branch(&pid, "feat", None).await.unwrap();
+        let feat_tree_json = {
+            let mut t = load_tree(&storage, &pid, "main").await.unwrap();
+            t.to_json().unwrap()
+        };
+        write_commit(&storage, &pid, "feat", &feat_tree_json, Some("Copy".into()))
+            .await.unwrap();
+
+        merge_branches_inner(&storage, &pid, "main", "feat", "union", None)
+            .await.unwrap();
+
+        let tree = load_tree(&storage, &pid, "main").await.unwrap();
+        assert_eq!(tree.tracks.len(), 1, "shared track must not be duplicated");
+    }
+
+    #[tokio::test]
+    async fn merge_intersection_keeps_only_shared_tracks() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("aaa", "Shared")).await.unwrap();
+        storage.db.insert_track(&track_record("bbb", "Main only")).await.unwrap();
+
+        // main: [aaa, bbb], feature: [aaa]
+        append_tracks_inner(&storage, &pid, "main",
+            &["aaa".to_string(), "bbb".to_string()], None).await.unwrap();
+
+        storage.db.create_branch(&pid, "feat", None).await.unwrap();
+        let feat_json = {
+            let mut t = load_tree(&storage, &pid, "main").await.unwrap();
+            t.tracks.retain(|e| e.hash == "aaa");
+            t.to_json().unwrap()
+        };
+        write_commit(&storage, &pid, "feat", &feat_json, Some("Only aaa".into()))
+            .await.unwrap();
+
+        merge_branches_inner(&storage, &pid, "main", "feat", "intersection", None)
+            .await.unwrap();
+
+        let tree = load_tree(&storage, &pid, "main").await.unwrap();
+        let hashes: Vec<_> = tree.tracks.iter().map(|t| t.hash.as_str()).collect();
+        assert_eq!(hashes, vec!["aaa"], "intersection must remove main-only track");
+    }
+
+    #[tokio::test]
+    async fn merge_same_branch_is_error() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+        let result = merge_branches_inner(&storage, &pid, "main", "main", "union", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn merge_produces_two_parent_commit() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("bbb", "B")).await.unwrap();
+        storage.db.create_branch(&pid, "feat", None).await.unwrap();
+        let feat_json = {
+            let t = load_tree(&storage, &pid, "main").await.unwrap();
+            let mut t = t;
+            t.tracks.push(melomaniac_storage::TrackEntry { hash: "bbb".to_string(), ..Default::default() });
+            t.to_json().unwrap()
+        };
+        write_commit(&storage, &pid, "feat", &feat_json, Some("Add bbb".into()))
+            .await.unwrap();
+
+        let merge_hash = merge_branches_inner(&storage, &pid, "main", "feat", "union", None)
+            .await.unwrap();
+
+        let parents = storage.db.get_commit_parents(&merge_hash).await.unwrap();
+        assert_eq!(parents.len(), 2, "merge commit must record exactly two parents");
+    }
+
+    #[tokio::test]
+    async fn merge_message_defaults_to_branch_names() {
+        let (storage, _tmp) = setup().await;
+        let pid = new_playlist(&storage, "P").await;
+
+        storage.db.insert_track(&track_record("bbb", "B")).await.unwrap();
+        storage.db.create_branch(&pid, "feat", None).await.unwrap();
+        let feat_json = {
+            let t = load_tree(&storage, &pid, "main").await.unwrap();
+            let mut t = t;
+            t.tracks.push(melomaniac_storage::TrackEntry { hash: "bbb".to_string(), ..Default::default() });
+            t.to_json().unwrap()
+        };
+        write_commit(&storage, &pid, "feat", &feat_json, Some("Add bbb".into()))
+            .await.unwrap();
+
+        let merge_hash = merge_branches_inner(&storage, &pid, "main", "feat", "union", None)
+            .await.unwrap();
+
+        let commit = storage.db.get_commit(&merge_hash).await.unwrap().unwrap();
+        assert_eq!(commit.message.as_deref(), Some("Merge 'feat' into 'main'"));
+    }
 }

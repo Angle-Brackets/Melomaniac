@@ -1,22 +1,41 @@
 import { useState } from 'react';
 import type { PlaylistRecord } from '../data';
 
-export default function PlaylistSettingsPanel({ playlist }: { playlist: PlaylistRecord | null }) {
+interface Props {
+  playlist:  PlaylistRecord | null;
+  onDelete?: () => void;
+  onRename?: (newName: string) => void;
+}
+
+export default function PlaylistSettingsPanel({ playlist, onDelete, onRename }: Props) {
   const branch = playlist?.branches[0];
-  const [upstream, setUpstream] = useState(
-    `github.com/you/${(playlist?.name ?? '').toLowerCase().replace(/ /g, '-')}`
-  );
+  const [name, setName] = useState(playlist?.name ?? '');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const nameChanged = name.trim() !== (playlist?.name ?? '').trim() && name.trim().length > 0;
 
   return (
     <div className="flex-1 px-6 py-[18px] overflow-y-auto styled-scroll">
       <div style={{ maxWidth: 500 }}>
         <div className="text-[10px] font-bold tracking-widest text-mm-t2 uppercase mb-2.5">Playlist Settings</div>
 
+        {/* Editable name */}
+        <div className="flex items-center justify-between py-2 border-b border-mm-b0 gap-3">
+          <span className="text-[12px] text-mm-t2 shrink-0">Name</span>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && nameChanged) onRename?.(name.trim()); }}
+            className="input input-xs bg-mm-3 text-mm-t0 flex-1 text-right font-['Outfit']"
+            style={{ maxWidth: 280 }}
+          />
+        </div>
+
         {([
-          ['Name', playlist?.name ?? '—'],
           ['Branches', `${playlist?.branches.length ?? 0}`],
           ['Branch', branch?.name ?? 'main'],
           ['Last commit', branch?.head_commit?.slice(0, 7) ?? '—'],
+          ['Forked from', playlist?.forked_from ? playlist.forked_from.slice(0, 8) + '…' : '—'],
         ] as [string, string][]).map(([k, v]) => (
           <div key={k} className="flex items-center justify-between py-2 border-b border-mm-b0">
             <span className="text-[12px] text-mm-t2">{k}</span>
@@ -24,19 +43,31 @@ export default function PlaylistSettingsPanel({ playlist }: { playlist: Playlist
           </div>
         ))}
 
-        <div className="py-2.5 border-b border-mm-b0">
-          <div className="text-[12px] text-mm-t2 mb-1.5">Upstream remote URL</div>
-          <input
-            value={upstream}
-            onChange={e => setUpstream(e.target.value)}
-            className="input input-sm w-full font-mono text-[11px] bg-mm-3 text-mm-t0"
-          />
-        </div>
-
-        <div className="flex gap-2 mt-3.5">
-          <button className="btn btn-ghost btn-sm text-mm-t1">Fork Playlist</button>
-          <button className="btn btn-ghost btn-sm text-error">Delete Playlist</button>
-          <button className="btn btn-sm border border-mm-accent-dim bg-mm-5 text-mm-accent-lit">Save Changes</button>
+        <div className="flex gap-2 mt-4">
+          {nameChanged && (
+            <button
+              className="btn btn-sm border border-mm-accent-dim bg-mm-5 text-mm-accent-lit"
+              onClick={() => onRename?.(name.trim())}
+            >
+              Save name
+            </button>
+          )}
+          <div className="flex-1" />
+          {confirmDelete ? (
+            <>
+              <span className="text-[11px] text-error self-center">Delete permanently?</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(false)}>Cancel</button>
+              <button className="btn btn-sm btn-error" onClick={onDelete}>Delete</button>
+            </>
+          ) : (
+            <button
+              className="btn btn-ghost btn-sm text-error"
+              onClick={() => setConfirmDelete(true)}
+              disabled={!playlist}
+            >
+              Delete Playlist
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -27,13 +27,17 @@ pub struct TrackRecord {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
 pub struct PlaylistRecord {
-    pub id:           String,
-    pub name:         String,
-    pub description:  Option<String>,
-    pub created_at:   i64,
-    pub forked_from:  Option<String>,
+    pub id:               String,
+    pub name:             String,
+    pub description:      Option<String>,
+    pub created_at:       i64,
+    /// Source playlist ID if this playlist was forked; NULL otherwise.
+    pub forked_from:      Option<String>,
+    /// HEAD commit of `main` on the source playlist at fork time.
+    /// This is the merge-base for future merge-fork-back operations.
+    pub forked_at_commit: Option<String>,
     /// Cached from the latest commit's tree blob; the blob is authoritative.
-    pub artwork_hash: Option<String>,
+    pub artwork_hash:     Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -224,8 +228,8 @@ impl Database {
         let now = unix_now();
 
         sqlx::query(
-            "INSERT INTO playlists (id, name, description, created_at, forked_from)
-             VALUES (?, ?, ?, ?, NULL)"
+            "INSERT INTO playlists (id, name, description, created_at, forked_from, forked_at_commit)
+             VALUES (?, ?, ?, ?, NULL, NULL)"
         )
         .bind(&id).bind(name).bind(description).bind(now)
         .execute(&self.pool).await?;
@@ -242,27 +246,35 @@ impl Database {
             name: name.to_string(),
             description: description.map(str::to_string),
             created_at: now,
-            forked_from: None,
-            artwork_hash: None,
+            forked_from:      None,
+            forked_at_commit: None,
+            artwork_hash:     None,
         })
     }
 
     pub async fn fork_playlist(
         &self,
         source_id: &str,
-        new_name: &str,
+        new_name:  &str,
     ) -> Result<PlaylistRecord, StorageError> {
         let new_id = uuid::Uuid::new_v4().to_string();
         let now    = unix_now();
 
+        // Snapshot the current HEAD of `main` as the merge-base for future
+        // merge-fork-back operations.
+        let fork_at = self.get_branches(source_id).await?
+            .into_iter()
+            .find(|b| b.name == "main")
+            .and_then(|b| b.head_commit);
+
         sqlx::query(
-            "INSERT INTO playlists (id, name, description, created_at, forked_from)
-             VALUES (?, ?, NULL, ?, ?)"
+            "INSERT INTO playlists (id, name, description, created_at, forked_from, forked_at_commit)
+             VALUES (?, ?, NULL, ?, ?, ?)"
         )
-        .bind(&new_id).bind(new_name).bind(now).bind(source_id)
+        .bind(&new_id).bind(new_name).bind(now).bind(source_id).bind(&fork_at)
         .execute(&self.pool).await?;
 
-        // Copy all branches — they point to the same HEAD commits.
+        // Copy all branches — they share the same HEAD commits as the source.
         // New commits on either side diverge independently from this point.
         for branch in self.get_branches(source_id).await? {
             let bid = uuid::Uuid::new_v4().to_string();
@@ -274,12 +286,13 @@ impl Database {
         }
 
         Ok(PlaylistRecord {
-            id: new_id,
-            name: new_name.to_string(),
-            description: None,
-            created_at: now,
-            forked_from: Some(source_id.to_string()),
-            artwork_hash: None,
+            id:               new_id,
+            name:             new_name.to_string(),
+            description:      None,
+            created_at:       now,
+            forked_from:      Some(source_id.to_string()),
+            forked_at_commit: fork_at,
+            artwork_hash:     None,
         })
     }
 

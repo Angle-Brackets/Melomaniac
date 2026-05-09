@@ -5,17 +5,18 @@ import { IcoClose } from '../icons';
 import { Select } from './Select';
 
 interface Props {
-  count:    number;
-  hashes:   string[];
-  onDone:   () => void;
-  onCancel: () => void;
+  count:              number;
+  hashes:             string[];
+  onDone:             (playlistId: string, branchName: string) => void;
+  onCancel:           () => void;
+  defaultPlaylistId?: string;
 }
 
 interface PlaylistWithBranches extends PlaylistRecord {
   branches: PlaylistRecord['branches'];
 }
 
-export default function AddToPlaylistModal({ count, hashes, onDone, onCancel }: Props) {
+export default function AddToPlaylistModal({ count, hashes, onDone, onCancel, defaultPlaylistId }: Props) {
   const [playlists,     setPlaylists]     = useState<PlaylistWithBranches[]>([]);
   const [selectedPl,    setSelectedPl]    = useState<string | null>(null);
   const [selectedBr,    setSelectedBr]    = useState<string>('main');
@@ -25,8 +26,10 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel }: 
   useEffect(() => {
     invoke<PlaylistWithBranches[]>('playlist_get_all').then(pl => {
       setPlaylists(pl);
-      if (pl.length > 0) setSelectedPl(pl[0].id);
+      const initial = defaultPlaylistId && pl.find(p => p.id === defaultPlaylistId);
+      setSelectedPl(initial ? initial.id : (pl[0]?.id ?? null));
     }).catch(() => setError('Failed to load playlists'));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activePl = playlists.find(p => p.id === selectedPl);
@@ -41,7 +44,7 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel }: 
         branchName: selectedBr,
         hashes,
       });
-      onDone();
+      onDone(selectedPl, selectedBr);
     } catch (e) {
       setError(String(e));
       setIsSubmitting(false);

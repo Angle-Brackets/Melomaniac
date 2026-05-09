@@ -28,6 +28,8 @@ import WindowResizeEdges from './components/WindowResizeEdges';
 import NewPlaylistModal from './components/NewPlaylistModal';
 import CommitBar from './components/CommitBar';
 import PlaylistArtworkModal from './components/PlaylistArtworkModal';
+import ForkPlaylistModal from './components/ForkPlaylistModal';
+import MergeBranchModal from './components/MergeBranchModal';
 
 export type { AppSettings };
 
@@ -67,6 +69,8 @@ export default function DesktopApp() {
   const [showCommitGraph,  setShowCommitGraph]   = useState(false);
   const [showSettings,     setShowSettings]      = useState(false);
   const [showBranchModal,  setShowBranchModal]   = useState(false);
+  const [showForkModal,    setShowForkModal]     = useState(false);
+  const [showMergeModal,   setShowMergeModal]    = useState(false);
   const [activePlaylistId, setActivePlaylistId]  = useState<string | null>(null);
   const [activeBranch, setActiveBranch] = useState('main');
   const [playlistRecords,  setPlaylistRecords]   = useState<PlaylistRecord[]>([]);
@@ -107,10 +111,15 @@ export default function DesktopApp() {
   // Fall back to first mock for the playlist header when no real playlist is selected
   const playlistForHeader = activePlaylist ?? null;
 
-  // Effective play order: shuffled queue when active, otherwise the playlist order
+  // When a playlist is selected, the queue is its tracks; otherwise fall back to
+  // the full library so the carousel is never empty.
+  const activeQueue = useMemo(
+    () => playlistTracks ?? trackOrder,
+    [playlistTracks, trackOrder],
+  );
   const playQueue = useMemo(
-    () => (isShuffle && shuffledQueue ? shuffledQueue : trackOrder),
-    [isShuffle, shuffledQueue, trackOrder],
+    () => (isShuffle && shuffledQueue ? shuffledQueue : activeQueue),
+    [isShuffle, shuffledQueue, activeQueue],
   );
   const carouselAlbums = useMemo(
     () => playQueue.map(t => ({
@@ -174,6 +183,11 @@ export default function DesktopApp() {
 
   // ── Load tracks for the active playlist ──────────────────────────────────
   useEffect(() => {
+    // Clear shuffle state when the source changes so the queue doesn't carry
+    // over tracks from a previous playlist into the new one.
+    setShuffledQueue(null);
+    setIsShuffle(false);
+
     if (!activePlaylistId) { setPlaylistTracks(null); return; }
     invoke<TrackRecord[]>('playlist_get_tracks', {
       playlistId:  activePlaylistId,
@@ -331,7 +345,7 @@ export default function DesktopApp() {
 
   const handleShuffle = () => {
     if (!isShuffle) {
-      const shuffled = [...trackOrder].sort(() => Math.random() - 0.5);
+      const shuffled = [...activeQueue].sort(() => Math.random() - 0.5);
       setShuffledQueue(shuffled);
       setIsShuffle(true);
     } else {
@@ -344,6 +358,59 @@ export default function DesktopApp() {
     handleGitAction('commit');
     setHasUncommitted(false);
   };
+
+  const handlePlaylistReorder = useCallback(async (newOrder: Track[] | null) => {
+    if (!activePlaylistId) return;
+    if (newOrder === null) {
+      // Discard: reload from backend
+      invoke<TrackRecord[]>('playlist_get_tracks', { playlistId: activePlaylistId, branchName: activeBranch })
+        .then(r => setPlaylistTracks(r.map(trackRecordToTrack))).catch(console.error);
+      return;
+    }
+    const hashes = newOrder.map(t => t.hash);
+    try {
+      await invoke('playlist_reorder_tracks', { playlistId: activePlaylistId, branchName: activeBranch, orderedHashes: hashes });
+      setPlaylistTracks(newOrder);
+      setCommitRefreshKey(k => k + 1);
+    } catch (e) { console.error(e); }
+  }, [activePlaylistId, activeBranch]);
+
+  const handleRemoveFromPlaylist = useCallback(async (hash: string) => {
+    if (!activePlaylistId) return;
+    const title = playlistTracks?.find(t => t.hash === hash)?.title ?? hash.slice(0, 7);
+    try {
+      await invoke('playlist_remove_track', { playlistId: activePlaylistId, branchName: activeBranch, hash, message: `Remove: ${title}` });
+      setPlaylistTracks(prev => prev ? prev.filter(t => t.hash !== hash) : null);
+      setCommitRefreshKey(k => k + 1);
+      setGitToast(`Removed "${title}"`);
+      setTimeout(() => setGitToast(null), 2400);
+    } catch (e) { console.error(e); }
+  }, [activePlaylistId, activeBranch, playlistTracks]);
+
+  const handleDeletePlaylist = useCallback(async () => {
+    if (!activePlaylistId) return;
+    const name = playlistRecords.find(p => p.id === activePlaylistId)?.name ?? 'playlist';
+    try {
+      await invoke('playlist_delete', { playlistId: activePlaylistId });
+      setPlaylistRecords(prev => prev.filter(p => p.id !== activePlaylistId));
+      setActivePlaylistId(null);
+      setPlaylistTracks(null);
+      setActiveTab('Tracks');
+      setGitToast(`Deleted "${name}"`);
+      setTimeout(() => setGitToast(null), 2400);
+    } catch (e) { console.error(e); }
+  }, [activePlaylistId, playlistRecords]);
+
+  const handleRenamePlaylist = useCallback(async (newName: string) => {
+    if (!activePlaylistId) return;
+    try {
+      await invoke('playlist_rename', { playlistId: activePlaylistId, branchName: activeBranch, newName, message: '' });
+      reloadPlaylists();
+      setCommitRefreshKey(k => k + 1);
+      setGitToast(`Renamed to "${newName}"`);
+      setTimeout(() => setGitToast(null), 2400);
+    } catch (e) { console.error(e); }
+  }, [activePlaylistId, activeBranch, reloadPlaylists]);
 
   const handleAbChange = (handle: 'A' | 'B', val: number) => {
     if (handle === 'A') {
@@ -453,6 +520,17 @@ export default function DesktopApp() {
                 artworkUrls={artworkUrls}
                 onOpenInEditor={hash => { setEditorTrackId(trackOrder.find(t => t.hash === hash)?.id ?? null); setRailItem('editor'); }}
                 onTracksChanged={setTrackOrder}
+                onTracksAddedToPlaylist={(playlistId, branchName, count) => {
+                  const plName = playlistRecords.find(p => p.id === playlistId)?.name ?? 'playlist';
+                  setGitToast(`Added ${count} ${count === 1 ? 'track' : 'tracks'} to "${plName}"`);
+                  setTimeout(() => setGitToast(null), 2400);
+                  if (playlistId === activePlaylistId && branchName === activeBranch) {
+                    invoke<TrackRecord[]>('playlist_get_tracks', { playlistId, branchName })
+                      .then(r => setPlaylistTracks(r.map(trackRecordToTrack)))
+                      .catch(console.error);
+                  }
+                  setCommitRefreshKey(k => k + 1);
+                }}
               />
             ) : railItem === 'editor' ? (
               <EditorView
@@ -510,6 +588,8 @@ export default function DesktopApp() {
                   isPinned={activePlaylistId ? pinnedIds.has(activePlaylistId) : false}
                   onTogglePin={() => { if (activePlaylistId) togglePin(activePlaylistId); }}
                   onNewBranch={() => setShowBranchModal(true)}
+                  onMerge={() => setShowMergeModal(true)}
+                  onFork={() => setShowForkModal(true)}
                   onEditArtwork={() => setShowArtworkModal(true)}
                   onBranchesChanged={reloadPlaylists}
                 />
@@ -551,11 +631,17 @@ export default function DesktopApp() {
                       tracks={playlistTracks ?? trackOrder}
                       activeTrackId={activeTrackId}
                       onSelect={handleSelectTrack}
-                      onReorder={playlistTracks ? null : handleReorder}
+                      onReorder={playlistTracks ? handlePlaylistReorder : handleReorder}
                       hasUncommitted={hasUncommitted}
                       onCommitChanges={handleCommitReorder}
                       onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
                       artworkUrls={artworkUrls}
+                      onRemoveTrack={playlistTracks ? handleRemoveFromPlaylist : undefined}
+                      onAddTracks={playlistTracks ? () => {
+                        setRailItem('library');
+                        setGitToast('Select tracks in the library, then use "Add to Playlist"');
+                        setTimeout(() => setGitToast(null), 3000);
+                      } : undefined}
                     />
                   </>
                 )}
@@ -587,7 +673,11 @@ export default function DesktopApp() {
                 )}
 
                 {activeTab === 'Settings' && (
-                  <PlaylistSettingsPanel playlist={playlistForHeader} />
+                  <PlaylistSettingsPanel
+                    playlist={playlistForHeader}
+                    onDelete={handleDeletePlaylist}
+                    onRename={handleRenamePlaylist}
+                  />
                 )}
               </>
             )}
@@ -706,6 +796,41 @@ export default function DesktopApp() {
               }).then(r => setPlaylistTracks(r.map(trackRecordToTrack))).catch(console.error);
             }}
             onDiscard={() => setPendingChanges([])}
+          />
+        )}
+
+
+        {showMergeModal && activePlaylist && (
+          <MergeBranchModal
+            playlist={activePlaylist}
+            targetBranch={activeBranch}
+            targetTrackHashes={(playlistTracks ?? []).map(t => t.hash)}
+            onClose={() => setShowMergeModal(false)}
+            onMerged={commitHash => {
+              setShowMergeModal(false);
+              reloadPlaylists();
+              invoke<TrackRecord[]>('playlist_get_tracks', {
+                playlistId: activePlaylist.id, branchName: activeBranch,
+              }).then(r => setPlaylistTracks(r.map(trackRecordToTrack))).catch(console.error);
+              setCommitRefreshKey(k => k + 1);
+              setGitToast(`Merged into '${activeBranch}' · ${commitHash.slice(0, 7)}`);
+              setTimeout(() => setGitToast(null), 2800);
+            }}
+          />
+        )}
+
+        {showForkModal && activePlaylist && (
+          <ForkPlaylistModal
+            source={activePlaylist}
+            onClose={() => setShowForkModal(false)}
+            onForked={newPlaylist => {
+              setShowForkModal(false);
+              reloadPlaylists();
+              setActivePlaylistId(newPlaylist.id);
+              setActiveBranch('main');
+              setGitToast(`Forked to '${newPlaylist.name}'`);
+              setTimeout(() => setGitToast(null), 2400);
+            }}
           />
         )}
 

@@ -57,14 +57,15 @@ const GRADIENT_FALLBACK = 'radial-gradient(ellipse at 35% 35%, var(--bg-5) 0%, v
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface LibraryViewProps {
-  artworkUrls:     Record<string, string>;
-  onOpenInEditor:  (hash: string) => void;
-  onTracksChanged: (tracks: Track[]) => void;
+  artworkUrls:               Record<string, string>;
+  onOpenInEditor:            (hash: string) => void;
+  onTracksChanged:           (tracks: Track[]) => void;
+  onTracksAddedToPlaylist?:  (playlistId: string, branchName: string, count: number) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged }: LibraryViewProps) {
+export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist }: LibraryViewProps) {
   const [records,           setRecords]           = useState<TrackRecord[]>([]);
   const [strayHashes,       setStrayHashes]       = useState<Set<string>>(new Set());
   const [search,            setSearch]            = useState('');
@@ -556,7 +557,12 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
         <AddToPlaylistModal
           count={selected.size}
           hashes={[...selected]}
-          onDone={() => { setShowAddToPlaylist(false); setSelected(new Set()); }}
+          onDone={(playlistId, branchName) => {
+            setShowAddToPlaylist(false);
+            const count = selected.size;
+            setSelected(new Set());
+            onTracksAddedToPlaylist?.(playlistId, branchName, count);
+          }}
           onCancel={() => setShowAddToPlaylist(false)}
         />
       )}

@@ -7,19 +7,22 @@ import { FiEdit2, FiTrash2, FiHeart, FiArrowUp } from 'react-icons/fi';
 const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Length', ''];
 
 interface TrackListProps {
-  tracks:          Track[];
-  activeTrackId:   number;
-  onSelect:        (id: number) => void;
-  onReorder:       ((newOrder: Track[] | null) => void) | null;
-  hasUncommitted:  boolean;
-  onCommitChanges: () => void;
-  onEditTrack:     (id: number) => void;
-  artworkUrls:     Record<string, string>;
+  tracks:           Track[];
+  activeTrackId:    number;
+  onSelect:         (id: number) => void;
+  onReorder:        ((newOrder: Track[] | null) => void) | null;
+  hasUncommitted:   boolean;
+  onCommitChanges:  () => void;
+  onEditTrack:      (id: number) => void;
+  artworkUrls:      Record<string, string>;
+  onRemoveTrack?:   (hash: string) => void;
+  onAddTracks?:     () => void;
 }
 
 export default function TrackList({
   tracks, activeTrackId, onSelect, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
+  onRemoveTrack, onAddTracks,
 }: TrackListProps) {
   const [dragIdx,     setDragIdx]     = useState<number | null>(null);
   const [dropIdx,     setDropIdx]     = useState<number | null>(null);
@@ -154,7 +157,7 @@ export default function TrackList({
                   onClick={e => {
                     e.stopPropagation();
                     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setMenuPos({ x: r.right, y: r.bottom });
+                    setMenuPos({ x: r.right, y: Math.min(r.bottom, window.innerHeight - 140) });
                     setMenuTrackId(menuTrackId === t.id ? null : t.id);
                   }}
                 >
@@ -187,28 +190,40 @@ export default function TrackList({
               </button>
             </li>
             <li><button className="text-mm-t2">Add to queue</button></li>
-            <li><button className="text-mm-t2">Add to playlist</button></li>
-            <li className="divider my-0" />
-            <li>
-              <button className="text-error flex items-center gap-2">
-                <FiTrash2 size={12} /> Remove from playlist
-              </button>
-            </li>
+            {onRemoveTrack && (
+              <>
+                <li className="divider my-0" />
+                <li>
+                  <button
+                    className="text-error flex items-center gap-2"
+                    onClick={e => { e.stopPropagation(); onRemoveTrack(t.hash); setMenuTrackId(null); }}
+                  >
+                    <FiTrash2 size={12} /> Remove from playlist
+                  </button>
+                </li>
+              </>
+            )}
           </ul>
         );
       })()}
 
       {/* Bottom action bar */}
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-mm-b0 bg-mm-1 shrink-0">
-        <button className="badge badge-ghost gap-1 cursor-pointer hover:bg-mm-4 transition-colors">
-          <FiHeart size={12} /> Favorite
-        </button>
-        <button className="badge badge-ghost gap-1 cursor-pointer hover:bg-mm-4 transition-colors">
-          <FiArrowUp size={12} /> Push/Pull
-        </button>
+        {onAddTracks ? (
+          <button
+            className="badge badge-ghost gap-1 cursor-pointer hover:bg-mm-4 transition-colors"
+            onClick={onAddTracks}
+          >
+            <FiArrowUp size={12} style={{ transform: 'rotate(0deg)' }} /> Add tracks
+          </button>
+        ) : (
+          <button className="badge badge-ghost gap-1 cursor-pointer hover:bg-mm-4 transition-colors">
+            <FiHeart size={12} /> Favorite
+          </button>
+        )}
         <div className="flex-1" />
         <span className="font-mono text-[10px] text-mm-t2">
-          {tracks.length} tracks · commit 4fa9b0
+          {tracks.length} track{tracks.length !== 1 ? 's' : ''}
         </span>
       </div>
     </div>

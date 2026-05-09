@@ -47,10 +47,10 @@
 - [x] Define and implement JSON Commit schema (tree_hash, parent, timestamp, device_id, message — `CommitRecord`)
 - [x] Implement Commit read/write functions (`db.insert_commit`, `db.get_commit`, `db.get_commit_history`)
 - [x] Set up SQLite database with `sqlx` (`crates/storage/src/db.rs` — WAL mode, foreign keys, migrations)
-- [x] Implement SQLite schema for track metadata, plays/skips, playlists, branches, commits, commit_parents (migrations 0001–0004)
+- [x] Implement SQLite schema for track metadata, plays/skips, playlists, branches, commits, commit_parents (migrations 0001–0008)
 - [x] Implement indexer that reconciles SQLite against CAS on startup (`crates/storage/src/indexer.rs` — removes stale rows, logs orphan blobs)
-- [x] Wire `StorageState` into Tauri app (`src-tauri/src/storage.rs` + `lib.rs`); expose 7 commands: `library_get_all`, `library_set_favorite`, `playlist_get_all`, `playlist_create`, `playlist_fork`, `branch_create`, `branch_commit`
-- [x] Write integration tests for CAS, DB, and Indexer (18/18 passing)
+- [x] Wire `StorageState` into Tauri app (`src-tauri/src/storage.rs` + `lib.rs`); expose all playlist/branch/commit commands
+- [x] Write unit tests for storage commands — 18 passing (7 in `db.rs`, 11 in `storage.rs` covering `append_tracks_inner` and `merge_branches_inner`)
 
 ### Axum Self-Hosted Sync Server
 - [ ] Scaffold Axum server project inside workspace
@@ -62,19 +62,16 @@
 
 ### React Frontend Scaffolding
 - [x] Set up Zustand store with slices for queue, playback state, library, and playlist (`src/store/`)
-  - `playbackSlice` — `isPlaying`, `loadedTrackHash`, `duration_ms`, `volume`; `position_ms` intentionally excluded (lives in `useRef` for rAF loop)
-  - `queueSlice` — `queueTracks`, `currentIndex`, `ShuffleMode` (`Off`/`Random`/`Smart`), `RepeatMode` (`None`/`One`/`All`), `shuffledQueue` lookahead (default 20), `shuffleHistory` dedup; `Smart` uses Fisher-Yates permutation, `Random` samples with history dedup
-  - `librarySlice` — `TrackMeta[]` with `favorited: boolean`; `toggleFavorite` uses optimistic update with rollback; stubs `library_get_all` / `library_set_favorite` Tauri commands
-  - `playlistSlice` — `playlists: PlaylistMeta[]`, `currentCommitHash`; no-op until CAS/Commit layer is built
 - [ ] Implement `requestAnimationFrame` progress bar loop via `useRef` (no React re-renders)
 - [ ] Implement virtualized tracklist with `tanstack/react-virtual` (target: 10,000+ tracks)
 - [x] Build player controls UI — play/pause, seek bar with real duration, volume slider, skip, shuffle, loop, A·B markers; all wired to Tauri invoke commands
 - [x] Build library view wired to SQLite metadata via Tauri invoke — `library_get_all` populates tracklist and carousel with real tracks; artwork fetched via `track_get_artwork` (BLAKE3 CAS lookup)
-- [ ] Build basic playlist view rendering Tree manifest tracks — `playlist_get_all` / `playlist_create` Tauri commands exist; UI not yet wired
+- [x] Build playlist view wired to real backend — `playlist_get_all` sidebar, `playlist_get_tracks` populates tracklist and carousel, add/remove/reorder tracks all commit to CAS
 - [x] Verify end-to-end audio playback on Desktop and iOS real device
 - [x] Wire playback controls to audio invoke commands — `audio_play`, `audio_pause`, `audio_seek`, `audio_set_volume`, `track_play`; volume synced to backend on mount; backward seek fallback via decoder reload
 - [x] Debug ingest replaced with `read_dir` loop scanning `tests/audio/` at startup — supports MP3, FLAC, OGG, WAV, M4A, AAC; idempotent
 - [x] Wire yt-dlp ingest UI — Download modal in Library header; progress bars per item; live title from yt-dlp `before_dl:` hook; library auto-refreshes on completion
+- [x] Carousel wired to active playlist — `playQueue` derives from `playlistTracks ?? trackOrder`; shuffle operates on the active source; queue resets when playlist/branch changes
 
 ---
 
@@ -128,16 +125,15 @@
 - [ ] Surface Spotify tracks alongside local library in UI
 
 ### Developer Mode — Commit Graph
-- [ ] Implement lazy-loaded visual commit history graph for playlists
-- [ ] Allow playlist reversion to any prior commit
-- [ ] Build developer mode toggle in settings
+- [x] Visual commit history graph for playlists — SVG DAG with lane layout, branch colours, cubic-bezier curves; inline (History tab) + full-screen overlay variants
+- [x] Merge commits rendered as diamond nodes; source branch lines flow in their own colour up to the merge point, then target colour continues
+- [x] Allow playlist reversion to any prior commit — `branch_revert_to` command + UI button in commit detail panel
+- [x] Build developer mode toggle in settings
 
 ### Telemetry (Local Only)
 - [ ] Track play counts per track in SQLite
 - [ ] Track skip events per track in SQLite
 - [ ] Build local stats view (most played, skip rate, listening history)
-
----
 
 ---
 
@@ -150,60 +146,106 @@ Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). 
 | File | Description |
 |---|---|
 | `src/shared/themes.ts` | Central theme system — `NAMED_THEMES` (warm/cool/forest/violet), mutable `_custom` slot, `writeCustomHue()`, `applyTheme()` sets all CSS vars + DaisyUI v5 vars |
-| `src/desktop/style.css` | Design-system CSS — fallback palette vars, layout classes, `.tl-row` grid, `.seek-track`, `.rail-tooltip`, `.styled-scroll`, animations; no hover-3d polyfill (native DaisyUI v5) |
+| `src/desktop/style.css` | Design-system CSS — fallback palette vars, layout classes, `.tl-row` grid, `.seek-track`, `.rail-tooltip`, `.styled-scroll`, animations |
 | `src/main.css` | Tailwind v4 entry — `@import "tailwindcss"`, `@plugin "daisyui"`, `@theme {}` mapping `--color-mm-*` → runtime CSS vars |
-| `src/desktop/data.ts` | Typed mock data — `Album`, `Track`, `Playlist`, `Commit` + chart data |
-| `src/desktop/types.ts` | `AppSettings` interface; imports `ThemeName` from `src/shared/themes` |
-| `src/desktop/DesktopApp.tsx` | Root app — all state, `useMemo` play-queue/carousel derivation, `handleShuffle` builds a frozen shuffled queue, `handleUpdateSetting` intercepts accent-hue changes to write the custom theme slot |
+| `src/desktop/data.ts` | Typed mock data (ALBUMS, fallback TRACKS, PLAYLISTS) + live converter functions `trackRecordToTrack`, `playlistRecordToPlaylist` |
+| `src/desktop/types.ts` | `AppSettings` interface |
+| `src/desktop/DesktopApp.tsx` | Root app — all state, `activeQueue = playlistTracks ?? trackOrder`, `playQueue` derives from `activeQueue`, shuffle/carousel/playback all playlist-aware |
 | `components/TitleBar.tsx` | Custom titlebar with drag region and window controls |
-| `components/Sidebar.tsx` | Icon rail with tooltips, collapsible playlist tree, pinned playlists, folder popup, yt-dlp importer stub |
-| `components/Carousel.tsx` | Coverflow — cubic ease-out animation, `requestAnimationFrame`, DaisyUI `hover-3d`, `ResizeObserver` for responsive width, `size` prop drives card px and `halfVisible` cutoff |
-| `components/PlaylistHeader.tsx` | Playlist name, version, git action buttons, tab bar (`tabs-border` DaisyUI v5) |
-| `components/PlayerControls.tsx` | Play/pause/shuffle/loop/queue buttons; play button is an explicit 44 px circle overriding DaisyUI min-height; A·B loop mode with draggable seek markers |
-| `components/TrackList.tsx` | 10-column grid; mouse-event drag-to-reorder (replaces broken HTML5 DnD); `window` mousemove/mouseup listeners scoped via `useEffect` on `dragIdx`; `dropIdxRef` for synchronous mouseup access; uncommitted-changes banner; fixed portal context menu |
-| `components/RightPanel.tsx` | AI vibe text → mock playlist generator, mini SVG charts, connections panel |
-| `components/CommitGraph.tsx` | SVG DAG — branch lane columns, overlay modal and inline (History tab) variants; Tailwind/mm-* classes |
-| `components/BranchModal.tsx` | Branch creation with commit selector |
-| `components/SettingsModal.tsx` | Named theme pills (warm/cool/forest/violet) + always-visible Custom pill; accent hue slider writes to custom slot; density, right-panel toggle, carousel size slider |
-| `components/PlaylistSettingsPanel.tsx` | Per-playlist settings — upstream URL, fork/delete/save |
-| `components/EditorView.tsx` | Placeholder for the MP3 metadata editor |
+| `components/Sidebar.tsx` | Icon rail with tooltips, collapsible playlist tree, pinned playlists, folder popup |
+| `components/Carousel.tsx` | Coverflow — cubic ease-out animation, `requestAnimationFrame`, DaisyUI `hover-3d`, `ResizeObserver` for responsive width |
+| `components/PlaylistHeader.tsx` | Playlist name, branch dropdown, Fork/Branch/Merge/Push/Pull buttons, tab bar |
+| `components/PlayerControls.tsx` | Play/pause/shuffle/loop/queue buttons; A·B loop mode with draggable seek markers |
+| `components/TrackList.tsx` | 10-column grid; mouse-event drag-to-reorder; uncommitted-changes banner; right-click context menu with "Remove from playlist" and "Add to playlist" |
+| `components/RightPanel.tsx` | AI vibe text → mock playlist generator, mini SVG charts |
+| `components/CommitGraph.tsx` | SVG DAG — branch lane columns, colour palette, merge diamonds, source-branch lines flow in own colour to the merge point; overlay + inline variants |
+| `components/BranchModal.tsx` | New branch from current HEAD |
+| `components/ForkPlaylistModal.tsx` | Fork with custom name; new name stamped into all branch trees immediately |
+| `components/MergeBranchModal.tsx` | Source branch picker, union/intersection strategy toggle, live track-diff preview, commit message input |
+| `components/PlaylistSettingsPanel.tsx` | Editable name with save button, two-step delete confirm, shows `forked_from` info |
+| `components/SettingsModal.tsx` | Named theme pills + Custom pill; accent hue slider; density, right-panel toggle, carousel size slider |
+| `components/EditorView.tsx` | MP3 metadata editor — title/artist/album fields, artwork replacement |
 
 ### Toolchain
 
-- **Tailwind v4** — `@import "tailwindcss"` + `@tailwindcss/vite` plugin; `tailwind.config.js` deleted; CSS-first config via `@theme {}`
-- **DaisyUI v5** — `@plugin "daisyui"`; class renames: `input-bordered` → `input`, `tabs-bordered` → `tabs-border`; `--depth: 0` / `--noise: 0` for flat native-desktop look; `hover-3d` native (polyfill removed); full oklch() vars (`--color-primary`, `--color-base-100`, etc.)
-- **CSS cascade layers** — no unlayered `* { padding:0 }` reset (would beat all `@layer daisyui.*` component styles); Tailwind v4 Preflight handles element resets inside `@layer base`
+- **Tailwind v4** — `@import "tailwindcss"` + `@tailwindcss/vite` plugin; CSS-first config via `@theme {}`
+- **DaisyUI v5** — `@plugin "daisyui"`; `tabs-border`, flat native-desktop look; full oklch() vars
+- **CSS cascade layers** — Tailwind v4 Preflight handles element resets inside `@layer base`
 
 ### Play queue / carousel ordering
 
-- `playQueue` — `useMemo`; equals `trackOrder` unless shuffle is active, in which case it's a frozen Fisher-Yates shuffle created when the user enables shuffle
-- `carouselAlbums` — `playQueue.map(t => ALBUMS[t.albumRef])` — one card per track in play order
-- `carouselIdx` — `playQueue.findIndex(t => t.id === activeTrackId)` — always points at the active track
-- Enabling shuffle: `shuffledQueue` state is set to a shuffled copy of `trackOrder`; disabling clears it
-- Manual drag-reorder clears `shuffledQueue` and turns off shuffle (user redefined the canonical order)
-- Carousel uses `key={i}` (array position) instead of `album.id` to avoid duplicate-key warnings when multiple tracks share the same album
+- `activeQueue` — `useMemo`; equals `playlistTracks` when a playlist is active, otherwise `trackOrder` (full library). This is what the carousel renders and what playback draws from.
+- `playQueue` — `activeQueue` unless shuffle is active, in which case it is a frozen Fisher-Yates shuffle of `activeQueue` created when shuffle is toggled on
+- `carouselAlbums` — `playQueue.map(t => ({ ...ALBUMS[t.albumRef], artworkUrl: artworkUrls[t.hash] }))`
+- `carouselIdx` — `playQueue.findIndex(t => t.id === activeTrackId)`, defaults to 0 if not found
+- Switching playlist or branch resets `shuffledQueue` and `isShuffle` so stale queue doesn't carry over
+
+### Commit message conventions (auto-generated)
+
+| Operation | Message format |
+|---|---|
+| Add 1 track | `"Add: {title}"` |
+| Add multiple tracks | `"Add tracks:\n• {title}\n• {title}\n…"` |
+| Remove track | `"Remove: {title}"` |
+| Reorder tracks | `"Reorder tracks"` |
+| Set artwork | `"Set playlist artwork"` |
+| Rename playlist | `"Rename: '{old}' → '{new}'"` |
+| Fork playlist | `"Forked from {source} @ {short_hash}"` |
+| Merge branch | `"Merge '{source}' into '{target}'"` |
+| Revert to commit | `"Revert to {short_hash}"` |
+
+### Unit tests — `src-tauri/src/storage.rs`
+
+18 tests total (7 pre-existing in `crates/storage/src/db.rs`, 11 new in `src-tauri/src/storage.rs`):
+
+**`append_tracks_inner`** (5 tests)
+- `append_adds_new_tracks_and_commits` — basic append advances HEAD
+- `append_noop_on_all_duplicates` — no commit when every hash already present
+- `append_partial_dedup_only_adds_new` — only genuinely new hashes added
+- `append_single_track_message` — generates `"Add: {title}"` message
+- `append_multi_track_message_uses_bullets` — generates bulleted `"Add tracks:\n• …"` message
+
+**`merge_branches_inner`** (6 tests)
+- `merge_union_appends_source_unique_tracks` — source-only tracks appended to target
+- `merge_union_no_duplicates_for_shared_tracks` — shared track appears exactly once
+- `merge_intersection_keeps_only_shared_tracks` — non-shared tracks removed
+- `merge_same_branch_is_error` — guard returns `Err` immediately
+- `merge_produces_two_parent_commit` — DB records exactly 2 parents
+- `merge_message_defaults_to_branch_names` — auto message `"Merge 'feat' into 'main'"`
+
+### Debug-only dev fixtures
+
+In debug builds all data lands in an isolated `dev/` subdirectory of the app data dir — it never touches the real production library.
+
+- **Library**: every audio file in `tests/audio/` is ingested at startup (idempotent — same hash skips the write)
+- **DevelopmentOnly playlist**: `dev_seed_dev_playlist` (called from `lib.rs`) destroys and recreates a "DevelopmentOnly" playlist on every launch, seeded with all test-audio tracks. History does not accumulate — it always starts clean. This is the fixture for exercising the carousel and playback UI. Never appears in production builds.
 
 ### Known bugs / remaining work
 
-- Rail git icon opens the commit graph modal but doesn't reset the highlighted rail icon when navigating away
-- Tracklist still uses mock `TRACKS` data for ordering (real library loaded but not committed to `trackOrder` on shuffle/commit)
-- Playlist view not yet wired to real SQLite `playlist_get_all` / Tree manifest data — sidebar shows mock playlists only
+- Rail git icon: clicking the git rail icon while the CommitGraph overlay is open doesn't reset the highlighted rail icon when navigating away
+- `forked_at_commit` field missing from TypeScript `PlaylistRecord` type in `src/desktop/data.ts`
+- Status bar at the bottom of the app still shows a hardcoded commit hash (`4fa9b0`)
 
 ### Completed since 2026-05-04
 
-- Phase 2 bulk actions wired: `AddToPlaylistModal`, `BulkEditPanel` in `LibraryView`
-- Phase 3 Library polish: column resizing (persistent via localStorage), sort persistence, right-click context menu, inline double-click playback
-- Import Files / Import Folder buttons fixed (`dialog:allow-open` capability was missing)
-- Editor view title bar added
-- Download modal added to Library header (progress per item, live yt-dlp title)
-- Fixed downloaded track titles showing temp UUID filename — `before_dl:MELO_TITLE:` hook + `set_track_title` DB write
-- Fixed metadata editing for downloaded tracks — forced M4A output; added `webm` case to `mime_to_ext`
-- Discord Rich Presence — hardcoded app ID `1501840436703268934`, on/off toggle in Settings, "Listening to" activity type
+- **Phase 1** (working playlists): all commands implemented and wired — `playlist_get_tracks`, `playlist_remove_track`, `playlist_reorder_tracks`, `playlist_delete`, `playlist_rename`, `playlist_set_artwork`, `playlist_get_artwork`; sidebar reads live data; new-playlist modal; artwork editor
+- **Phase 2** (branching UI): branch switcher dropdown, `branch_delete`, `branch_rename`, `branch_revert_to`; commit detail panel with branch-from-here and revert actions
+- **Phase 3** (merge UI): `MergeBranchModal` with source picker, union/intersection strategy, live track-diff preview; `branch_merge` Rust command; two-parent commits; diamond nodes in commit graph; source branch lines keep their colour up to the merge point
+- **Fork name fix**: forked playlists no longer show the source name — a commit stamping the new name into all branch trees is written immediately after fork
+- **Descriptive commit messages**: add operations emit `"Add: title"` or bulleted list; remove emits `"Remove: title"`; fork emits `"Forked from X @ hash"`
+- **Toast notifications**: fork, delete, rename, remove-from-playlist, add-to-playlist, merge all surface a toast
+- **No-op append guard**: `branch_append_tracks` returns current HEAD without writing a commit when all provided hashes already exist in the tree
+- **CommitGraph colour fix**: merge commit diamonds use target branch colour; source branch line keeps its own colour all the way to the merge point, then only the target branch continues
+- **Unit tests**: 11 new tests for `append_tracks_inner` and `merge_branches_inner`; extracted inner functions so logic is testable without Tauri state; `tempfile` added to dev-deps
+- **Carousel wired to playlist**: `activeQueue = playlistTracks ?? trackOrder`; shuffle uses the correct source; queue resets on playlist/branch switch
+- **DevelopmentOnly playlist**: debug fixture recreated fresh each launch with all test tracks
 
 ### Next steps
 
-1. **Playlist creation** — wire `playlist_create` / `playlist_get_all` to sidebar; replace mock `PLAYLISTS` data with live reads; allow adding tracks to a playlist
-2. Replace mock `TRACKS` in `trackOrder` with a stable live source (currently `reloadLibrary` populates it correctly but only on mount)
-3. Add platform check in `src/App.tsx` to route desktop vs. mobile UI at runtime
+1. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin commands; recursive resolver in `playlist_get_tracks`; "Includes" section in Playlist Settings
+2. **Fix `forked_at_commit` in TS types** — add to `PlaylistRecord` interface in `src/desktop/data.ts`
+3. **Fix status bar** — replace hardcoded `4fa9b0` with live `activePlaylist` branch HEAD short hash
+4. **Android audio bridge** — ExoPlayer / Media3 implementation
+5. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime
 
-*Last updated: 2026-05-07.*
+*Last updated: 2026-05-08.*

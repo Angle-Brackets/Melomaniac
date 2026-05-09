@@ -73,13 +73,20 @@ pub fn run() {
             let storage_state = tauri::async_runtime::block_on(storage::init_storage(app_data_dir))
                 .expect("failed to initialise storage");
 
-            // In debug builds, ingest every audio file in tests/audio/ so the
-            // library is never empty during development.
+            // ── Debug-only dev fixtures ────────────────────────────────────────
+            // Everything below runs only in `cargo tauri dev` / debug builds.
+            // All data lands in the isolated `dev/` subdirectory of the app data
+            // dir (see StorageState init above), so it never touches the real
+            // production library or playlist history.
             #[cfg(debug_assertions)]
             {
                 let audio_exts = ["mp3", "flac", "ogg", "wav", "m4a", "aac"];
                 let test_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../tests/audio");
+
+                // Ingest every audio file in tests/audio/ into the dev library so
+                // the library view is never empty during UI development.
+                let mut dev_hashes: Vec<String> = Vec::new();
                 if let Ok(entries) = std::fs::read_dir(&test_dir) {
                     let cas = Arc::clone(&storage_state.cas);
                     let db  = Arc::clone(&storage_state.db);
@@ -89,12 +96,24 @@ pub fn run() {
                             .and_then(|e| e.to_str())
                             .map(|e| e.to_ascii_lowercase());
                         if ext.as_deref().map(|e| audio_exts.contains(&e)).unwrap_or(false) {
-                            tauri::async_runtime::block_on(
+                            if let Ok(record) = tauri::async_runtime::block_on(
                                 melomaniac_storage::ingest::ingest_file(&path, &cas, &db),
-                            )
-                            .ok();
+                            ) {
+                                dev_hashes.push(record.hash);
+                            }
                         }
                     }
+                }
+
+                // Recreate the "DevelopmentOnly" playlist fresh on each launch so the
+                // carousel and playback have a real playlist to exercise without
+                // accumulating stale commit history.  The playlist is destroyed and
+                // rebuilt here — it is purely a UI test fixture and is never shown in
+                // production builds.
+                if !dev_hashes.is_empty() {
+                    tauri::async_runtime::block_on(
+                        storage::dev_seed_dev_playlist(&storage_state, &dev_hashes)
+                    ).ok();
                 }
             }
 
@@ -161,6 +180,7 @@ pub fn run() {
             storage::branch_delete,
             storage::branch_rename,
             storage::branch_revert_to,
+            storage::branch_merge,
             storage::playlist_get_graph,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,

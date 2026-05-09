@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import type { PlaylistRecord, BranchRecord } from '../data';
 import { IcoPin } from '../icons';
 import { FiSettings as GearIcon, FiGitBranch, FiTrash2, FiEdit2, FiCheck, FiX } from 'react-icons/fi';
+import { TbGitFork } from 'react-icons/tb';
+import { FiGitMerge } from 'react-icons/fi';
 
 interface PlaylistHeaderProps {
   playlist:      PlaylistRecord | null;
@@ -15,6 +17,8 @@ interface PlaylistHeaderProps {
   isPinned:      boolean;
   onTogglePin:   () => void;
   onNewBranch:   () => void;
+  onMerge:       () => void;
+  onFork:        () => void;
   onEditArtwork: () => void;
   onBranchesChanged: () => void;
 }
@@ -213,7 +217,7 @@ const iconBtn: React.CSSProperties = {
 
 export default function PlaylistHeader({
   playlist, artworkUrl, activeBranch, onBranchChange, onGitAction, activeTab,
-  onTabChange, isPinned, onTogglePin, onNewBranch, onEditArtwork, onBranchesChanged,
+  onTabChange, isPinned, onTogglePin, onNewBranch, onMerge, onFork, onEditArtwork, onBranchesChanged,
 }: PlaylistHeaderProps) {
   const name = playlist?.name ?? 'No playlist selected';
   const branch = playlist?.branches.find(b => b.name === activeBranch) ?? playlist?.branches[0];
@@ -286,8 +290,17 @@ export default function PlaylistHeader({
 
         {playlist && (
           <div className="flex gap-1.5 shrink-0">
-            <button className="btn btn-ghost btn-xs" onClick={() => onGitAction('shuffle')}>▶ Shuffle</button>
+            <button className="btn btn-ghost btn-xs gap-1" onClick={onFork} title="Fork this playlist into a new independent playlist">
+              <TbGitFork size={12} />
+              Fork
+            </button>
             <button className="btn btn-ghost btn-xs" onClick={onNewBranch} title="New branch from current HEAD">⎇ Branch</button>
+            {(playlist.branches?.length ?? 0) > 1 && (
+              <button className="btn btn-ghost btn-xs gap-1" onClick={onMerge} title="Merge another branch into this one">
+                <FiGitMerge size={12} />
+                Merge
+              </button>
+            )}
             <button className="btn btn-primary btn-xs" onClick={() => onGitAction('push')}>↑ Push</button>
             <button className="btn btn-primary btn-xs" onClick={() => onGitAction('pull')}>↓ Pull</button>
           </div>
