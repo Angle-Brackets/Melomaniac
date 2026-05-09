@@ -77,52 +77,52 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 export default function DesktopApp() {
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
-  const [leftExpanded,     setLeftExpanded]     = useState(true);
-  const [rightExpanded,    setRightExpanded]     = useState(true);
-  const [sidebarWidth,     setSidebarWidth]      = useState(220);
-  const [rightPanelWidth,  setRightPanelWidth]   = useState(220);
-  const [topPaneHeight,    setTopPaneHeight]      = useState(SETTING_DEFAULTS.carouselSize + 190);
-  const [showCommitGraph,  setShowCommitGraph]   = useState(false);
-  const [showSettings,     setShowSettings]      = useState(false);
-  const [showBranchModal,  setShowBranchModal]   = useState(false);
-  const [showForkModal,    setShowForkModal]     = useState(false);
-  const [showMergeModal,   setShowMergeModal]    = useState(false);
-  const [activePlaylistId, setActivePlaylistId]  = useState<string | null>(null);
+  const [leftExpanded, setLeftExpanded] = useState(true);
+  const [rightExpanded, setRightExpanded] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(220);
+  const [rightPanelWidth, setRightPanelWidth] = useState(220);
+  const [topPaneHeight, setTopPaneHeight] = useState(SETTING_DEFAULTS.carouselSize + 190);
+  const [showCommitGraph, setShowCommitGraph] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showBranchModal, setShowBranchModal] = useState(false);
+  const [showForkModal, setShowForkModal] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [activeBranch, setActiveBranch] = useState('main');
-  const [playlistRecords,  setPlaylistRecords]   = useState<PlaylistRecord[]>([]);
-  const [playlistTracks,   setPlaylistTracks]    = useState<Track[] | null>(null);
-  const [showNewPlaylist,  setShowNewPlaylist]   = useState(false);
-  const [showArtworkModal, setShowArtworkModal]  = useState(false);
-  const [pendingChanges,   setPendingChanges]    = useState<{ message: string; execute: () => Promise<void> }[]>([]);
-  const [railItem,         setRailItem]          = useState('playlists');
-  const [activeTab,        setActiveTab]         = useState('Tracks');
-  const [pinnedIds,        setPinnedIds]         = useState<Set<string>>(new Set());
-  const [trackOrder,       setTrackOrder]        = useState<Track[]>(TRACKS);
-  const [hasUncommitted,   setHasUncommitted]    = useState(false);
-  const [abA,              setAbA]               = useState(0.2);
-  const [abB,              setAbB]               = useState(0.7);
-  const [loopMode,         setLoopMode]          = useState<LoopMode>('off');
-  const [trackAbPoints,    setTrackAbPoints]     = useState<Record<number, { a: number; b: number }>>({ 1: { a: 0.2, b: 0.7 } });
-  const [folderPopupItem,  setFolderPopupItem]   = useState<Playlist | null>(null);
-  const [folders,          setFolders]           = useState([{ id: 4, name: 'Gaming Sessions' }]);
-  const [editorTrackId,    setEditorTrackId]     = useState<number | null>(null);
-  const [activeTrackId,    setActiveTrackId]     = useState(1);
-  const [isPlaying,        setIsPlaying]         = useState(false);
-  const [isFav,            setIsFav]             = useState(false);
-  const [isShuffle,        setIsShuffle]         = useState(false);
-  const [shuffledQueue,    setShuffledQueue]     = useState<Track[] | null>(null);
-  const [loadedHash,       setLoadedHash]        = useState<string | null>(null);
-  const [positionMs,       setPositionMs]        = useState(0);
-  const [durationMs,       setDurationMs]        = useState(0);
+  const [playlistRecords, setPlaylistRecords] = useState<PlaylistRecord[]>([]);
+  const [playlistTracks, setPlaylistTracks] = useState<Track[] | null>(null);
+  const [showNewPlaylist, setShowNewPlaylist] = useState(false);
+  const [showArtworkModal, setShowArtworkModal] = useState(false);
+  const [pendingChanges, setPendingChanges] = useState<{ message: string; execute: () => Promise<void> }[]>([]);
+  const [railItem, setRailItem] = useState('playlists');
+  const [activeTab, setActiveTab] = useState('Tracks');
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  const [trackOrder, setTrackOrder] = useState<Track[]>(TRACKS);
+  const [hasUncommitted, setHasUncommitted] = useState(false);
+  const [abA, setAbA] = useState(0.2);
+  const [abB, setAbB] = useState(0.7);
+  const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  const [trackAbPoints, setTrackAbPoints] = useState<Record<number, { a: number; b: number }>>({ 1: { a: 0.2, b: 0.7 } });
+  const [folderPopupItem, setFolderPopupItem] = useState<Playlist | null>(null);
+  const [folders, setFolders] = useState([{ id: 4, name: 'Gaming Sessions' }]);
+  const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
+  const [activeTrackId, setActiveTrackId] = useState(1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isFav, setIsFav] = useState(false);
+  const [isShuffle, setIsShuffle] = useState(false);
+  const [shuffledQueue, setShuffledQueue] = useState<Track[] | null>(null);
+  const [loadedHash, setLoadedHash] = useState<string | null>(null);
+  const [positionMs, setPositionMs] = useState(0);
+  const [durationMs, setDurationMs] = useState(0);
   const lastSeekTime = useRef(0);
-  const [artworkUrls,      setArtworkUrls]       = useState<Record<string, string>>({});
-  const [volume,           setVolume]            = useState(0.72);
+  const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
+  const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
-  const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
-  const [gitToast,         setGitToast]          = useState<string | null>(null);
-  const [commitRefreshKey, setCommitRefreshKey]  = useState(0);
-  const [showStats,        setShowStats]         = useState(false);
-  const [appStats,         setAppStats]          = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
+  const [vibeText, setVibeText] = useState('chill ambient music for focus');
+  const [gitToast, setGitToast] = useState<string | null>(null);
+  const [commitRefreshKey, setCommitRefreshKey] = useState(0);
+  const [showStats, setShowStats] = useState(false);
+  const [appStats, setAppStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
 
   const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
   // Fall back to first mock for the playlist header when no real playlist is selected
@@ -160,7 +160,7 @@ export default function DesktopApp() {
   // Sync initial volume to the audio backend on mount
   useEffect(() => {
     invoke('audio_set_volume', { volume }).catch(console.error);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch the persisted commit author name from the backend on mount
@@ -168,7 +168,7 @@ export default function DesktopApp() {
     invoke<string>('get_commit_author')
       .then(name => { if (name) updateSetting('commitAuthor', name); })
       .catch(console.error);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Push commit author changes to the backend whenever the setting is updated
@@ -210,7 +210,7 @@ export default function DesktopApp() {
       const fallback = activePlaylist.branches.find(b => b.name === 'main') ?? activePlaylist.branches[0];
       if (fallback) setActiveBranch(fallback.name);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylistId]);
 
   // ── Load tracks for the active playlist ──────────────────────────────────
@@ -222,7 +222,7 @@ export default function DesktopApp() {
 
     if (!activePlaylistId) { setPlaylistTracks(null); return; }
     invoke<TrackRecord[]>('playlist_get_tracks', {
-      playlistId:  activePlaylistId,
+      playlistId: activePlaylistId,
       branchName: activeBranch,
     })
       .then(records => setPlaylistTracks(records.map(trackRecordToTrack)))
@@ -235,9 +235,9 @@ export default function DesktopApp() {
     const track = trackOrder.find(t => t.hash === loadedHash);
     if (track) {
       invoke('discord_set_activity', {
-        title:  track.title,
+        title: track.title,
         artist: track.artist,
-        album:  track.album ?? null,
+        album: track.album ?? null,
       }).catch(console.error);
     } else {
       invoke('discord_clear_activity').catch(console.error);
@@ -304,7 +304,7 @@ export default function DesktopApp() {
         setIsPlaying(false);
         setPositionMs(0);
       }
-      if (payload === 'RemotePlay')  setIsPlaying(true);
+      if (payload === 'RemotePlay') setIsPlaying(true);
       if (payload === 'RemotePause') setIsPlaying(false);
       if (payload === 'RemoteTogglePlayPause') setIsPlaying(p => !p);
     }).then(fn => { unlisten = fn; });
@@ -326,7 +326,7 @@ export default function DesktopApp() {
         })
         .catch(console.error);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playQueue]);
 
   // ── Load artwork for the active playlist branch ───────────────────────────
@@ -343,14 +343,14 @@ export default function DesktopApp() {
         // Branch has no artwork — mark as empty so we don't retry
         setArtworkUrls(prev => ({ ...prev, [key]: '' }));
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylist?.id, activeBranch]);
 
   // ── Sync A·B handles on track change ──────────────────────────────────────
   useEffect(() => {
     const pts = trackAbPoints[activeTrackId];
     if (pts) { setAbA(pts.a); setAbB(pts.b); }
-    else      { setAbA(0.2);  setAbB(0.7);   }
+    else { setAbA(0.2); setAbB(0.7); }
   }, [activeTrackId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -474,11 +474,11 @@ export default function DesktopApp() {
 
   const handleGitAction = (action: string) => {
     const msgs: Record<string, string> = {
-      commit:  'Committed snapshot → a3f891',
-      push:    'Pushed to upstream/study-beats ✓',
-      pull:    'Pulled 2 new tracks from remote',
+      commit: 'Committed snapshot → a3f891',
+      push: 'Pushed to upstream/study-beats ✓',
+      pull: 'Pulled 2 new tracks from remote',
       shuffle: 'Shuffled queue',
-      branch:  'Branch created',
+      branch: 'Branch created',
     };
     setGitToast(msgs[action] ?? action);
     setTimeout(() => setGitToast(null), 2400);
@@ -695,8 +695,8 @@ export default function DesktopApp() {
                         durationMs={durationMs}
                         isPlaying={isPlaying} onPlayPause={handlePlayPause}
                         onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
-                        isFav={isFav}         onFav={() => setIsFav(p => !p)}
-                        loopMode={loopMode}   onLoopCycle={handleLoopCycle}
+                        isFav={isFav} onFav={() => setIsFav(p => !p)}
+                        loopMode={loopMode} onLoopCycle={handleLoopCycle}
                         isShuffle={isShuffle} onShuffle={handleShuffle}
                         onSeek={pct => {
                           const ms = Math.floor(pct * durationMs);
@@ -704,8 +704,8 @@ export default function DesktopApp() {
                           setPositionMs(ms);
                           invoke('audio_seek', { positionMs: ms }).catch(console.error);
                         }}
-                        volume={volume}       onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
-                        abA={abA} abB={abB}   onAbChange={handleAbChange}
+                        volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+                        abA={abA} abB={abB} onAbChange={handleAbChange}
                       />
                     </div>
                     <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
@@ -865,7 +865,7 @@ export default function DesktopApp() {
           padding: '0 12px', flexShrink: 0,
         }}>
           <span className="font-mono text-[9px] text-mm-t2">
-            Melomaniac | Rust + Tauri | GPLv3 | Syncing: <span className="text-mm-green">Up-to-Date</span>
+            Melomaniac by Soupa | v0.1 Alpha | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--text-3)' }}>N/A</span>
             {showStats && appStats && (
               <span className="ml-4 text-mm-accent-lit">
                 RAM: {appStats.memory_mb.toFixed(1)} MB | CPU: {appStats.cpu_usage.toFixed(1)}%
@@ -875,7 +875,7 @@ export default function DesktopApp() {
           <span className="font-mono text-[9px] text-mm-t2">
             {(() => {
               const branch = activePlaylist?.branches.find(b => b.name === activeBranch);
-              const head   = branch?.head_commit?.slice(0, 7);
+              const head = branch?.head_commit?.slice(0, 7);
               if (activePlaylist) {
                 return `${playlistTracks?.length ?? 0} tracks · ${activePlaylist.name} · ${activeBranch}${head ? ` · ${head}` : ''}`;
               }

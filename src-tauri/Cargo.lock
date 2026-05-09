@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "melomaniac"
-version = "0.0.1"
+version = "0.1.0-alpha"
 dependencies = [
  "discord-rich-presence",
  "melomaniac-audio",
