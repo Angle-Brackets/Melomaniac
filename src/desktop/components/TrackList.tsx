@@ -27,12 +27,13 @@ interface TrackListProps {
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
   density?: 'compact' | 'normal' | 'relaxed';
+  favorites?: Set<string>;
 }
 
 export default function TrackList({
   tracks, activeTrackId, loadedHash, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
-  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = 'relaxed',
+  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = 'relaxed', favorites,
 }: TrackListProps) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -185,7 +186,12 @@ export default function TrackList({
                       : art.gradient,
                   }} />
                 </div>
-                <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`}>{t.title}</div>
+                <div className={`tl-cell gap-1 ${active ? 'bright font-semibold' : ''}`}>
+                  {favorites?.has(t.hash) && (
+                    <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
+                  )}
+                  {t.title}
+                </div>
                 <div className="tl-cell">{t.artist}</div>
                 <div className="tl-cell muted">{t.album}</div>
                 <div className="tl-cell mono">{t.commit}</div>

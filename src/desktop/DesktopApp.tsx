@@ -962,6 +962,7 @@ export default function DesktopApp() {
                       } : undefined}
                       onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
                       onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
+                      favorites={favorites}
                       density={settings.density}
                     />
                   </>
