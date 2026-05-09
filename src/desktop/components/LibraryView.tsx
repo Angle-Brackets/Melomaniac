@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { Track, TrackRecord } from '../data';
 import { trackRecordToTrack } from '../data';
 import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
-import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay } from 'react-icons/fi';
+import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import BulkEditPanel from './BulkEditPanel';
@@ -64,11 +64,12 @@ interface LibraryViewProps {
   onTracksAddedToPlaylist?:  (playlistId: string, branchName: string, count: number) => void;
   defaultPlaylistId?:        string | null;
   defaultBranchName?:        string;
+  favorites?:                Set<string>;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName }: LibraryViewProps) {
+export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName, favorites }: LibraryViewProps) {
   const [records,           setRecords]           = useState<TrackRecord[]>([]);
   const [strayHashes,       setStrayHashes]       = useState<Set<string>>(new Set());
   const [search,            setSearch]            = useState('');
@@ -459,6 +460,9 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
                 />
                 {isNew   && <Badge label="NEW"   accent />}
                 {isStray && <Badge label="STRAY" />}
+                {favorites?.has(r.hash) && (
+                  <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
+                )}
               </div>
 
               {/* Artist */}

@@ -36,7 +36,7 @@ export default function ScrollText({ text, style, textStyle, className }: Scroll
         ref={innerRef}
         style={anim ? {
           display: 'inline-block',
-          animation: `mm-scroll ${(0.6 + ov / 80).toFixed(2)}s ease-in-out 0.35s infinite alternate`,
+          animation: `mm-scroll ${Math.max(2, 1 + ov / 50).toFixed(2)}s linear 0.3s infinite`,
           ['--mm-ov' as string]: `-${ov}px`,
           ...textStyle,
         } : {

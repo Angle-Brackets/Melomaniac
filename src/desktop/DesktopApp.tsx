@@ -835,6 +835,7 @@ export default function DesktopApp() {
                   }
                   setCommitRefreshKey(k => k + 1);
                 }}
+                favorites={favorites}
               />
             ) : railItem === 'editor' ? (
               <EditorView
