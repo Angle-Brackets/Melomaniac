@@ -171,6 +171,7 @@ pub fn run() {
             discord::discord_set_activity,
             discord::discord_clear_activity,
             storage::playlist_get_tracks,
+            storage::playlist_set_ab_loop,
             storage::playlist_remove_track,
             storage::playlist_reorder_tracks,
             storage::playlist_rename,

@@ -383,21 +383,119 @@ async fn head_commit(storage: &StorageState, playlist_id: &str, branch_name: &st
 
 // ── Playlist track commands ───────────────────────────────────────────────────
 
-/// Resolve a branch HEAD → commit → tree blob → TrackRecord[]. Returns in tree order.
+/// TrackRecord enriched with per-playlist A/B loop points from the tree manifest.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PlaylistTrackRecord {
+    #[serde(flatten)]
+    pub record: TrackRecord,
+    pub ab_start_ms: Option<u64>,
+    pub ab_end_ms:   Option<u64>,
+}
+
+/// Resolve a branch HEAD → commit → tree blob → PlaylistTrackRecord[].
+/// Returns in tree order with A/B loop points from the manifest.
 #[tauri::command]
 pub async fn playlist_get_tracks(
     playlist_id: String,
     branch_name: String,
     storage:     State<'_, StorageState>,
-) -> Result<Vec<TrackRecord>, String> {
+) -> Result<Vec<PlaylistTrackRecord>, String> {
     let tree = load_tree(&storage, &playlist_id, &branch_name).await?;
     let mut records = Vec::with_capacity(tree.tracks.len());
     for entry in &tree.tracks {
         if let Some(r) = storage.db.get_track(&entry.hash).await.map_err(|e| e.to_string())? {
-            records.push(r);
+            records.push(PlaylistTrackRecord {
+                record:      r,
+                ab_start_ms: entry.ab_start_ms,
+                ab_end_ms:   entry.ab_end_ms,
+            });
         }
     }
     Ok(records)
+}
+
+/// Update a single track's A/B loop points in the active branch.
+/// If the current HEAD commit is itself an A/B commit, it is amended in place
+/// (new commit with the same grandparent) so dragging the markers doesn't
+/// accumulate one commit per adjustment.
+#[tauri::command]
+pub async fn playlist_set_ab_loop(
+    playlist_id: String,
+    branch_name: String,
+    track_hash:  String,
+    ab_start_ms: Option<u64>,
+    ab_end_ms:   Option<u64>,
+    storage:     State<'_, StorageState>,
+) -> Result<(), String> {
+    let mut tree = load_tree(&storage, &playlist_id, &branch_name).await?;
+
+    let entry = tree.tracks.iter_mut()
+        .find(|e| e.hash == track_hash)
+        .ok_or_else(|| format!("track {track_hash} not in playlist"))?;
+    entry.ab_start_ms = ab_start_ms;
+    entry.ab_end_ms   = ab_end_ms;
+
+    let tree_json = tree.to_json().map_err(|e| e.to_string())?;
+
+    let title = storage.db.get_track(&track_hash).await
+        .map_err(|e| e.to_string())?
+        .map(|r| r.title)
+        .unwrap_or_else(|| track_hash[..8].to_string());
+    let message = Some(format!("A/B: {title}"));
+
+    // Check whether HEAD is an A/B commit — if so, amend by using its parent.
+    let db = &storage.db;
+    let branch = db.get_branch(&playlist_id, &branch_name).await.map_err(|e| e.to_string())?;
+    let parent_hash: Option<String> = match branch.and_then(|b| b.head_commit) {
+        None => None,
+        Some(head_hash) => {
+            match storage.cas.read_blob(&head_hash).await {
+                Ok(bytes) => {
+                    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+                    let head_msg = v["message"].as_str().unwrap_or("");
+                    if head_msg.starts_with("A/B:") {
+                        // Amend: skip HEAD, use its parent
+                        v["parent"].as_str().map(|s| s.to_string())
+                    } else {
+                        Some(head_hash)
+                    }
+                }
+                Err(_) => Some(head_hash),
+            }
+        }
+    };
+
+    let cas = &storage.cas;
+    let tree_hash = cas.write_blob(tree_json.as_bytes()).await.map_err(|e| e.to_string())?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let author = storage.commit_author.lock().unwrap().clone();
+    let commit_body = serde_json::json!({
+        "tree_hash": &tree_hash,
+        "parent":    &parent_hash,
+        "timestamp": timestamp,
+        "device_id": &author,
+        "message":   &message,
+    }).to_string();
+
+    let commit_hash = cas.write_blob(commit_body.as_bytes()).await.map_err(|e| e.to_string())?;
+
+    let record = CommitRecord {
+        hash: commit_hash.clone(),
+        tree_hash,
+        timestamp,
+        device_id: author,
+        message,
+    };
+    let parents: Vec<&str> = parent_hash.iter().map(String::as_str).collect();
+    db.insert_commit(&record, &parents).await.map_err(|e| e.to_string())?;
+    db.update_branch_head(&playlist_id, &branch_name, &commit_hash).await.map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Remove a single track hash from the tree and commit. Message is user-provided.

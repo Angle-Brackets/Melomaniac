@@ -36,6 +36,9 @@ export interface TrackRecord {
   mime_type:    string | null;
   ingested_at:  number;
   source_url:   string | null;
+  /** Present only when returned by `playlist_get_tracks` — ms from tree manifest. */
+  ab_start_ms?: number | null;
+  ab_end_ms?:   number | null;
 }
 
 export interface Playlist {

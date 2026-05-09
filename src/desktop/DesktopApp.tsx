@@ -218,8 +218,9 @@ export default function DesktopApp() {
 
   // Refs that hold the latest skip handlers so the audio event listener can
   // call them without stale closures.
-  const skipNextRef = useRef<() => void>(() => {});
-  const skipPrevRef = useRef<() => void>(() => {});
+  const skipNextRef  = useRef<() => void>(() => {});
+  const skipPrevRef  = useRef<() => void>(() => {});
+  const abCommitRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Theme effect — all palette logic lives in shared/themes.ts ──────────
   useEffect(() => {
@@ -310,6 +311,19 @@ export default function DesktopApp() {
       .then(records => {
         const newTracks = records.map(trackRecordToTrack);
         setPlaylistTracks(newTracks);
+        // Seed A/B points from the committed tree (backend is authoritative per playlist)
+        const committed: Record<string, { a: number; b: number }> = {};
+        for (const r of records) {
+          if (r.ab_start_ms != null && r.ab_end_ms != null && r.duration_ms > 0) {
+            committed[r.hash] = {
+              a: r.ab_start_ms / r.duration_ms,
+              b: r.ab_end_ms   / r.duration_ms,
+            };
+          }
+        }
+        if (Object.keys(committed).length > 0) {
+          setTrackAbPoints(prev => ({ ...prev, ...committed }));
+        }
         // Branch switch within same playlist — rebuild shuffled queue from new tracks
         if (!playlistChanged && newTracks.length > 0) {
           setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode) : null);
@@ -639,6 +653,28 @@ export default function DesktopApp() {
     } else {
       setAbB(val);
       setTrackAbPoints(p => ({ ...p, [hash]: { ...(p[hash] ?? { a: 0, b: 1 }), b: val } }));
+    }
+
+    // Debounced commit — only when a playlist is active; uses sr.current so the
+    // timeout always sees the final values after rapid dragging.
+    if (activePlaylistId) {
+      if (abCommitRef.current) clearTimeout(abCommitRef.current);
+      const playlistId  = activePlaylistId;
+      const branchName  = activeBranch;
+      const durationMs  = sr.current.durationMs;
+      abCommitRef.current = setTimeout(() => {
+        const pts = sr.current.abA !== undefined
+          ? { a: sr.current.abA, b: sr.current.abB }
+          : null;
+        if (!pts || durationMs <= 0) return;
+        invoke('playlist_set_ab_loop', {
+          playlistId,
+          branchName,
+          trackHash:  hash,
+          abStartMs:  Math.round(pts.a * durationMs),
+          abEndMs:    Math.round(pts.b * durationMs),
+        }).catch(console.error);
+      }, 1500);
     }
   };
 
