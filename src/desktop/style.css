@@ -208,5 +208,9 @@
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+@keyframes mm-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--mm-ov, 0px)); }
+}
 .tl-context-menu { animation: fadeInScale 0.12s ease; }
 div:hover > .lib-delete-btn { opacity: 1 !important; }

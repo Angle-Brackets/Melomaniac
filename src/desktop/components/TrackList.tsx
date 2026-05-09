@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
 import { IcoDragHandle, IcoDots } from '../icons';
-import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause } from 'react-icons/fi';
+import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause, FiSearch, FiX } from 'react-icons/fi';
+import ScrollText from './ScrollText';
 
 const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Length', ''];
 
@@ -39,13 +40,25 @@ export default function TrackList({
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [menuTrackId, setMenuTrackId] = useState<number | null>(null);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const [search, setSearch] = useState('');
   const dropIdxRef = useRef<number | null>(null);
   const parentRef  = useRef<HTMLDivElement>(null);
+  const searchRef  = useRef<HTMLInputElement>(null);
 
   const rowHeight = ROW_HEIGHT[density] ?? 34;
 
+  const displayTracks = useMemo(() => {
+    if (!search.trim()) return tracks;
+    const q = search.toLowerCase();
+    return tracks.filter(t =>
+      t.title.toLowerCase().includes(q) ||
+      t.artist.toLowerCase().includes(q) ||
+      (t.album ?? '').toLowerCase().includes(q),
+    );
+  }, [tracks, search]);
+
   const virtualizer = useVirtualizer({
-    count: tracks.length,
+    count: displayTracks.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight,
     overscan: 8,
@@ -72,7 +85,7 @@ export default function TrackList({
       if (!parentRef.current) return;
       const rect = parentRef.current.getBoundingClientRect();
       const relY  = e.clientY - rect.top + parentRef.current.scrollTop;
-      const idx   = Math.round(Math.min(Math.max(0, relY / rowHeight), tracks.length - 1));
+      const idx   = Math.round(Math.min(Math.max(0, relY / rowHeight), displayTracks.length - 1));
       dropIdxRef.current = idx;
       setDropIdx(idx);
     };
@@ -81,7 +94,7 @@ export default function TrackList({
       const target = dropIdxRef.current;
       document.body.style.cursor = '';
       if (target !== null && target !== dragIdx) {
-        const next = [...tracks];
+        const next = [...displayTracks];
         const [moved] = next.splice(dragIdx, 1);
         next.splice(target, 0, moved);
         onReorder?.(next);
@@ -98,7 +111,7 @@ export default function TrackList({
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
     };
-  }, [dragIdx, tracks, onReorder, rowHeight]);
+  }, [dragIdx, displayTracks, onReorder, rowHeight]);
 
   const COLS = '18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px';
 
@@ -118,6 +131,24 @@ export default function TrackList({
         </div>
       )}
 
+      {/* Search bar */}
+      <div className="flex items-center gap-2 px-3 py-1 bg-mm-1 border-b border-mm-b0 shrink-0">
+        <FiSearch size={11} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+        <input
+          ref={searchRef}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search tracks…"
+          className="flex-1 bg-transparent outline-none text-mm-t1"
+          style={{ fontSize: 11, fontFamily: "'Outfit', sans-serif" }}
+        />
+        {search && (
+          <button onClick={() => setSearch('')} style={{ color: 'var(--text-3)', display: 'flex' }}>
+            <FiX size={11} />
+          </button>
+        )}
+      </div>
+
       {/* Column headers */}
       <div
         className="tl-row bg-mm-1 cursor-default shrink-0"
@@ -133,7 +164,7 @@ export default function TrackList({
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
           {virtualizer.getVirtualItems().map(vItem => {
             const idx = vItem.index;
-            const t   = tracks[idx];
+            const t   = displayTracks[idx];
             if (!t) return null;
             const active     = t.id === activeTrackId;
             const art        = ALBUMS[t.albumRef] ?? ALBUMS[0];
@@ -186,14 +217,14 @@ export default function TrackList({
                       : art.gradient,
                   }} />
                 </div>
-                <div className={`tl-cell gap-1 ${active ? 'bright font-semibold' : ''}`}>
+                <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`} style={{ gap: 4 }}>
+                  <ScrollText text={t.title} style={{ flex: 1 }} />
                   {favorites?.has(t.hash) && (
                     <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
                   )}
-                  {t.title}
                 </div>
-                <div className="tl-cell">{t.artist}</div>
-                <div className="tl-cell muted">{t.album}</div>
+                <div className="tl-cell"><ScrollText text={t.artist} style={{ flex: 1 }} /></div>
+                <div className="tl-cell muted"><ScrollText text={t.album ?? ''} style={{ flex: 1 }} /></div>
                 <div className="tl-cell mono">{t.commit}</div>
                 <div className="tl-cell muted text-[10px]">{t.added}</div>
                 <div className="tl-cell muted font-mono text-[10px]">{t.length}</div>
@@ -291,7 +322,9 @@ export default function TrackList({
         )}
         <div className="flex-1" />
         <span className="font-mono text-[10px] text-mm-t2">
-          {tracks.length} track{tracks.length !== 1 ? 's' : ''}
+          {search
+            ? `${displayTracks.length} of ${tracks.length} tracks`
+            : `${tracks.length} track${tracks.length !== 1 ? 's' : ''}`}
         </span>
       </div>
     </div>

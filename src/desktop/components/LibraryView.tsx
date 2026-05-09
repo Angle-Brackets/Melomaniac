@@ -6,6 +6,7 @@ import type { Track, TrackRecord } from '../data';
 import { trackRecordToTrack } from '../data';
 import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
 import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay } from 'react-icons/fi';
+import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import BulkEditPanel from './BulkEditPanel';
 import DownloadModal from './DownloadModal';
@@ -451,21 +452,26 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
               {/* Title + badges */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden', minWidth: 0 }}>
-                <span style={{
-                  fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  color: sel ? 'var(--text-0)' : isPlaying ? 'var(--accent-light)' : 'var(--text-1)',
-                }}>
-                  {r.title}
-                </span>
+                <ScrollText
+                  text={r.title}
+                  style={{ flex: 1 }}
+                  textStyle={{ fontSize: 12, color: sel ? 'var(--text-0)' : isPlaying ? 'var(--accent-light)' : 'var(--text-1)' }}
+                />
                 {isNew   && <Badge label="NEW"   accent />}
                 {isStray && <Badge label="STRAY" />}
               </div>
 
               {/* Artist */}
-              <span style={{ ...cellStyle, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>{r.artist}</span>
+              <ScrollText
+                text={r.artist}
+                textStyle={{ ...cellStyle, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}
+              />
 
               {/* Album */}
-              <span style={{ ...cellStyle, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>{r.album ?? '—'}</span>
+              <ScrollText
+                text={r.album ?? '—'}
+                textStyle={{ ...cellStyle, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}
+              />
 
               {/* Duration */}
               <span style={{ ...cellStyle, fontFamily: "'JetBrains Mono', monospace", fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>
