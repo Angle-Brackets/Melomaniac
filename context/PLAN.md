@@ -165,6 +165,7 @@ Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). 
 | `components/PlaylistSettingsPanel.tsx` | Editable name with save button, two-step delete confirm, shows `forked_from` info |
 | `components/SettingsModal.tsx` | Named theme pills + Custom pill; accent hue slider; density, right-panel toggle, carousel size slider |
 | `components/EditorView.tsx` | MP3 metadata editor — title/artist/album fields, artwork replacement |
+| `components/MiniPlayer.tsx` | Persistent bottom bar (Spotify-style) — 3px drag-seek strip, artwork + title/artist, prev/play-pause/next, loop cycle button, volume slider, collapse to slim strip |
 
 ### Toolchain
 
@@ -223,8 +224,21 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 ### Known bugs / remaining work
 
 - Rail git icon: clicking the git rail icon while the CommitGraph overlay is open doesn't reset the highlighted rail icon when navigating away
-- `forked_at_commit` field missing from TypeScript `PlaylistRecord` type in `src/desktop/data.ts`
-- Status bar at the bottom of the app still shows a hardcoded commit hash (`4fa9b0`)
+
+### Completed since 2026-05-09
+
+- **MiniPlayer**: persistent Spotify-style bottom bar visible on any page whenever a track is loaded — 3px draggable seek strip, artwork thumbnail, title/artist, prev/play-pause/next transport, loop cycle button, volume slider; collapses to a 22px slim strip with track title and play/pause indicator; `^` chevron dismisses, clicking the strip restores
+- **Skip handlers**: `handleSkipNext` / `handleSkipPrev` advance through `playQueue` by matching `loadedHash`; wired to both `PlayerControls` prev/next buttons and `MiniPlayer` transport
+- **Carousel wheel momentum**: `addEventListener('wheel', …, { passive: false })` with per-frame velocity accumulation and 0.87 friction decay; snaps to nearest index on release
+- **Track list play column**: row clicks only set `activeTrackId` (no auto-play); column 2 is a dedicated toggleable button — shows track number normally, hover reveals FiPlay; when `t.hash === loadedHash` shows FiPlay/FiPause in accent colour
+- **Play button correctness**: all play/pause state derived from `loadedHash` (what the audio engine has loaded), not `activeTrackId` (UI selection) — fixes wrong icon when scrolling carousel while audio plays a different track
+- **`ingested_at` timestamp**: `ingest_file` now writes current unix seconds; re-ingest fast-path backfills when `ingested_at == 0`; `timeAgo()` helper in `data.ts` converts unix seconds to human-readable relative string shown in the Added column
+- **`forked_at_commit` TS type**: added `forked_at_commit: string | null` to `PlaylistRecord` interface
+- **Settings persistence**: `useSettings` hook reads from `localStorage` on init (merged over defaults for forward-compat); writes on every update
+- **Live status bar**: right side shows `{n} tracks · {playlist name} · {branch} · {HEAD short hash}` when a playlist is active, `{n} tracks · library` otherwise
+- **Commit author setting**: `StorageState.commit_author` initialised from `$USER`/`$USERNAME`; `get_commit_author` / `set_commit_author` Tauri commands; Identity section in SettingsModal
+- **AddToPlaylistModal autofill**: `defaultPlaylistId` and `defaultBranchName` props pre-select the playlist/branch you were just on
+- **Push/Pull disabled**: buttons render with `disabled` attribute until sync is implemented
 
 ### Completed since 2026-05-04
 
@@ -243,9 +257,8 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 ### Next steps
 
 1. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin commands; recursive resolver in `playlist_get_tracks`; "Includes" section in Playlist Settings
-2. **Fix `forked_at_commit` in TS types** — add to `PlaylistRecord` interface in `src/desktop/data.ts`
-3. **Fix status bar** — replace hardcoded `4fa9b0` with live `activePlaylist` branch HEAD short hash
-4. **Android audio bridge** — ExoPlayer / Media3 implementation
-5. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime
+2. **Android audio bridge** — ExoPlayer / Media3 implementation
+3. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime
+4. **Virtualized tracklist** — `tanstack/react-virtual` for 10 000+ track libraries
 
-*Last updated: 2026-05-08.*
+*Last updated: 2026-05-09.*

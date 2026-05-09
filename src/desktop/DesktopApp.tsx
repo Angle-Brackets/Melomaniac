@@ -30,6 +30,8 @@ import CommitBar from './components/CommitBar';
 import PlaylistArtworkModal from './components/PlaylistArtworkModal';
 import ForkPlaylistModal from './components/ForkPlaylistModal';
 import MergeBranchModal from './components/MergeBranchModal';
+import MiniPlayer from './components/MiniPlayer';
+import { FiPlay, FiPause } from 'react-icons/fi';
 
 export type { AppSettings };
 
@@ -115,6 +117,7 @@ export default function DesktopApp() {
   const lastSeekTime = useRef(0);
   const [artworkUrls,      setArtworkUrls]       = useState<Record<string, string>>({});
   const [volume,           setVolume]            = useState(0.72);
+  const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
   const [vibeText,         setVibeText]          = useState('chill ambient music for focus');
   const [gitToast,         setGitToast]          = useState<string | null>(null);
   const [commitRefreshKey, setCommitRefreshKey]  = useState(0);
@@ -512,6 +515,32 @@ export default function DesktopApp() {
     }
   };
 
+  const handleSkipNext = () => {
+    const idx = playQueue.findIndex(t => t.hash === loadedHash);
+    if (idx === -1) return;
+    const next = playQueue[(idx + 1) % playQueue.length];
+    if (!next) return;
+    setActiveTrackId(next.id);
+    invoke('track_play', { hash: next.hash }).catch(console.error);
+    setIsPlaying(true);
+    setLoadedHash(next.hash);
+    setDurationMs(next.duration_ms);
+    setPositionMs(0);
+  };
+
+  const handleSkipPrev = () => {
+    const idx = playQueue.findIndex(t => t.hash === loadedHash);
+    if (idx === -1) return;
+    const prev = playQueue[(idx - 1 + playQueue.length) % playQueue.length];
+    if (!prev) return;
+    setActiveTrackId(prev.id);
+    invoke('track_play', { hash: prev.hash }).catch(console.error);
+    setIsPlaying(true);
+    setLoadedHash(prev.hash);
+    setDurationMs(prev.duration_ms);
+    setPositionMs(0);
+  };
+
   const handlePlayPause = () => {
     const track = playQueue.find(t => t.id === activeTrackId);
     if (!track?.hash) return;
@@ -665,6 +694,7 @@ export default function DesktopApp() {
                         positionMs={positionMs}
                         durationMs={durationMs}
                         isPlaying={isPlaying} onPlayPause={handlePlayPause}
+                        onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
                         isFav={isFav}         onFav={() => setIsFav(p => !p)}
                         loopMode={loopMode}   onLoopCycle={handleLoopCycle}
                         isShuffle={isShuffle} onShuffle={handleShuffle}
@@ -770,6 +800,57 @@ export default function DesktopApp() {
             >‹</div>
           )}
         </div>
+
+        {/* Mini player */}
+        {loadedHash && !miniPlayerCollapsed && (
+          <MiniPlayer
+            track={playQueue.find(t => t.hash === loadedHash) ?? null}
+            artworkUrl={artworkUrls[loadedHash]}
+            isPlaying={isPlaying}
+            positionMs={positionMs}
+            durationMs={durationMs}
+            loopMode={loopMode}
+            volume={volume}
+            onPlayPause={handlePlayPause}
+            onSkipNext={handleSkipNext}
+            onSkipPrev={handleSkipPrev}
+            onLoopCycle={handleLoopCycle}
+            onSeek={pct => {
+              const ms = Math.floor(pct * durationMs);
+              lastSeekTime.current = Date.now();
+              setPositionMs(ms);
+              invoke('audio_seek', { positionMs: ms }).catch(console.error);
+            }}
+            onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+            onCollapse={() => setMiniPlayerCollapsed(true)}
+          />
+        )}
+        {loadedHash && miniPlayerCollapsed && (
+          <div
+            onClick={() => setMiniPlayerCollapsed(false)}
+            style={{
+              height: 22, flexShrink: 0,
+              background: 'var(--bg-1)',
+              borderTop: '1px solid var(--border-1)',
+              display: 'flex', alignItems: 'center',
+              padding: '0 12px', gap: 8,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-2)')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.background = 'var(--bg-1)')}
+            title="Expand player"
+          >
+            <span style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: "'Outfit', sans-serif", whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+              {playQueue.find(t => t.hash === loadedHash)?.title ?? '—'}
+            </span>
+            <span style={{ color: 'var(--text-3)', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+              {isPlaying ? <FiPlay size={10} strokeWidth={2.5} /> : <FiPause size={11} strokeWidth={2} />}
+            </span>
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" style={{ color: 'var(--text-3)', flexShrink: 0 }}>
+              <polyline points="2,6.5 5,3.5 8,6.5" />
+            </svg>
+          </div>
+        )}
 
         {/* Status bar */}
         <div style={{

@@ -15,6 +15,8 @@ interface PlayerControlsProps {
   isFav:       boolean; onFav:       () => void;
   loopMode:    LoopMode; onLoopCycle: () => void;
   isShuffle:   boolean; onShuffle:   () => void;
+  onSkipNext?: () => void;
+  onSkipPrev?: () => void;
   onSeek:      (pct: number) => void;
   volume:      number;  onVolume:    (vol: number) => void;
   abA:         number;  abB:         number;
@@ -25,6 +27,7 @@ export default function PlayerControls({
   track, positionMs, durationMs,
   isPlaying, onPlayPause, isFav, onFav,
   loopMode, onLoopCycle, isShuffle, onShuffle,
+  onSkipNext, onSkipPrev,
   onSeek, volume, onVolume,
   abA, abB, onAbChange,
 }: PlayerControlsProps) {
@@ -90,7 +93,7 @@ export default function PlayerControls({
             className={`btn btn-ghost btn-square btn-sm ${isShuffle ? 'text-primary' : ''}`}
             onClick={onShuffle} title="Shuffle"
           ><IcoShuffle size={16} /></button>
-          <button className="btn btn-ghost btn-square btn-sm" title="Previous"><IcoPrev size={16} /></button>
+          <button className="btn btn-ghost btn-square btn-sm" onClick={onSkipPrev} title="Previous"><IcoPrev size={16} /></button>
         </div>
 
         {/* Play/pause — explicit 44px circle so DaisyUI size classes don't squash it */}
@@ -103,7 +106,7 @@ export default function PlayerControls({
         </button>
 
         <div className="flex items-center gap-2">
-          <button className="btn btn-ghost btn-square btn-sm" title="Next"><IcoNext size={16} /></button>
+          <button className="btn btn-ghost btn-square btn-sm" onClick={onSkipNext} title="Next"><IcoNext size={16} /></button>
           <button
             className={`btn btn-ghost btn-square btn-sm ${isFav ? 'text-primary' : ''}`}
             onClick={onFav} title="Favorite"

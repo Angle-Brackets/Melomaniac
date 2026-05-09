@@ -7,20 +7,20 @@ import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause } from 'react-ic
 const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Length', ''];
 
 interface TrackListProps {
-  tracks:           Track[];
-  activeTrackId:    number;
-  loadedHash:       string | null;
-  isPlaying:        boolean;
-  onSelect:         (id: number) => void;
-  onPlayPause:      (id: number) => void;
-  onReorder:        ((newOrder: Track[] | null) => void) | null;
-  hasUncommitted:   boolean;
-  onCommitChanges:  () => void;
-  onEditTrack:      (id: number) => void;
-  artworkUrls:      Record<string, string>;
-  onRemoveTrack?:   (hash: string) => void;
-  onAddTracks?:     () => void;
-  density?:         'compact' | 'normal' | 'relaxed';
+  tracks: Track[];
+  activeTrackId: number;
+  loadedHash: string | null;
+  isPlaying: boolean;
+  onSelect: (id: number) => void;
+  onPlayPause: (id: number) => void;
+  onReorder: ((newOrder: Track[] | null) => void) | null;
+  hasUncommitted: boolean;
+  onCommitChanges: () => void;
+  onEditTrack: (id: number) => void;
+  artworkUrls: Record<string, string>;
+  onRemoveTrack?: (hash: string) => void;
+  onAddTracks?: () => void;
+  density?: 'compact' | 'normal' | 'relaxed';
 }
 
 export default function TrackList({
@@ -28,12 +28,12 @@ export default function TrackList({
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
   onRemoveTrack, onAddTracks, density = 'relaxed',
 }: TrackListProps) {
-  const [dragIdx,     setDragIdx]     = useState<number | null>(null);
-  const [dropIdx,     setDropIdx]     = useState<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [menuTrackId, setMenuTrackId] = useState<number | null>(null);
-  const [menuPos,     setMenuPos]     = useState({ x: 0, y: 0 });
-  const dropIdxRef   = useRef<number | null>(null);
-  const rowRefs      = useRef<(HTMLDivElement | null)[]>([]);
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
+  const dropIdxRef = useRef<number | null>(null);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -118,8 +118,8 @@ export default function TrackList({
       {/* Track rows */}
       <div className="flex-1 overflow-y-auto styled-scroll">
         {tracks.map((t, idx) => {
-          const active     = t.id === activeTrackId;
-          const art        = ALBUMS[t.albumRef] ?? ALBUMS[0];
+          const active = t.id === activeTrackId;
+          const art = ALBUMS[t.albumRef] ?? ALBUMS[0];
           const artworkUrl = artworkUrls[t.hash];
           return (
             <div
@@ -147,8 +147,8 @@ export default function TrackList({
                   {t.hash === loadedHash ? (
                     <span className="text-mm-accent group-hover/playbtn:opacity-70 transition-opacity">
                       {isPlaying
-                        ? <FiPause size={12} strokeWidth={2.5} />
-                        : <FiPlay  size={12} strokeWidth={2.5} />}
+                        ? <FiPause size={12} strokeWidth={2} />
+                        : <FiPlay size={12} strokeWidth={2.5} />}
                     </span>
                   ) : (
                     <>
