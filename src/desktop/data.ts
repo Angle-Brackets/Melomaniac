@@ -61,13 +61,14 @@ export interface BranchRecord {
 
 /** Shape returned by `playlist_get_all` / `playlist_create` / `playlist_fork`. */
 export interface PlaylistRecord {
-  id:           string;
-  name:         string;
-  description:  string | null;
-  created_at:   number;
-  forked_from:  string | null;
-  artwork_hash: string | null;
-  branches:     BranchRecord[];
+  id:                string;
+  name:              string;
+  description:       string | null;
+  created_at:        number;
+  forked_from:       string | null;
+  forked_at_commit:  string | null;
+  artwork_hash:      string | null;
+  branches:          BranchRecord[];
 }
 
 export function playlistRecordToPlaylist(r: PlaylistRecord): Playlist {

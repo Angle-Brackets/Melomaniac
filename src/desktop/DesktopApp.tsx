@@ -45,16 +45,29 @@ const SETTING_DEFAULTS: AppSettings = {
   commitAuthor: '',
 };
 
-// Thin hook so the settings object stays in one place
+const SETTINGS_KEY = 'melomaniac.settings';
+
+function loadSettings(defaults: AppSettings): AppSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) return { ...defaults, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return defaults;
+}
+
 function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettings | Partial<AppSettings>, value?: unknown) => void] {
-  const [settings, setSettings] = useState<AppSettings>(defaults);
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings(defaults));
+
   const updateSetting = (key: keyof AppSettings | Partial<AppSettings>, value?: unknown) => {
-    if (typeof key === 'object') {
-      setSettings(prev => ({ ...prev, ...key }));
-    } else {
-      setSettings(prev => ({ ...prev, [key]: value }));
-    }
+    setSettings(prev => {
+      const next = typeof key === 'object'
+        ? { ...prev, ...key }
+        : { ...prev, [key]: value };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+      return next;
+    });
   };
+
   return [settings, updateSetting];
 }
 
@@ -749,7 +762,14 @@ export default function DesktopApp() {
             )}
           </span>
           <span className="font-mono text-[9px] text-mm-t2">
-            {trackOrder.length} tracks · branch: main · commit: 4fa9b0
+            {(() => {
+              const branch = activePlaylist?.branches.find(b => b.name === activeBranch);
+              const head   = branch?.head_commit?.slice(0, 7);
+              if (activePlaylist) {
+                return `${playlistTracks?.length ?? 0} tracks · ${activePlaylist.name} · ${activeBranch}${head ? ` · ${head}` : ''}`;
+              }
+              return `${trackOrder.length} tracks · library`;
+            })()}
           </span>
         </div>
 
