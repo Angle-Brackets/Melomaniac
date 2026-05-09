@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
 import { IcoDragHandle, IcoDots } from '../icons';
-import { FiEdit2, FiTrash2, FiHeart, FiArrowUp } from 'react-icons/fi';
+import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause } from 'react-icons/fi';
 
 const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Length', ''];
 
@@ -141,17 +141,21 @@ export default function TrackList({
               ><IcoDragHandle /></div>
               <div className="tl-cell justify-center group/playbtn">
                 <button
-                  className="flex items-center justify-center w-full h-full focus:outline-none"
+                  className="flex items-center justify-center w-full h-full focus:outline-none transition-colors"
                   onClick={e => { e.stopPropagation(); onPlayPause(t.id); }}
                 >
                   {t.hash === loadedHash ? (
-                    <span className={`text-[11px] ${isPlaying ? 'text-mm-accent' : 'bright'}`}>
-                      {isPlaying ? '⏸' : '▶'}
+                    <span className="text-mm-accent group-hover/playbtn:opacity-70 transition-opacity">
+                      {isPlaying
+                        ? <FiPause size={12} strokeWidth={2.5} />
+                        : <FiPlay  size={12} strokeWidth={2.5} />}
                     </span>
                   ) : (
                     <>
                       <span className="text-[10px] text-mm-t3 group-hover/playbtn:hidden">{idx + 1}</span>
-                      <span className="hidden text-[10px] text-mm-t2 group-hover/playbtn:inline">▶</span>
+                      <span className="hidden text-mm-t2 group-hover/playbtn:flex transition-opacity">
+                        <FiPlay size={12} strokeWidth={2.5} />
+                      </span>
                     </>
                   )}
                 </button>
