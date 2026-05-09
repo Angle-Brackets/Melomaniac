@@ -140,13 +140,19 @@ export default function DesktopApp() {
   const [abA, setAbA] = useState(0);
   const [abB, setAbB] = useState(1);
   const [loopMode, setLoopMode] = useState<LoopMode>('off');
-  const [trackAbPoints, setTrackAbPoints] = useState<Record<number, { a: number; b: number }>>({});
+  // Keyed by track hash so points survive DB re-indexes and cross-device imports
+  const [trackAbPoints, setTrackAbPoints] = useState<Record<string, { a: number; b: number }>>(() => {
+    try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
+  });
   const [folderPopupItem, setFolderPopupItem] = useState<Playlist | null>(null);
   const [folders, setFolders] = useState([{ id: 4, name: 'Gaming Sessions' }]);
   const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
   const [activeTrackId, setActiveTrackId] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isFav, setIsFav] = useState(false);
+  // User-local favorites — persisted to localStorage, never committed to git
+  const [favorites, setFavorites] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('melomaniac.favorites') ?? '[]')); } catch { return new Set(); }
+  });
   const [isShuffle, setIsShuffle] = useState(false);
   const [shuffledQueue, setShuffledQueue] = useState<Track[] | null>(null);
   const [loadedHash, setLoadedHash] = useState<string | null>(null);
@@ -498,9 +504,20 @@ export default function DesktopApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylist?.id, activeBranch]);
 
+  // ── Persist A·B points and favorites to localStorage ─────────────────────
+  useEffect(() => {
+    localStorage.setItem('melomaniac.ab_points', JSON.stringify(trackAbPoints));
+  }, [trackAbPoints]);
+
+  useEffect(() => {
+    localStorage.setItem('melomaniac.favorites', JSON.stringify([...favorites]));
+  }, [favorites]);
+
   // ── Sync A·B handles on track change ──────────────────────────────────────
   useEffect(() => {
-    const pts = trackAbPoints[activeTrackId];
+    const hash = playQueue.find(t => t.id === activeTrackId)?.hash
+               ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
+    const pts = hash ? trackAbPoints[hash] : undefined;
     if (pts) { setAbA(pts.a); setAbB(pts.b); }
     else { setAbA(0); setAbB(1); }
   }, [activeTrackId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -613,12 +630,15 @@ export default function DesktopApp() {
   }, [activePlaylistId, activeBranch, reloadPlaylists]);
 
   const handleAbChange = (handle: 'A' | 'B', val: number) => {
+    const hash = playQueue.find(t => t.id === activeTrackId)?.hash
+               ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
+    if (!hash) return;
     if (handle === 'A') {
       setAbA(val);
-      setTrackAbPoints(p => ({ ...p, [activeTrackId]: { ...p[activeTrackId], a: val } }));
+      setTrackAbPoints(p => ({ ...p, [hash]: { ...(p[hash] ?? { a: 0, b: 1 }), a: val } }));
     } else {
       setAbB(val);
-      setTrackAbPoints(p => ({ ...p, [activeTrackId]: { ...p[activeTrackId], b: val } }));
+      setTrackAbPoints(p => ({ ...p, [hash]: { ...(p[hash] ?? { a: 0, b: 1 }), b: val } }));
     }
   };
 
@@ -898,7 +918,16 @@ export default function DesktopApp() {
                         durationMs={durationMs}
                         isPlaying={isPlaying} onPlayPause={handlePlayPause}
                         onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
-                        isFav={isFav} onFav={() => setIsFav(p => !p)}
+                        isFav={favorites.has(playQueue.find(t => t.id === activeTrackId)?.hash ?? '')}
+                        onFav={() => {
+                          const hash = playQueue.find(t => t.id === activeTrackId)?.hash;
+                          if (!hash) return;
+                          setFavorites(prev => {
+                            const next = new Set(prev);
+                            next.has(hash) ? next.delete(hash) : next.add(hash);
+                            return next;
+                          });
+                        }}
                         loopMode={loopMode} onLoopCycle={handleLoopCycle}
                         isShuffle={isShuffle} shuffleMode={settings.shuffleMode} onShuffle={handleShuffle}
                         showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
