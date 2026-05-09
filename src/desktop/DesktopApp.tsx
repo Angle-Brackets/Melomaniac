@@ -494,18 +494,21 @@ export default function DesktopApp() {
   const handleTrackPlayPause = (id: number) => {
     const track = playQueue.find(t => t.id === id);
     if (!track?.hash) return;
-    if (id !== activeTrackId) {
-      // Different track — select and play it
+    if (track.hash === loadedHash) {
+      // Already loaded — just toggle pause/resume
+      if (isPlaying) {
+        invoke('audio_pause').catch(console.error);
+        setIsPlaying(false);
+      } else {
+        invoke('audio_play').catch(console.error);
+        setIsPlaying(true);
+      }
+    } else {
+      // Different track — load and play it
       setActiveTrackId(id);
       invoke('track_play', { hash: track.hash }).catch(console.error);
       setIsPlaying(true);
       setLoadedHash(track.hash);
-    } else if (isPlaying) {
-      invoke('audio_pause').catch(console.error);
-      setIsPlaying(false);
-    } else {
-      invoke('audio_play').catch(console.error);
-      setIsPlaying(true);
     }
   };
 
@@ -679,6 +682,7 @@ export default function DesktopApp() {
                     <TrackList
                       tracks={playlistTracks ?? trackOrder}
                       activeTrackId={activeTrackId}
+                      loadedHash={loadedHash}
                       isPlaying={isPlaying}
                       onSelect={handleSelectTrack}
                       onPlayPause={handleTrackPlayPause}

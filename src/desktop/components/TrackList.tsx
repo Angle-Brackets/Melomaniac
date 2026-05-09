@@ -9,6 +9,7 @@ const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Le
 interface TrackListProps {
   tracks:           Track[];
   activeTrackId:    number;
+  loadedHash:       string | null;
   isPlaying:        boolean;
   onSelect:         (id: number) => void;
   onPlayPause:      (id: number) => void;
@@ -23,7 +24,7 @@ interface TrackListProps {
 }
 
 export default function TrackList({
-  tracks, activeTrackId, isPlaying, onSelect, onPlayPause, onReorder,
+  tracks, activeTrackId, loadedHash, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
   onRemoveTrack, onAddTracks, density = 'relaxed',
 }: TrackListProps) {
@@ -143,7 +144,7 @@ export default function TrackList({
                   className="flex items-center justify-center w-full h-full focus:outline-none"
                   onClick={e => { e.stopPropagation(); onPlayPause(t.id); }}
                 >
-                  {active ? (
+                  {t.hash === loadedHash ? (
                     <span className={`text-[11px] ${isPlaying ? 'text-mm-accent' : 'bright'}`}>
                       {isPlaying ? '⏸' : '▶'}
                     </span>
