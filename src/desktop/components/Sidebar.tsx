@@ -226,23 +226,6 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
   );
 }
 
-// ── Collapsible section header ────────────────────────────────────────────────
-function CollapsibleSection({ label, open, onToggle, children }: {
-  label: string; open: boolean; onToggle: () => void; children: React.ReactNode;
-}) {
-  return (
-    <div className="border-t border-mm-b0">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-bold tracking-[0.08em] text-mm-t2 uppercase hover:text-mm-t1 transition-colors"
-      >
-        <span>{label}</span>
-        <IcoChevron size={9} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
-      </button>
-      {open && children}
-    </div>
-  );
-}
 
 // ── LibrarySidebar ────────────────────────────────────────────────────────────
 interface LibrarySidebarProps {
@@ -262,7 +245,7 @@ export default function LibrarySidebar({
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
   pinnedIds, onTogglePin, onOpenSettings, onAddToFolderClick, onNewPlaylist,
 }: LibrarySidebarProps) {
-  const [sectionsOpen, setSectionsOpen] = useState({ repos: true, importer: false });
+  const [sectionsOpen, setSectionsOpen] = useState({ repos: true });
   const toggle = (k: keyof typeof sectionsOpen) => setSectionsOpen(s => ({ ...s, [k]: !s[k] }));
 
   const sorted  = [...playlists].sort((a, b) => (pinnedIds.has(a.id) ? 0 : 1) - (pinnedIds.has(b.id) ? 0 : 1));
@@ -343,18 +326,6 @@ export default function LibrarySidebar({
             )}
           </div>
 
-          {/* Importer section */}
-          <CollapsibleSection label="Importer" open={sectionsOpen.importer} onToggle={() => toggle('importer')}>
-            <div className="px-3 pb-2 space-y-1.5">
-              <p className="text-[11px] text-mm-t2">yt-dlp URL</p>
-              <input
-                placeholder="https://youtube.com/..."
-                className="input input-xs w-full bg-mm-3 text-mm-t1 font-['Outfit']"
-              />
-              <button className="btn btn-ghost btn-xs btn-block">Download &amp; Import</button>
-              <button className="btn btn-ghost btn-xs btn-block">Import Local Files</button>
-            </div>
-          </CollapsibleSection>
         </div>
       </div>
     </div>

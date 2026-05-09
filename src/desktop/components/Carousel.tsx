@@ -181,6 +181,7 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
         onTouchStart={e => startDrag(e.touches[0].clientX)}
         onTouchMove={e => { e.preventDefault(); moveDrag(e.touches[0].clientX); }}
         onTouchEnd={() => endDrag()}
+        onWheel={e => { e.preventDefault(); snapTo(Math.round(posRef.current) + Math.sign(e.deltaY)); }}
         style={{
           position: 'relative', width: '100%', height: '100%',
           perspective: '1100px',

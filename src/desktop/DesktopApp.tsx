@@ -489,6 +489,12 @@ export default function DesktopApp() {
 
   const handleSelectTrack = (id: number) => {
     setActiveTrackId(id);
+    const track = playQueue.find(t => t.id === id);
+    if (track?.hash) {
+      invoke('track_play', { hash: track.hash }).catch(console.error);
+      setIsPlaying(true);
+      setLoadedHash(track.hash);
+    }
   };
 
   const handlePlayPause = () => {
