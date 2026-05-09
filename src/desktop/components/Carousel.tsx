@@ -63,12 +63,18 @@ const SLOT_GAP = 6; // px gap between card slots
 export default function Carousel({ albums, activeIndex, onIndexChange, size = 180 }: CarouselProps) {
   const [position,      setPosition]      = useState(activeIndex);
   const [containerWidth, setContainerWidth] = useState(600);
-  const posRef        = useRef(activeIndex);
-  const dragStartX    = useRef<number | null>(null);
-  const dragStartPos  = useRef(0);
-  const isDragging    = useRef(false);
-  const animFrame     = useRef<number | null>(null);
-  const containerRef  = useRef<HTMLDivElement>(null);
+  const posRef           = useRef(activeIndex);
+  const dragStartX       = useRef<number | null>(null);
+  const dragStartPos     = useRef(0);
+  const isDragging       = useRef(false);
+  const animFrame        = useRef<number | null>(null);
+  const containerRef     = useRef<HTMLDivElement>(null);
+  const wheelVelRef      = useRef(0);
+  const wheelRafRef      = useRef<number | null>(null);
+  const albumsLenRef     = useRef(albums.length);
+  const onIndexChangeRef = useRef(onIndexChange);
+  useEffect(() => { albumsLenRef.current     = albums.length;  }, [albums.length]);
+  useEffect(() => { onIndexChangeRef.current = onIndexChange;  }, [onIndexChange]);
 
   // Track container width so getCardProps fills the available space
   useEffect(() => {
@@ -85,6 +91,50 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
   useEffect(() => {
     if (!isDragging.current) animateTo(activeIndex);
   }, [activeIndex]);
+
+  // Wheel with momentum — passive:false so preventDefault stops page scroll
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Normalize: mouse notch ≈ 120, trackpad per-event ≈ 1–10
+      const delta = e.deltaY * 0.0015;
+      wheelVelRef.current = Math.max(-3, Math.min(3, wheelVelRef.current + delta));
+
+      if (wheelRafRef.current !== null) return; // loop already running
+
+      // Cancel any in-progress animateTo
+      if (animFrame.current) { cancelAnimationFrame(animFrame.current); animFrame.current = null; }
+
+      const tick = () => {
+        const vel = wheelVelRef.current;
+        if (Math.abs(vel) < 0.005) {
+          wheelVelRef.current = 0;
+          wheelRafRef.current = null;
+          const snapped = Math.max(0, Math.min(albumsLenRef.current - 1, Math.round(posRef.current)));
+          onIndexChangeRef.current(snapped);
+          animateTo(snapped);
+          return;
+        }
+        const newPos = Math.max(0, Math.min(albumsLenRef.current - 1, posRef.current + vel));
+        posRef.current = newPos;
+        setPosition(newPos);
+        wheelVelRef.current *= 0.87;
+        wheelRafRef.current = requestAnimationFrame(tick);
+      };
+
+      wheelRafRef.current = requestAnimationFrame(tick);
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      if (wheelRafRef.current) { cancelAnimationFrame(wheelRafRef.current); wheelRafRef.current = null; }
+      wheelVelRef.current = 0;
+    };
+  }, []);
 
   const animateTo = (target: number) => {
     if (animFrame.current) cancelAnimationFrame(animFrame.current);
@@ -181,7 +231,6 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
         onTouchStart={e => startDrag(e.touches[0].clientX)}
         onTouchMove={e => { e.preventDefault(); moveDrag(e.touches[0].clientX); }}
         onTouchEnd={() => endDrag()}
-        onWheel={e => { e.preventDefault(); snapTo(Math.round(posRef.current) + Math.sign(e.deltaY)); }}
         style={{
           position: 'relative', width: '100%', height: '100%',
           perspective: '1100px',

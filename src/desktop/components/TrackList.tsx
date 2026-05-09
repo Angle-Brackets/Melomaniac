@@ -9,7 +9,9 @@ const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Le
 interface TrackListProps {
   tracks:           Track[];
   activeTrackId:    number;
+  isPlaying:        boolean;
   onSelect:         (id: number) => void;
+  onPlayPause:      (id: number) => void;
   onReorder:        ((newOrder: Track[] | null) => void) | null;
   hasUncommitted:   boolean;
   onCommitChanges:  () => void;
@@ -21,7 +23,7 @@ interface TrackListProps {
 }
 
 export default function TrackList({
-  tracks, activeTrackId, onSelect, onReorder,
+  tracks, activeTrackId, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
   onRemoveTrack, onAddTracks, density = 'relaxed',
 }: TrackListProps) {
@@ -136,7 +138,23 @@ export default function TrackList({
                 style={{ cursor: 'grab' }}
                 onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setDragIdx(idx); }}
               ><IcoDragHandle /></div>
-              <div className={`tl-cell text-[10px] ${active ? 'bright' : 'muted'}`}>{active ? '▶' : idx + 1}</div>
+              <div className="tl-cell justify-center group/playbtn">
+                <button
+                  className="flex items-center justify-center w-full h-full focus:outline-none"
+                  onClick={e => { e.stopPropagation(); onPlayPause(t.id); }}
+                >
+                  {active ? (
+                    <span className={`text-[11px] ${isPlaying ? 'text-mm-accent' : 'bright'}`}>
+                      {isPlaying ? '⏸' : '▶'}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-[10px] text-mm-t3 group-hover/playbtn:hidden">{idx + 1}</span>
+                      <span className="hidden text-[10px] text-mm-t2 group-hover/playbtn:inline">▶</span>
+                    </>
+                  )}
+                </button>
+              </div>
               <div className="tl-cell">
                 <div className="w-[22px] h-[22px] rounded-[3px] shrink-0" style={{
                   background: artworkUrl
