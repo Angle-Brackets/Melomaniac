@@ -120,6 +120,16 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+function timeAgo(unixSecs: number): string {
+  if (!unixSecs) return '—';
+  const diff = Math.floor(Date.now() / 1000) - unixSecs;
+  if (diff < 60)           return 'just now';
+  if (diff < 3600)         return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400)        return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 3 * 86400)   return `${Math.floor(diff / 86400)}d ago`;
+  return new Date(unixSecs * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 /** Convert a backend TrackRecord into the display Track type. */
 export function trackRecordToTrack(r: TrackRecord, idx: number): Track {
   return {
@@ -131,7 +141,7 @@ export function trackRecordToTrack(r: TrackRecord, idx: number): Track {
     artist:       r.artist,
     album:        r.album ?? 'Unknown Album',
     commit:       r.hash.slice(0, 6),
-    added:        '—',
+    added:        timeAgo(r.ingested_at),
     length:       fmtDuration(r.duration_ms),
     albumRef:     parseInt(r.hash[0], 16) % ALBUMS.length,
     ingested_at:  r.ingested_at,

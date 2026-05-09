@@ -10,4 +10,5 @@ export interface AppSettings {
   density: 'compact' | 'normal' | 'relaxed';
   defaultView: 'Tracks' | 'History';
   discordEnabled: boolean;
+  commitAuthor: string;
 }

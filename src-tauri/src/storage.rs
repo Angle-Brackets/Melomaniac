@@ -13,6 +13,7 @@ use tauri::State;
 pub struct StorageState {
     pub cas: Arc<CasStore>,
     pub db: Arc<Database>,
+    pub commit_author: Arc<std::sync::Mutex<String>>,
 }
 
 // ── Response types ────────────────────────────────────────────────────────────
@@ -303,11 +304,12 @@ async fn write_commit(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let author = storage.commit_author.lock().unwrap().clone();
     let commit_body = serde_json::json!({
         "tree_hash": &tree_hash,
         "parent":    &parent_hash,
         "timestamp": timestamp,
-        "device_id": "desktop",
+        "device_id": &author,
         "message":   &message,
     }).to_string();
 
@@ -317,7 +319,7 @@ async fn write_commit(
         hash: commit_hash.clone(),
         tree_hash: tree_hash.clone(),
         timestamp,
-        device_id: "desktop".into(),
+        device_id: author,
         message,
     };
     let parents: Vec<&str> = parent_hash.iter().map(String::as_str).collect();
@@ -346,12 +348,13 @@ async fn write_commit_explicit(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    let author = storage.commit_author.lock().unwrap().clone();
     let first_parent = parents.first();
     let commit_body = serde_json::json!({
         "tree_hash": &tree_hash,
         "parent":    first_parent,
         "timestamp": timestamp,
-        "device_id": "desktop",
+        "device_id": &author,
         "message":   &message,
     }).to_string();
 
@@ -361,7 +364,7 @@ async fn write_commit_explicit(
         hash: commit_hash.clone(),
         tree_hash,
         timestamp,
-        device_id: "desktop".into(),
+        device_id: author,
         message,
     };
     let parent_refs: Vec<&str> = parents.iter().map(String::as_str).collect();
@@ -948,6 +951,18 @@ async fn merge_branches_inner(
     ).await
 }
 
+// ── Commit author ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_commit_author(storage: State<'_, StorageState>) -> String {
+    storage.commit_author.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn set_commit_author(storage: State<'_, StorageState>, name: String) {
+    *storage.commit_author.lock().unwrap() = name;
+}
+
 // ── Initialisation helper ─────────────────────────────────────────────────────
 
 pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageState, String> {
@@ -971,7 +986,15 @@ pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageSta
 
     indexer.rebuild_playlist_caches().await.map_err(|e| e.to_string())?;
 
-    Ok(StorageState { cas, db })
+    let default_author = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "desktop".into());
+
+    Ok(StorageState {
+        cas,
+        db,
+        commit_author: Arc::new(std::sync::Mutex::new(default_author)),
+    })
 }
 
 // ── Dev seeding (debug builds only) ──────────────────────────────────────────
@@ -1037,7 +1060,11 @@ mod tests {
                 .expect("open db"),
         );
         db.migrate().await.expect("migrate");
-        (StorageState { cas, db }, tmp)
+        (StorageState {
+            cas,
+            db,
+            commit_author: Arc::new(std::sync::Mutex::new("test".into())),
+        }, tmp)
     }
 
     fn track_record(hash: &str, title: &str) -> TrackRecord {

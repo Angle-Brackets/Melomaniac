@@ -17,12 +17,13 @@ interface TrackListProps {
   artworkUrls:      Record<string, string>;
   onRemoveTrack?:   (hash: string) => void;
   onAddTracks?:     () => void;
+  density?:         'compact' | 'normal' | 'relaxed';
 }
 
 export default function TrackList({
   tracks, activeTrackId, onSelect, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
-  onRemoveTrack, onAddTracks,
+  onRemoveTrack, onAddTracks, density = 'relaxed',
 }: TrackListProps) {
   const [dragIdx,     setDragIdx]     = useState<number | null>(null);
   const [dropIdx,     setDropIdx]     = useState<number | null>(null);
@@ -86,7 +87,7 @@ export default function TrackList({
   }, [dragIdx, tracks, onReorder]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex flex-col overflow-hidden" data-density={density}>
 
       {/* Pending changes banner */}
       {hasUncommitted && (

@@ -132,6 +132,25 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
             </div>
           </section>
 
+          {/* ── Identity ── */}
+          <section>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Identity</p>
+
+            <div className="flex items-center justify-between py-2 border-b border-mm-b0">
+              <div>
+                <span className="text-xs text-mm-t1">Commit author name</span>
+                <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Shown in playlist commit history</p>
+              </div>
+              <input
+                type="text"
+                value={settings.commitAuthor}
+                onChange={e => updateSetting('commitAuthor', e.target.value)}
+                placeholder="e.g. your username"
+                className="input input-xs input-bordered bg-mm-2 text-mm-t0 w-36"
+              />
+            </div>
+          </section>
+
           {/* ── Integrations ── */}
           <section>
             <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Integrations</p>

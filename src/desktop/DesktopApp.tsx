@@ -37,11 +37,12 @@ export type { AppSettings };
 const SETTING_DEFAULTS: AppSettings = {
   theme: 'warm',
   accentHue: 28,
-  showRightPanel: true,
+  showRightPanel: false,
   carouselSize: 210,
   density: 'relaxed',
   defaultView: 'Tracks',
   discordEnabled: false,
+  commitAuthor: '',
 };
 
 // Thin hook so the settings object stays in one place
@@ -145,6 +146,21 @@ export default function DesktopApp() {
     invoke('audio_set_volume', { volume }).catch(console.error);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetch the persisted commit author name from the backend on mount
+  useEffect(() => {
+    invoke<string>('get_commit_author')
+      .then(name => { if (name) updateSetting('commitAuthor', name); })
+      .catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Push commit author changes to the backend whenever the setting is updated
+  useEffect(() => {
+    if (settings.commitAuthor) {
+      invoke('set_commit_author', { name: settings.commitAuthor }).catch(console.error);
+    }
+  }, [settings.commitAuthor]);
 
   // ── Load real tracks from storage on mount ───────────────────────────────
   const reloadLibrary = useCallback(() => {
@@ -520,6 +536,8 @@ export default function DesktopApp() {
                 artworkUrls={artworkUrls}
                 onOpenInEditor={hash => { setEditorTrackId(trackOrder.find(t => t.hash === hash)?.id ?? null); setRailItem('editor'); }}
                 onTracksChanged={setTrackOrder}
+                defaultPlaylistId={activePlaylistId}
+                defaultBranchName={activeBranch}
                 onTracksAddedToPlaylist={(playlistId, branchName, count) => {
                   const plName = playlistRecords.find(p => p.id === playlistId)?.name ?? 'playlist';
                   setGitToast(`Added ${count} ${count === 1 ? 'track' : 'tracks'} to "${plName}"`);
@@ -642,6 +660,7 @@ export default function DesktopApp() {
                         setGitToast('Select tracks in the library, then use "Add to Playlist"');
                         setTimeout(() => setGitToast(null), 3000);
                       } : undefined}
+                      density={settings.density}
                     />
                   </>
                 )}

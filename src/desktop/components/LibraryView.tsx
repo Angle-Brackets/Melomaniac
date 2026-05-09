@@ -61,11 +61,13 @@ interface LibraryViewProps {
   onOpenInEditor:            (hash: string) => void;
   onTracksChanged:           (tracks: Track[]) => void;
   onTracksAddedToPlaylist?:  (playlistId: string, branchName: string, count: number) => void;
+  defaultPlaylistId?:        string | null;
+  defaultBranchName?:        string;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist }: LibraryViewProps) {
+export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName }: LibraryViewProps) {
   const [records,           setRecords]           = useState<TrackRecord[]>([]);
   const [strayHashes,       setStrayHashes]       = useState<Set<string>>(new Set());
   const [search,            setSearch]            = useState('');
@@ -564,6 +566,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
             onTracksAddedToPlaylist?.(playlistId, branchName, count);
           }}
           onCancel={() => setShowAddToPlaylist(false)}
+          defaultPlaylistId={defaultPlaylistId ?? undefined}
+          defaultBranchName={defaultBranchName}
         />
       )}
       {showBulkEdit && (

@@ -182,6 +182,8 @@ pub fn run() {
             storage::branch_revert_to,
             storage::branch_merge,
             storage::playlist_get_graph,
+            storage::get_commit_author,
+            storage::set_commit_author,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,
         ])

@@ -35,13 +35,14 @@ pub async fn ingest_bytes(
     // 1. Hash + write blob (no-op if already present)
     let hash = cas.write_blob(bytes).await?;
 
-    // 2. Already indexed? Return fast — unless fields are missing (duration or artwork),
-    //    in which case fall through to patch them.
+    // 2. Already indexed? Return fast — unless fields are missing (duration, artwork,
+    //    or ingested_at timestamp), in which case fall through to patch them.
     if let Some(existing) = db.get_track(&hash).await? {
-        let needs_duration = existing.duration_ms == 0;
-        let needs_artwork  = existing.artwork_hash.is_none();
+        let needs_duration   = existing.duration_ms == 0;
+        let needs_artwork    = existing.artwork_hash.is_none();
+        let needs_ingested   = existing.ingested_at == 0;
 
-        if !needs_duration && !needs_artwork {
+        if !needs_duration && !needs_artwork && !needs_ingested {
             return Ok(existing);
         }
 
@@ -70,7 +71,18 @@ pub async fn ingest_bytes(
             existing.duration_ms
         };
 
-        return Ok(TrackRecord { duration_ms, artwork_hash, ..existing });
+        let ingested_at = if needs_ingested {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            db.set_track_provenance(&hash, now, None).await.ok();
+            now
+        } else {
+            existing.ingested_at
+        };
+
+        return Ok(TrackRecord { duration_ms, artwork_hash, ingested_at, ..existing });
     }
 
     // 3. Detect MIME type from magic bytes
@@ -87,6 +99,11 @@ pub async fn ingest_bytes(
     };
 
     // 6. Insert into DB
+    let ingested_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
     let record = TrackRecord {
         hash,
         title: tags.title,
@@ -96,7 +113,7 @@ pub async fn ingest_bytes(
         duration_ms: tags.duration_ms,
         favorited: false,
         mime_type: Some(mime_type),
-        ingested_at: 0,
+        ingested_at,
         source_url: None,
     };
     db.insert_track(&record).await?;

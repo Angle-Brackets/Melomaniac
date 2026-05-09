@@ -118,6 +118,11 @@
 .tl-row.active-row              { background: var(--bg-5); }
 .tl-row.active-row:hover        { background: var(--bg-5); }
 
+/* Density variants */
+[data-density="compact"] .tl-row  { padding-top: 1px; padding-bottom: 1px; }
+[data-density="normal"]  .tl-row  { padding-top: 3px; padding-bottom: 3px; }
+/* relaxed uses the default 4px padding */
+
 .tl-cell {
   display: flex;
   align-items: center;

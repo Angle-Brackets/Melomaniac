@@ -10,16 +10,17 @@ interface Props {
   onDone:             (playlistId: string, branchName: string) => void;
   onCancel:           () => void;
   defaultPlaylistId?: string;
+  defaultBranchName?: string;
 }
 
 interface PlaylistWithBranches extends PlaylistRecord {
   branches: PlaylistRecord['branches'];
 }
 
-export default function AddToPlaylistModal({ count, hashes, onDone, onCancel, defaultPlaylistId }: Props) {
+export default function AddToPlaylistModal({ count, hashes, onDone, onCancel, defaultPlaylistId, defaultBranchName }: Props) {
   const [playlists,     setPlaylists]     = useState<PlaylistWithBranches[]>([]);
   const [selectedPl,    setSelectedPl]    = useState<string | null>(null);
-  const [selectedBr,    setSelectedBr]    = useState<string>('main');
+  const [selectedBr,    setSelectedBr]    = useState<string>(defaultBranchName ?? 'main');
   const [isSubmitting,  setIsSubmitting]  = useState(false);
   const [error,         setError]         = useState<string | null>(null);
 
@@ -28,6 +29,7 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel, de
       setPlaylists(pl);
       const initial = defaultPlaylistId && pl.find(p => p.id === defaultPlaylistId);
       setSelectedPl(initial ? initial.id : (pl[0]?.id ?? null));
+      if (initial && defaultBranchName) setSelectedBr(defaultBranchName);
     }).catch(() => setError('Failed to load playlists'));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -83,7 +85,12 @@ export default function AddToPlaylistModal({ count, hashes, onDone, onCancel, de
             <Select
               value={selectedPl ?? ''}
               options={playlists.map(p => ({ value: p.id, label: p.name }))}
-              onChange={v => { setSelectedPl(v); setSelectedBr('main'); }}
+              onChange={v => {
+                setSelectedPl(v);
+                const pl = playlists.find(p => p.id === v);
+                const hasBr = pl?.branches.some(b => b.name === selectedBr);
+                if (!hasBr) setSelectedBr('main');
+              }}
               minWidth={200}
             />
           )}

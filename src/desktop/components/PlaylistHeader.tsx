@@ -216,7 +216,7 @@ const iconBtn: React.CSSProperties = {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function PlaylistHeader({
-  playlist, artworkUrl, activeBranch, onBranchChange, onGitAction, activeTab,
+  playlist, artworkUrl, activeBranch, onBranchChange, activeTab,
   onTabChange, isPinned, onTogglePin, onNewBranch, onMerge, onFork, onEditArtwork, onBranchesChanged,
 }: PlaylistHeaderProps) {
   const name = playlist?.name ?? 'No playlist selected';
@@ -301,8 +301,8 @@ export default function PlaylistHeader({
                 Merge
               </button>
             )}
-            <button className="btn btn-primary btn-xs" onClick={() => onGitAction('push')}>↑ Push</button>
-            <button className="btn btn-primary btn-xs" onClick={() => onGitAction('pull')}>↓ Pull</button>
+            <button className="btn btn-primary btn-xs" disabled>↑ Push</button>
+            <button className="btn btn-primary btn-xs" disabled>↓ Pull</button>
           </div>
         )}
       </div>
