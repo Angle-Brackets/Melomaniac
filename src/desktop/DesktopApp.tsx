@@ -153,6 +153,9 @@ export default function DesktopApp() {
   const [positionMs, setPositionMs] = useState(0);
   const [durationMs, setDurationMs] = useState(0);
   const lastSeekTime = useRef(0);
+  // Live position updated on every PositionChanged without triggering a re-render.
+  // PlayerControls / MiniPlayer read this via rAF and update their DOM directly.
+  const livePositionMsRef = useRef(0);
   const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
   const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
@@ -279,20 +282,35 @@ export default function DesktopApp() {
   }, [activePlaylistId]);
 
   // ── Load tracks for the active playlist ──────────────────────────────────
+  // Track the previous playlist ID so we can distinguish a playlist change
+  // (reset shuffle entirely) from a branch switch within the same playlist
+  // (keep shuffle mode, rebuild the queue from the new branch's tracks).
+  const prevPlaylistIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    // Clear shuffle state when the source changes so the queue doesn't carry
-    // over tracks from a previous playlist into the new one.
-    setShuffledQueue(null);
-    setIsShuffle(false);
+    const playlistChanged = prevPlaylistIdRef.current !== activePlaylistId;
+    prevPlaylistIdRef.current = activePlaylistId;
+
+    if (playlistChanged) {
+      setShuffledQueue(null);
+      setIsShuffle(false);
+    }
 
     if (!activePlaylistId) { setPlaylistTracks(null); return; }
     invoke<TrackRecord[]>('playlist_get_tracks', {
       playlistId: activePlaylistId,
       branchName: activeBranch,
     })
-      .then(records => setPlaylistTracks(records.map(trackRecordToTrack)))
+      .then(records => {
+        const newTracks = records.map(trackRecordToTrack);
+        setPlaylistTracks(newTracks);
+        // Branch switch within same playlist — rebuild shuffled queue from new tracks
+        if (!playlistChanged && newTracks.length > 0) {
+          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode) : null);
+        }
+      })
       .catch(() => setPlaylistTracks([]));
-  }, [activePlaylistId, activeBranch]);
+  }, [activePlaylistId, activeBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Discord Rich Presence ─────────────────────────────────────────────────
   useEffect(() => {
@@ -359,6 +377,7 @@ export default function DesktopApp() {
       setLoadedHash(track.hash);
       setDurationMs(track.duration_ms);
       setPositionMs(0);
+      livePositionMsRef.current = 0;
       setIsPlaying(true);
       invoke('track_play', { hash: track.hash }).catch(console.error);
     };
@@ -368,13 +387,16 @@ export default function DesktopApp() {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
         const posMs = payload.PositionChanged;
         if (Date.now() - lastSeekTime.current > 600) {
-          setPositionMs(posMs);
+          // Update the live ref — no React re-render; rAF in seek components reads it
+          livePositionMsRef.current = posMs;
+          sr.current.positionMs = posMs;
           // ── A·B loop enforcement ──────────────────────────────────────────
           const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
           if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
             const aMs = Math.floor(a * dur);
             lastSeekTime.current = Date.now();
-            setPositionMs(aMs);
+            livePositionMsRef.current = aMs;
+            sr.current.positionMs = aMs;
             invoke('audio_seek', { positionMs: aMs }).catch(console.error);
           }
         }
@@ -671,7 +693,7 @@ export default function DesktopApp() {
       setIsPlaying(true);
       setLoadedHash(next.hash);
       setDurationMs(next.duration_ms);
-      setPositionMs(0);
+      setPositionMs(0); livePositionMsRef.current = 0;
       return;
     }
     const q = playQueue;
@@ -685,15 +707,15 @@ export default function DesktopApp() {
     setIsPlaying(true);
     setLoadedHash(next.hash);
     setDurationMs(next.duration_ms);
-    setPositionMs(0);
+    setPositionMs(0); livePositionMsRef.current = 0;
   };
   skipNextRef.current = handleSkipNext;
 
   const handleSkipPrev = () => {
     // Restart current track if more than 3 s in — reload is more reliable than seek-to-0
-    if (positionMs > 3000 && loadedHash) {
+    if (livePositionMsRef.current > 3000 && loadedHash) {
       invoke('track_play', { hash: loadedHash }).catch(console.error);
-      setPositionMs(0);
+      setPositionMs(0); livePositionMsRef.current = 0;
       setIsPlaying(true);
       return;
     }
@@ -708,31 +730,41 @@ export default function DesktopApp() {
     setIsPlaying(true);
     setLoadedHash(prev.hash);
     setDurationMs(prev.duration_ms);
-    setPositionMs(0);
+    setPositionMs(0); livePositionMsRef.current = 0;
   };
   skipPrevRef.current = handleSkipPrev;
 
   const handlePlayPause = () => {
+    // If audio is already loaded, toggle it — even if the current track isn't
+    // in the active queue (e.g. switched to a branch that doesn't have it).
+    if (loadedHash) {
+      const queueTrack = playQueue.find(t => t.id === activeTrackId);
+      if (!queueTrack || queueTrack.hash === loadedHash) {
+        if (isPlaying) {
+          invoke('audio_pause').catch(console.error);
+          setIsPlaying(false);
+        } else {
+          invoke('audio_play').catch(console.error);
+          setIsPlaying(true);
+        }
+        return;
+      }
+      // A different track is selected in the queue — load it
+      invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
+      setLoadedHash(queueTrack.hash);
+      setDurationMs(queueTrack.duration_ms);
+      setPositionMs(0); livePositionMsRef.current = 0;
+      setIsPlaying(true);
+      return;
+    }
+    // Nothing loaded yet — load the selected track from the queue
     const track = playQueue.find(t => t.id === activeTrackId);
     if (!track?.hash) return;
-
-    if (track.hash === loadedHash) {
-      // Same track: toggle pause/resume
-      if (isPlaying) {
-        invoke('audio_pause').catch(console.error);
-        setIsPlaying(false);
-      } else {
-        invoke('audio_play').catch(console.error);
-        setIsPlaying(true);
-      }
-    } else {
-      // New track: load and play
-      invoke('track_play', { hash: track.hash }).catch(console.error);
-      setLoadedHash(track.hash);
-      setDurationMs(track.duration_ms);
-      setPositionMs(0);
-      setIsPlaying(true);
-    }
+    invoke('track_play', { hash: track.hash }).catch(console.error);
+    setLoadedHash(track.hash);
+    setDurationMs(track.duration_ms);
+    setPositionMs(0); livePositionMsRef.current = 0;
+    setIsPlaying(true);
   };
 
   return (
@@ -862,7 +894,7 @@ export default function DesktopApp() {
                       </div>
                       <PlayerControls
                         track={playQueue.find(t => t.id === activeTrackId) ?? null}
-                        positionMs={positionMs}
+                        positionMsRef={livePositionMsRef}
                         durationMs={durationMs}
                         isPlaying={isPlaying} onPlayPause={handlePlayPause}
                         onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
@@ -873,7 +905,7 @@ export default function DesktopApp() {
                         onSeek={pct => {
                           const ms = Math.floor(pct * durationMs);
                           lastSeekTime.current = Date.now();
-                          setPositionMs(ms);
+                          setPositionMs(ms); livePositionMsRef.current = ms;
                           invoke('audio_seek', { positionMs: ms }).catch(console.error);
                         }}
                         volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
@@ -994,7 +1026,7 @@ export default function DesktopApp() {
             track={playQueue.find(t => t.hash === loadedHash) ?? null}
             artworkUrl={artworkUrls[loadedHash]}
             isPlaying={isPlaying}
-            positionMs={positionMs}
+            positionMsRef={livePositionMsRef}
             durationMs={durationMs}
             loopMode={loopMode}
             volume={volume}
@@ -1005,7 +1037,7 @@ export default function DesktopApp() {
             onSeek={pct => {
               const ms = Math.floor(pct * durationMs);
               lastSeekTime.current = Date.now();
-              setPositionMs(ms);
+              setPositionMs(ms); livePositionMsRef.current = ms;
               invoke('audio_seek', { positionMs: ms }).catch(console.error);
             }}
             onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
@@ -1015,7 +1047,7 @@ export default function DesktopApp() {
               invoke('audio_stop').catch(console.error);
               setIsPlaying(false);
               setLoadedHash(null);
-              setPositionMs(0);
+              setPositionMs(0); livePositionMsRef.current = 0;
             }}
           />
         )}

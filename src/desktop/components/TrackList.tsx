@@ -1,10 +1,14 @@
 import { useState, useRef, useEffect } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
 import { IcoDragHandle, IcoDots } from '../icons';
 import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause } from 'react-icons/fi';
 
 const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Length', ''];
+
+// Row height (px) per density — must match CSS padding + content + border
+const ROW_HEIGHT: Record<string, number> = { compact: 26, normal: 30, relaxed: 34 };
 
 interface TrackListProps {
   tracks: Track[];
@@ -35,7 +39,16 @@ export default function TrackList({
   const [menuTrackId, setMenuTrackId] = useState<number | null>(null);
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 });
   const dropIdxRef = useRef<number | null>(null);
-  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const parentRef  = useRef<HTMLDivElement>(null);
+
+  const rowHeight = ROW_HEIGHT[density] ?? 34;
+
+  const virtualizer = useVirtualizer({
+    count: tracks.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 8,
+  });
 
   // Close context menu on outside click
   useEffect(() => {
@@ -49,23 +62,18 @@ export default function TrackList({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Mouse-based drag — active only while dragIdx is set
+  // Mouse-based drag — coordinate approach works for all rows including non-rendered ones
   useEffect(() => {
     if (dragIdx === null) return;
     document.body.style.cursor = 'grabbing';
 
     const onMove = (e: MouseEvent) => {
-      let closest: number | null = null;
-      let minDist = Infinity;
-      rowRefs.current.forEach((el, i) => {
-        if (!el) return;
-        const r = el.getBoundingClientRect();
-        const mid = r.top + r.height / 2;
-        const d = Math.abs(e.clientY - mid);
-        if (d < minDist) { minDist = d; closest = i; }
-      });
-      dropIdxRef.current = closest;
-      setDropIdx(closest);
+      if (!parentRef.current) return;
+      const rect = parentRef.current.getBoundingClientRect();
+      const relY  = e.clientY - rect.top + parentRef.current.scrollTop;
+      const idx   = Math.round(Math.min(Math.max(0, relY / rowHeight), tracks.length - 1));
+      dropIdxRef.current = idx;
+      setDropIdx(idx);
     };
 
     const onUp = () => {
@@ -89,7 +97,9 @@ export default function TrackList({
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
     };
-  }, [dragIdx, tracks, onReorder]);
+  }, [dragIdx, tracks, onReorder, rowHeight]);
+
+  const COLS = '18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px';
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" data-density={density}>
@@ -109,90 +119,97 @@ export default function TrackList({
 
       {/* Column headers */}
       <div
-        className="tl-row bg-mm-1 cursor-default sticky top-0 z-[5]"
-        style={{ gridTemplateColumns: '18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px' }}
+        className="tl-row bg-mm-1 cursor-default shrink-0"
+        style={{ gridTemplateColumns: COLS }}
       >
         {HEADERS.map((h, i) => (
           <div key={i} className="tl-cell text-[9px] font-bold tracking-[0.08em] text-mm-t2 uppercase">{h}</div>
         ))}
       </div>
 
-      {/* Track rows */}
-      <div className="flex-1 overflow-y-auto styled-scroll">
-        {tracks.map((t, idx) => {
-          const active = t.id === activeTrackId;
-          const art = ALBUMS[t.albumRef] ?? ALBUMS[0];
-          const artworkUrl = artworkUrls[t.hash];
-          return (
-            <div
-              key={t.id}
-              ref={el => { rowRefs.current[idx] = el; }}
-              onClick={() => { if (dragIdx === null) onSelect(t.id); }}
-              className={`tl-row${active ? ' active-row' : ''}`}
-              style={{
-                gridTemplateColumns: '18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px',
-                opacity: dragIdx === idx ? 0.35 : 1,
-                borderTop: dropIdx === idx && dragIdx !== idx ? '2px solid var(--accent)' : undefined,
-                transition: 'opacity 0.15s',
-              }}
-            >
+      {/* Virtual track rows */}
+      <div ref={parentRef} className="flex-1 overflow-y-auto styled-scroll">
+        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+          {virtualizer.getVirtualItems().map(vItem => {
+            const idx = vItem.index;
+            const t   = tracks[idx];
+            if (!t) return null;
+            const active     = t.id === activeTrackId;
+            const art        = ALBUMS[t.albumRef] ?? ALBUMS[0];
+            const artworkUrl = artworkUrls[t.hash];
+            return (
               <div
-                className="tl-cell justify-center"
-                style={{ cursor: 'grab' }}
-                onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setDragIdx(idx); }}
-              ><IcoDragHandle /></div>
-              <div className="tl-cell justify-center group/playbtn">
-                <button
-                  className="flex items-center justify-center w-full h-full focus:outline-none transition-colors"
-                  onClick={e => { e.stopPropagation(); onPlayPause(t.id); }}
-                >
-                  {t.hash === loadedHash ? (
-                    <span className="text-mm-accent group-hover/playbtn:opacity-70 transition-opacity">
-                      {isPlaying
-                        ? <FiPause size={12} strokeWidth={2} />
-                        : <FiPlay size={12} strokeWidth={2.5} />}
-                    </span>
-                  ) : (
-                    <>
-                      <span className="text-[10px] text-mm-t3 group-hover/playbtn:hidden">{idx + 1}</span>
-                      <span className="hidden text-mm-t2 group-hover/playbtn:flex transition-opacity">
-                        <FiPlay size={12} strokeWidth={2.5} />
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <div className="tl-cell">
-                <div className="w-[22px] h-[22px] rounded-[3px] shrink-0" style={{
-                  background: artworkUrl
-                    ? `url(${artworkUrl}) center/cover no-repeat, ${art.gradient}`
-                    : art.gradient,
-                }} />
-              </div>
-              <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`}>{t.title}</div>
-              <div className="tl-cell">{t.artist}</div>
-              <div className="tl-cell muted">{t.album}</div>
-              <div className="tl-cell mono">{t.commit}</div>
-              <div className="tl-cell muted text-[10px]">{t.added}</div>
-              <div className="tl-cell muted font-mono text-[10px]">{t.length}</div>
+                key={t.id}
+                onClick={() => { if (dragIdx === null) onSelect(t.id); }}
+                className={`tl-row${active ? ' active-row' : ''}`}
+                style={{
+                  position: 'absolute', top: 0, left: 0, width: '100%',
+                  transform: `translateY(${vItem.start}px)`,
+                  gridTemplateColumns: COLS,
+                  opacity: dragIdx === idx ? 0.35 : 1,
+                  borderTop: dropIdx === idx && dragIdx !== idx ? '2px solid var(--accent)' : undefined,
+                }}
+              >
+                <div
+                  className="tl-cell justify-center"
+                  style={{ cursor: 'grab' }}
+                  onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setDragIdx(idx); }}
+                ><IcoDragHandle /></div>
 
-              {/* Context menu trigger */}
-              <div className="tl-cell justify-center relative">
-                <button
-                  className="tl-dots-btn btn btn-ghost btn-xs btn-square text-mm-t3"
-                  onClick={e => {
-                    e.stopPropagation();
-                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setMenuPos({ x: r.right, y: Math.min(r.bottom, window.innerHeight - 140) });
-                    setMenuTrackId(menuTrackId === t.id ? null : t.id);
-                  }}
-                >
-                  <IcoDots size={14} />
-                </button>
+                <div className="tl-cell justify-center group/playbtn">
+                  <button
+                    className="flex items-center justify-center w-full h-full focus:outline-none transition-colors"
+                    onClick={e => { e.stopPropagation(); onPlayPause(t.id); }}
+                  >
+                    {t.hash === loadedHash ? (
+                      <span className="text-mm-accent group-hover/playbtn:opacity-70 transition-opacity">
+                        {isPlaying
+                          ? <FiPause size={12} strokeWidth={2} />
+                          : <FiPlay size={12} strokeWidth={2.5} />}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="text-[10px] text-mm-t3 group-hover/playbtn:hidden">{idx + 1}</span>
+                        <span className="hidden text-mm-t2 group-hover/playbtn:flex transition-opacity">
+                          <FiPlay size={12} strokeWidth={2.5} />
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="tl-cell">
+                  <div className="w-[22px] h-[22px] rounded-[3px] shrink-0" style={{
+                    background: artworkUrl
+                      ? `url(${artworkUrl}) center/cover no-repeat, ${art.gradient}`
+                      : art.gradient,
+                  }} />
+                </div>
+                <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`}>{t.title}</div>
+                <div className="tl-cell">{t.artist}</div>
+                <div className="tl-cell muted">{t.album}</div>
+                <div className="tl-cell mono">{t.commit}</div>
+                <div className="tl-cell muted text-[10px]">{t.added}</div>
+                <div className="tl-cell muted font-mono text-[10px]">{t.length}</div>
+
+                {/* Context menu trigger */}
+                <div className="tl-cell justify-center relative">
+                  <button
+                    className="tl-dots-btn btn btn-ghost btn-xs btn-square text-mm-t3"
+                    onClick={e => {
+                      e.stopPropagation();
+                      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setMenuPos({ x: r.right, y: Math.min(r.bottom, window.innerHeight - 140) });
+                      setMenuTrackId(menuTrackId === t.id ? null : t.id);
+                    }}
+                  >
+                    <IcoDots size={14} />
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {/* Context menu portal */}

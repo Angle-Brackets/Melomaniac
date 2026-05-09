@@ -9,21 +9,27 @@ import { FiLayers } from 'react-icons/fi';
 
 export type LoopMode = 'off' | 'one' | 'ab';
 
+// Pure helper — defined at module level so useEffect deps stay stable
+function fmtMs(ms: number) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
 interface PlayerControlsProps {
-  track:        Track | null;
-  positionMs:   number;
-  durationMs:   number;
-  isPlaying:    boolean; onPlayPause: () => void;
-  isFav:        boolean; onFav:       () => void;
-  loopMode:     LoopMode; onLoopCycle: () => void;
-  isShuffle:    boolean; shuffleMode: ShuffleMode; onShuffle: () => void;
-  showQueue:    boolean; onQueueToggle: () => void;
-  onSkipNext?:  () => void;
-  onSkipPrev?:  () => void;
-  onSeek:       (pct: number) => void;
-  volume:       number;  onVolume:    (vol: number) => void;
-  abA:          number;  abB:         number;
-  onAbChange:   (handle: 'A' | 'B', val: number) => void;
+  track:           Track | null;
+  positionMsRef:   React.MutableRefObject<number>;
+  durationMs:      number;
+  isPlaying:       boolean; onPlayPause: () => void;
+  isFav:           boolean; onFav:       () => void;
+  loopMode:        LoopMode; onLoopCycle: () => void;
+  isShuffle:       boolean; shuffleMode: ShuffleMode; onShuffle: () => void;
+  showQueue:       boolean; onQueueToggle: () => void;
+  onSkipNext?:     () => void;
+  onSkipPrev?:     () => void;
+  onSeek:          (pct: number) => void;
+  volume:          number;  onVolume:    (vol: number) => void;
+  abA:             number;  abB:         number;
+  onAbChange:      (handle: 'A' | 'B', val: number) => void;
 }
 
 function ShuffleIcon({ isShuffle, mode, size = 16 }: { isShuffle: boolean; mode: ShuffleMode; size?: number }) {
@@ -48,7 +54,7 @@ function Tip({ tip, children }: { tip: string; children: React.ReactNode }) {
 }
 
 export default function PlayerControls({
-  track, positionMs, durationMs,
+  track, positionMsRef, durationMs,
   isPlaying, onPlayPause, isFav, onFav,
   loopMode, onLoopCycle, isShuffle, shuffleMode, onShuffle,
   showQueue, onQueueToggle,
@@ -56,13 +62,35 @@ export default function PlayerControls({
   onSeek, volume, onVolume,
   abA, abB, onAbChange,
 }: PlayerControlsProps) {
-  const seekPct = durationMs > 0 ? positionMs / durationMs : 0;
   const seekRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
+  // DOM refs for rAF-driven updates (no React re-render needed)
+  const seekFillRef = useRef<HTMLDivElement>(null);
+  const posTextRef  = useRef<HTMLSpanElement>(null);
+  const rafRef      = useRef<number>(0);
+
   const seekingRef  = useRef(false);
   const volumingRef = useRef(false);
   const abDragging  = useRef<'A' | 'B' | null>(null);
   const abActive    = loopMode === 'ab';
+
+  // rAF loop — updates seek fill and time text directly without React re-renders
+  useEffect(() => {
+    const tick = () => {
+      if (durationMs > 0) {
+        const posMs = positionMsRef.current;
+        const pct = Math.min(1, Math.max(0, posMs / durationMs));
+        if (seekFillRef.current) seekFillRef.current.style.width = `${pct * 100}%`;
+        if (posTextRef.current)  posTextRef.current.textContent  = fmtMs(posMs);
+      } else {
+        if (seekFillRef.current) seekFillRef.current.style.width = '0%';
+        if (posTextRef.current)  posTextRef.current.textContent  = '0:00';
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [durationMs, positionMsRef]);
 
   const getPct = (e: MouseEvent, ref: React.RefObject<HTMLDivElement>) => {
     if (!ref.current) return 0;
@@ -87,11 +115,6 @@ export default function PlayerControls({
     loopMode === 'off' ? 'Loop: Off — click for Single Track' :
     loopMode === 'one' ? 'Loop: Single Track — click for A·B' :
     'Loop: A·B — drag handles on seek bar';
-
-  const fmtMs = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  };
 
   return (
     <div className="shrink-0">
@@ -163,8 +186,8 @@ export default function PlayerControls({
 
       {/* Seek bar + volume */}
       <div className="flex items-center gap-2 px-5 pb-1.5">
-        <span className="font-mono text-[10px] text-mm-t2 min-w-[32px] text-right">
-          {fmtMs(positionMs)}
+        <span ref={posTextRef} className="font-mono text-[10px] text-mm-t2 min-w-[32px] text-right">
+          0:00
         </span>
 
         {/* Custom seek bar — needed for draggable A·B loop markers */}
@@ -192,11 +215,14 @@ export default function PlayerControls({
                 top: 0, bottom: 0, background: 'var(--accent-dim)', opacity: 0.7, borderRadius: 2,
               }} />
             )}
-            <div style={{
-              position: 'absolute', left: 0, top: 0, bottom: 0,
-              width: `${seekPct * 100}%`,
-              background: 'var(--accent)', borderRadius: 2,
-            }} />
+            <div
+              ref={seekFillRef}
+              style={{
+                position: 'absolute', left: 0, top: 0, bottom: 0,
+                width: '0%',
+                background: 'var(--accent)', borderRadius: 2,
+              }}
+            />
           </div>
 
           {abActive && (

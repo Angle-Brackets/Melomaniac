@@ -4,38 +4,52 @@ import type { LoopMode } from './PlayerControls';
 import { IcoPlay, IcoPause, IcoNext, IcoPrev, IcoVolume, IcoLoop, IcoQueue } from '../icons';
 
 interface MiniPlayerProps {
-  track:       Track | null;
-  artworkUrl?: string;
-  isPlaying:   boolean;
-  positionMs:  number;
-  durationMs:  number;
-  loopMode:    LoopMode;
-  volume:      number;
-  onPlayPause: () => void;
-  onSkipNext:  () => void;
-  onSkipPrev:  () => void;
-  onLoopCycle: () => void;
-  onSeek:      (pct: number) => void;
-  onVolume:    (vol: number) => void;
-  showQueue:   boolean;
+  track:         Track | null;
+  artworkUrl?:   string;
+  isPlaying:     boolean;
+  positionMsRef: React.MutableRefObject<number>;
+  durationMs:    number;
+  loopMode:      LoopMode;
+  volume:        number;
+  onPlayPause:   () => void;
+  onSkipNext:    () => void;
+  onSkipPrev:    () => void;
+  onLoopCycle:   () => void;
+  onSeek:        (pct: number) => void;
+  onVolume:      (vol: number) => void;
+  showQueue:     boolean;
   onQueueToggle: () => void;
-  onCollapse:  () => void;
-  onStop:      () => void;
+  onCollapse:    () => void;
+  onStop:        () => void;
 }
 
 export default function MiniPlayer({
-  track, artworkUrl, isPlaying, positionMs, durationMs,
+  track, artworkUrl, isPlaying, positionMsRef, durationMs,
   loopMode, volume, onPlayPause, onSkipNext, onSkipPrev,
   onLoopCycle, onSeek, onVolume, showQueue, onQueueToggle, onCollapse, onStop,
 }: MiniPlayerProps) {
-  const seekPct   = durationMs > 0 ? positionMs / durationMs : 0;
-  const seekRef   = useRef<HTMLDivElement>(null);
-  const seekingRef = useRef(false);
+  const seekBarRef  = useRef<HTMLDivElement>(null);
+  const seekFillRef = useRef<HTMLDivElement>(null);
+  const seekingRef  = useRef(false);
+  const rafRef      = useRef<number>(0);
+
+  // rAF loop — updates seek fill width without React re-renders
+  useEffect(() => {
+    const tick = () => {
+      if (durationMs > 0 && seekFillRef.current) {
+        const pct = Math.min(1, Math.max(0, positionMsRef.current / durationMs));
+        seekFillRef.current.style.width = `${pct * 100}%`;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [durationMs, positionMsRef]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (!seekingRef.current || !seekRef.current) return;
-      const r = seekRef.current.getBoundingClientRect();
+      if (!seekingRef.current || !seekBarRef.current) return;
+      const r = seekBarRef.current.getBoundingClientRect();
       onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
     };
     const onUp = () => { seekingRef.current = false; };
@@ -58,7 +72,7 @@ export default function MiniPlayer({
 
       {/* Seek bar — 3px strip at very top, draggable */}
       <div
-        ref={seekRef}
+        ref={seekBarRef}
         style={{
           height: 3, flexShrink: 0, cursor: 'pointer', position: 'relative',
           background: 'var(--border-0)',
@@ -69,13 +83,15 @@ export default function MiniPlayer({
           onSeek(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
         }}
       >
-        <div style={{
-          position: 'absolute', left: 0, top: 0, bottom: 0,
-          width: `${seekPct * 100}%`,
-          background: 'var(--accent)',
-          transition: 'width 0.25s linear',
-          borderRadius: '0 2px 2px 0',
-        }} />
+        <div
+          ref={seekFillRef}
+          style={{
+            position: 'absolute', left: 0, top: 0, bottom: 0,
+            width: '0%',
+            background: 'var(--accent)',
+            borderRadius: '0 2px 2px 0',
+          }}
+        />
       </div>
 
       {/* Controls row */}
@@ -133,7 +149,7 @@ export default function MiniPlayer({
           </button>
         </div>
 
-        {/* Right — queue + loop + volume */}
+        {/* Right — queue + loop + volume + collapse + stop */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
           <button
             className={`btn btn-ghost btn-square btn-sm ${showQueue ? 'text-primary' : ''}`}
