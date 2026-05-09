@@ -18,12 +18,13 @@ interface MiniPlayerProps {
   onSeek:      (pct: number) => void;
   onVolume:    (vol: number) => void;
   onCollapse:  () => void;
+  onStop:      () => void;
 }
 
 export default function MiniPlayer({
   track, artworkUrl, isPlaying, positionMs, durationMs,
   loopMode, volume, onPlayPause, onSkipNext, onSkipPrev,
-  onLoopCycle, onSeek, onVolume, onCollapse,
+  onLoopCycle, onSeek, onVolume, onCollapse, onStop,
 }: MiniPlayerProps) {
   const seekPct   = durationMs > 0 ? positionMs / durationMs : 0;
   const seekRef   = useRef<HTMLDivElement>(null);
@@ -155,6 +156,17 @@ export default function MiniPlayer({
           >
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
               <polyline points="2,3.5 5,6.5 8,3.5" />
+            </svg>
+          </button>
+          <button
+            className="btn btn-ghost btn-square btn-xs"
+            onClick={onStop}
+            title="Stop and dismiss"
+            style={{ color: 'var(--text-3)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <line x1="2" y1="2" x2="8" y2="8" />
+              <line x1="8" y1="2" x2="2" y2="8" />
             </svg>
           </button>
         </div>

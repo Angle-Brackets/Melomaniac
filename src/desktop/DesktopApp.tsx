@@ -823,6 +823,12 @@ export default function DesktopApp() {
             }}
             onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
             onCollapse={() => setMiniPlayerCollapsed(true)}
+            onStop={() => {
+              invoke('audio_stop').catch(console.error);
+              setIsPlaying(false);
+              setLoadedHash(null);
+              setPositionMs(0);
+            }}
           />
         )}
         {loadedHash && miniPlayerCollapsed && (
