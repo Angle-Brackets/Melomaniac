@@ -229,7 +229,6 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 
 ### Remaining desktop UI work
 
-- **Platform routing** — `src/App.tsx` hardcodes `<DesktopApp />`; mobile entry point not yet built; should branch on `isTauri()` + mobile UA or a compile-time flag
 - **Android audio bridge** — ExoPlayer / Media3 implementation (see P0 section)
 
 ### Completed since 2026-05-09 (second pass)
@@ -301,7 +300,6 @@ The tree schema has an `includes` array (reserved field). After design review, p
 
 ### Next steps (priority order)
 
-1. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime (e.g. `@tauri-apps/plugin-os` or user-agent check)
-2. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
+1. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
 
 *Last updated: 2026-05-09.*
