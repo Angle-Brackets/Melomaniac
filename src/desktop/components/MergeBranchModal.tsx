@@ -5,17 +5,22 @@ import { IcoClose } from '../icons';
 import { FiGitMerge } from 'react-icons/fi';
 
 type Strategy = 'union' | 'intersection';
+type DescChoice = 'target' | 'source';
+
+interface BranchMeta { description: string | null; }
 
 interface Props {
-  playlist:          PlaylistRecord;
-  targetBranch:      string;
-  targetTrackHashes: string[];
-  onClose:           () => void;
-  onMerged:          (commitHash: string) => void;
+  playlist:           PlaylistRecord;
+  targetBranch:       string;
+  targetTrackHashes:  string[];
+  targetDescription:  string | null;
+  onClose:            () => void;
+  onMerged:           (commitHash: string) => void;
+  closing?:           boolean;
 }
 
 export default function MergeBranchModal({
-  playlist, targetBranch, targetTrackHashes, onClose, onMerged,
+  playlist, targetBranch, targetTrackHashes, targetDescription, onClose, onMerged, closing,
 }: Props) {
   const otherBranches = playlist.branches.filter(b => b.name !== targetBranch);
 
@@ -23,18 +28,24 @@ export default function MergeBranchModal({
   const [strategy,      setStrategy]      = useState<Strategy>('union');
   const [message,       setMessage]       = useState(`Merge '${otherBranches[0]?.name ?? ''}' into '${targetBranch}'`);
   const [sourceHashes,  setSourceHashes]  = useState<string[]>([]);
+  const [sourceMeta,    setSourceMeta]    = useState<BranchMeta | null>(null);
   const [loadingPrev,   setLoadingPrev]   = useState(false);
+  const [descChoice,    setDescChoice]    = useState<DescChoice>('target');
   const [submitting,    setSubmitting]    = useState(false);
   const [err,           setErr]           = useState<string | null>(null);
 
-  // Load source branch track hashes for preview
+  // Load source branch tracks + meta for preview and conflict detection
   useEffect(() => {
     if (!sourceBranch) return;
     setLoadingPrev(true);
-    invoke<TrackRecord[]>('playlist_get_tracks', { playlistId: playlist.id, branchName: sourceBranch })
-      .then(tracks => setSourceHashes(tracks.map(t => t.hash)))
-      .catch(() => setSourceHashes([]))
+    Promise.all([
+      invoke<TrackRecord[]>('playlist_get_tracks', { playlistId: playlist.id, branchName: sourceBranch }),
+      invoke<BranchMeta>('playlist_get_meta', { playlistId: playlist.id, branchName: sourceBranch }),
+    ])
+      .then(([tracks, meta]) => { setSourceHashes(tracks.map(t => t.hash)); setSourceMeta(meta); })
+      .catch(() => { setSourceHashes([]); setSourceMeta(null); })
       .finally(() => setLoadingPrev(false));
+    setDescChoice('target'); // reset choice when source changes
   }, [sourceBranch, playlist.id]);
 
   // Update default message when source changes
@@ -52,17 +63,24 @@ export default function MergeBranchModal({
     ? { adds: toAdd.length, removes: 0,           result: targetTrackHashes.length + toAdd.length }
     : { adds: 0,            removes: toRemove.length, result: kept.length };
 
+  const descConflict = sourceMeta !== null &&
+    (sourceMeta.description ?? null) !== (targetDescription ?? null);
+
   const handleMerge = async () => {
     if (!sourceBranch) return;
     setSubmitting(true);
     setErr(null);
     try {
+      const descriptionOverride = descConflict && descChoice === 'source'
+        ? (sourceMeta?.description ?? null)
+        : null; // null → keep target's description (Rust default)
       const hash = await invoke<string>('branch_merge', {
         playlistId:   playlist.id,
         targetBranch,
         sourceBranch,
         strategy,
         message: message.trim() || null,
+        descriptionOverride,
       });
       onMerged(hash);
     } catch (e) {
@@ -71,10 +89,13 @@ export default function MergeBranchModal({
     }
   };
 
+  const bdClass  = closing ? 'mm-backdrop-exit'  : 'mm-backdrop';
+  const boxClass = closing ? 'mm-modal-box-exit' : 'mm-modal-box';
+
   if (otherBranches.length === 0) {
     return (
-      <div style={BACKDROP} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-        <div style={BOX}>
+      <div style={BACKDROP} className={bdClass} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+        <div style={BOX} className={boxClass}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={TITLE_STYLE}><FiGitMerge size={16} style={{ color: 'var(--accent-light)', marginRight: 8 }} />Merge branch</span>
             <button onClick={onClose} style={CLOSE_BTN}><IcoClose size={14} /></button>
@@ -91,8 +112,8 @@ export default function MergeBranchModal({
   }
 
   return (
-    <div style={BACKDROP} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={BOX}>
+    <div style={BACKDROP} className={bdClass} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={BOX} className={boxClass}>
 
         {/* Title */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -153,6 +174,38 @@ export default function MergeBranchModal({
               : 'Keeps only tracks that appear in both branches. Removes any track not shared.'}
           </p>
         </div>
+
+        {/* Description conflict */}
+        {descConflict && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <label style={{ ...LABEL, color: '#f59e0b' }}>⚠ Description conflict</label>
+            {(['target', 'source'] as DescChoice[]).map(side => {
+              const desc = side === 'target' ? targetDescription : sourceMeta?.description;
+              const branch = side === 'target' ? targetBranch : sourceBranch;
+              const chosen = descChoice === side;
+              return (
+                <button
+                  key={side}
+                  onClick={() => setDescChoice(side)}
+                  style={{
+                    padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                    textAlign: 'left', border: `1px solid ${chosen ? 'var(--accent)' : 'var(--border-1)'}`,
+                    background: chosen ? 'var(--accent-dim)' : 'var(--bg-2)',
+                  }}
+                >
+                  <div style={{ fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                    color: chosen ? 'var(--accent-light)' : 'var(--text-2)', marginBottom: 2 }}>
+                    {side === 'target' ? '← keep' : '← use'} ⎇ {branch}
+                  </div>
+                  <div style={{ fontSize: 12, color: chosen ? 'var(--accent-light)' : 'var(--text-1)',
+                    fontFamily: "'Outfit', sans-serif" }}>
+                    {desc ? `"${desc}"` : <em style={{ color: 'var(--text-3)' }}>no description</em>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Preview */}
         {preview && (

@@ -15,6 +15,7 @@ interface BranchModalProps {
   branchName:   string;
   onClose:      () => void;
   onCreate:     (newBranchName: string) => void;
+  closing?:     boolean;
 }
 
 function fmtTime(ts: number): string {
@@ -25,7 +26,7 @@ function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export default function BranchModal({ playlistId, playlistName, branchName, onClose, onCreate }: BranchModalProps) {
+export default function BranchModal({ playlistId, playlistName, branchName, onClose, onCreate, closing }: BranchModalProps) {
   const [name,       setName]       = useState('');
   const [fromCommit, setFromCommit] = useState<string | null>(null);
   const [commits,    setCommits]    = useState<CommitRecord[]>([]);
@@ -63,8 +64,8 @@ export default function BranchModal({ playlistId, playlistName, branchName, onCl
   };
 
   return (
-    <dialog className="modal modal-open" style={{ zIndex: 70 }}>
-      <div className="modal-box bg-mm-1 border border-mm-b2 max-w-lg p-0 overflow-hidden">
+    <dialog className={`modal modal-open ${closing ? 'mm-backdrop-exit' : 'mm-backdrop'}`} style={{ zIndex: 70 }}>
+      <div className={`modal-box bg-mm-1 border border-mm-b2 max-w-lg p-0 overflow-hidden ${closing ? 'mm-modal-box-exit' : 'mm-modal-box'}`}>
 
         {/* Header */}
         <div className="flex items-start justify-between px-5 py-3 border-b border-mm-b1 bg-mm-0">

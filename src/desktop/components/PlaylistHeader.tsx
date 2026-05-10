@@ -273,6 +273,15 @@ export default function PlaylistHeader({
               </>
             )}
           </div>
+          {playlist?.description && (
+            <div style={{
+              fontSize: 11, color: 'var(--text-2)',
+              marginTop: 1, lineHeight: 1.35,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {playlist.description}
+            </div>
+          )}
 
           <div className="flex items-center gap-2 mt-0.5">
             {playlist ? (

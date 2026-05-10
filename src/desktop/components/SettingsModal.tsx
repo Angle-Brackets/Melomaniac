@@ -11,15 +11,16 @@ interface SettingsModalProps {
   updateSetting: (key: keyof AppSettings | Partial<AppSettings>, value?: unknown) => void;
   onClose: () => void;
   onReset: () => void;
+  closing?: boolean;
 }
 
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
 
-export default function SettingsModal({ settings, updateSetting, onClose, onReset }: SettingsModalProps) {
+export default function SettingsModal({ settings, updateSetting, onClose, onReset, closing }: SettingsModalProps) {
   return (
     // DaisyUI modal — backdrop click closes
-    <dialog className="modal modal-open" style={{ zIndex: 60 }}>
-      <div className="modal-box bg-mm-1 border border-mm-b2 max-w-md p-0 overflow-hidden">
+    <dialog className={`modal modal-open ${closing ? 'mm-backdrop-exit' : 'mm-backdrop'}`} style={{ zIndex: 60 }}>
+      <div className={`modal-box bg-mm-1 border border-mm-b2 max-w-md p-0 overflow-hidden ${closing ? 'mm-modal-box-exit' : 'mm-modal-box'}`}>
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-mm-b1 bg-mm-0">

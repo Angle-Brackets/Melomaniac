@@ -229,7 +229,6 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 
 ### Remaining desktop UI work
 
-- **A/B loop backend** — `ab_start_ms`/`ab_end_ms` are present in the tree manifest schema but `playlist_get_tracks` and `playlist_reorder_tracks` don't read/write them; frontend stores A/B points in `localStorage` only
 - **Sublists (Phase 4)** — `playlist_add_include` / `playlist_remove_include` / `playlist_pin_include` Tauri commands; recursive resolver inside `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
 - **Platform routing** — `src/App.tsx` hardcodes `<DesktopApp />`; mobile entry point not yet built; should branch on `isTauri()` + mobile UA or a compile-time flag
 - **Android audio bridge** — ExoPlayer / Media3 implementation (see P0 section)
@@ -275,6 +274,13 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 - **Carousel wired to playlist**: `activeQueue = playlistTracks ?? trackOrder`; shuffle uses the correct source; queue resets on playlist/branch switch
 - **DevelopmentOnly playlist**: debug fixture recreated fresh each launch with all test tracks
 
+### Completed since 2026-05-09 (fourth pass)
+
+- **A/B loop backend wired** — `playlist_get_tracks` returns committed `ab_start_ms`/`ab_end_ms` per track entry; `playlist_set_ab_loop` writes them to the tree blob with amend-style commits; `playlist_reorder_tracks` preserves them via hash→entry map. Frontend seeds `trackAbPoints` from the committed tree on every branch load (backend wins over localStorage). Clearing A/B (drag to full range) now sends `null` to erase the committed values; commit graph refreshes and a toast fires on write/clear.
+- **Playlist descriptions** — per-branch description stored in tree blob; `playlist_get_meta` reads from tree (not SQL cache); `playlist_set_description` commits and updates SQL cache; description shown in `PlaylistHeader` subtitle and editable in `PlaylistSettingsPanel`; `branchMeta` state in `DesktopApp` overrides SQL-cached description so each branch shows its own value
+- **Merge description conflicts** — `MergeBranchModal` fetches both branches' descriptions and shows a conflict chooser when they differ; `branch_merge` accepts `description_override: Option<String>`; `branchMeta` refreshes after merge
+- **Sidebar folders** — real folder grouping, drag-and-drop (HTML5 DnD with `dataTransfer.setData` for WebKit), folder delete, "No folder" drop zone, all state persisted to `localStorage`
+
 ### Completed since 2026-05-09 (third pass)
 
 - **A/B loop fixed** — three-layer bug: (1) A/B check was inside the 600 ms seek throttle gate — moved before it with early `return`; (2) `sr.current.durationMs` was stale on first `PositionChanged` after load — synchronous assignment added at every track-load site; (3) `track_active` not reset in the fallback seek path — fixed in `audio.rs`
@@ -288,9 +294,8 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 
 ### Next steps (priority order)
 
-1. **A/B loop backend** — read/write `ab_start_ms`/`ab_end_ms` in the Rust tree manifest so loop points are committed with the playlist and survive across devices
-2. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin Tauri commands; recursive resolver in `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
-3. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime (e.g. `@tauri-apps/plugin-os` or user-agent check)
-4. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
+1. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin Tauri commands; recursive resolver in `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
+2. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime (e.g. `@tauri-apps/plugin-os` or user-agent check)
+3. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
 
 *Last updated: 2026-05-09.*

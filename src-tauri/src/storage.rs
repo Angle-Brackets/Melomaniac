@@ -25,6 +25,13 @@ pub struct PlaylistWithBranches {
     pub branches: Vec<BranchRecord>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PlaylistBranchMeta {
+    pub name:         String,
+    pub description:  Option<String>,
+    pub artwork_hash: Option<String>,
+}
+
 // ── Library ───────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -594,6 +601,55 @@ pub async fn playlist_rename(
     Ok(commit_hash)
 }
 
+/// Set (or clear) the description on a playlist branch and commit the change.
+#[tauri::command]
+pub async fn playlist_set_description(
+    playlist_id: String,
+    branch_name: String,
+    description: Option<String>,
+    storage:     State<'_, StorageState>,
+) -> Result<String, String> {
+    let mut tree = load_tree(&storage, &playlist_id, &branch_name).await?;
+
+    let new_desc = description.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    if tree.meta.description == new_desc {
+        return head_commit(&storage, &playlist_id, &branch_name).await;
+    }
+
+    let msg = match &new_desc {
+        Some(d) => format!("Description: {}", d),
+        None    => "Clear description".into(),
+    };
+    tree.meta.description = new_desc.clone();
+    let json = tree.to_json().map_err(|e| e.to_string())?;
+    let commit_hash = write_commit(&storage, &playlist_id, &branch_name, &json, Some(msg)).await?;
+
+    storage.db.update_playlist_cache(
+        &playlist_id,
+        &tree.meta.name,
+        new_desc.as_deref(),
+        tree.meta.artwork_hash.as_deref(),
+    ).await.map_err(|e| e.to_string())?;
+
+    Ok(commit_hash)
+}
+
+/// Return the tree-blob metadata (name, description, artwork hash) for a branch.
+/// Reads from the live tree, not the SQL cache, so callers always get branch-specific values.
+#[tauri::command]
+pub async fn playlist_get_meta(
+    playlist_id: String,
+    branch_name: String,
+    storage:     State<'_, StorageState>,
+) -> Result<PlaylistBranchMeta, String> {
+    let tree = load_tree(&storage, &playlist_id, &branch_name).await?;
+    Ok(PlaylistBranchMeta {
+        name:         tree.meta.name,
+        description:  tree.meta.description,
+        artwork_hash: tree.meta.artwork_hash,
+    })
+}
+
 /// Write artwork bytes to CAS, embed the hash in the tree meta, and commit.
 #[tauri::command]
 pub async fn playlist_set_artwork(
@@ -993,23 +1049,28 @@ pub async fn library_get_stray_tracks(
 ///   - `"intersection"` — keep only tracks present in both branches
 #[tauri::command]
 pub async fn branch_merge(
-    playlist_id:   String,
-    target_branch: String,
-    source_branch: String,
-    strategy:      String,
-    message:       Option<String>,
-    storage:       State<'_, StorageState>,
+    playlist_id:          String,
+    target_branch:        String,
+    source_branch:        String,
+    strategy:             String,
+    message:              Option<String>,
+    description_override: Option<String>,
+    storage:              State<'_, StorageState>,
 ) -> Result<String, String> {
-    merge_branches_inner(&storage, &playlist_id, &target_branch, &source_branch, &strategy, message).await
+    merge_branches_inner(
+        &storage, &playlist_id, &target_branch, &source_branch,
+        &strategy, message, description_override,
+    ).await
 }
 
 async fn merge_branches_inner(
-    storage:       &StorageState,
-    playlist_id:   &str,
-    target_branch: &str,
-    source_branch: &str,
-    strategy:      &str,
-    message:       Option<String>,
+    storage:              &StorageState,
+    playlist_id:          &str,
+    target_branch:        &str,
+    source_branch:        &str,
+    strategy:             &str,
+    message:              Option<String>,
+    description_override: Option<String>,
 ) -> Result<String, String> {
     use std::collections::HashSet;
 
@@ -1046,6 +1107,11 @@ async fn merge_branches_inner(
             merged
         }
     };
+
+    // Apply description resolution: caller passes the chosen value; None means keep target's.
+    if let Some(desc) = description_override {
+        merged_tree.meta.description = if desc.is_empty() { None } else { Some(desc) };
+    }
 
     let auto_msg = format!("Merge '{}' into '{}'", source_branch, target_branch);
     let msg = message.unwrap_or(auto_msg);
@@ -1314,7 +1380,7 @@ mod tests {
             .await.unwrap();
 
         // Merge feature → main (union)
-        merge_branches_inner(&storage, &pid, "main", "feature", "union", None)
+        merge_branches_inner(&storage, &pid, "main", "feature", "union", None, None)
             .await.unwrap();
 
         let tree = load_tree(&storage, &pid, "main").await.unwrap();
@@ -1343,7 +1409,7 @@ mod tests {
         write_commit(&storage, &pid, "feat", &feat_tree_json, Some("Copy".into()))
             .await.unwrap();
 
-        merge_branches_inner(&storage, &pid, "main", "feat", "union", None)
+        merge_branches_inner(&storage, &pid, "main", "feat", "union", None, None)
             .await.unwrap();
 
         let tree = load_tree(&storage, &pid, "main").await.unwrap();
@@ -1371,7 +1437,7 @@ mod tests {
         write_commit(&storage, &pid, "feat", &feat_json, Some("Only aaa".into()))
             .await.unwrap();
 
-        merge_branches_inner(&storage, &pid, "main", "feat", "intersection", None)
+        merge_branches_inner(&storage, &pid, "main", "feat", "intersection", None, None)
             .await.unwrap();
 
         let tree = load_tree(&storage, &pid, "main").await.unwrap();
@@ -1383,7 +1449,7 @@ mod tests {
     async fn merge_same_branch_is_error() {
         let (storage, _tmp) = setup().await;
         let pid = new_playlist(&storage, "P").await;
-        let result = merge_branches_inner(&storage, &pid, "main", "main", "union", None).await;
+        let result = merge_branches_inner(&storage, &pid, "main", "main", "union", None, None).await;
         assert!(result.is_err());
     }
 
@@ -1403,7 +1469,7 @@ mod tests {
         write_commit(&storage, &pid, "feat", &feat_json, Some("Add bbb".into()))
             .await.unwrap();
 
-        let merge_hash = merge_branches_inner(&storage, &pid, "main", "feat", "union", None)
+        let merge_hash = merge_branches_inner(&storage, &pid, "main", "feat", "union", None, None)
             .await.unwrap();
 
         let parents = storage.db.get_commit_parents(&merge_hash).await.unwrap();
@@ -1426,7 +1492,7 @@ mod tests {
         write_commit(&storage, &pid, "feat", &feat_json, Some("Add bbb".into()))
             .await.unwrap();
 
-        let merge_hash = merge_branches_inner(&storage, &pid, "main", "feat", "union", None)
+        let merge_hash = merge_branches_inner(&storage, &pid, "main", "feat", "union", None, None)
             .await.unwrap();
 
         let commit = storage.db.get_commit(&merge_hash).await.unwrap().unwrap();

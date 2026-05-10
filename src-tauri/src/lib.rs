@@ -175,6 +175,8 @@ pub fn run() {
             storage::playlist_remove_track,
             storage::playlist_reorder_tracks,
             storage::playlist_rename,
+            storage::playlist_set_description,
+            storage::playlist_get_meta,
             storage::playlist_set_artwork,
             storage::playlist_get_artwork,
             storage::playlist_delete,

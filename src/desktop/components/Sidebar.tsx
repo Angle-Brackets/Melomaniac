@@ -269,11 +269,12 @@ interface FolderRowProps {
   onTogglePin: (id: string) => void;
   onAddToFolderClick: (item: Playlist) => void;
   onAssignToFolder: (playlistId: string, folderId: number) => void;
+  onDeleteFolder: (folderId: number) => void;
   onDragStart: (id: string) => void;
   onDragEnd: () => void;
 }
 
-function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onTogglePin, onAddToFolderClick, onAssignToFolder, onDragStart, onDragEnd }: FolderRowProps) {
+function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onTogglePin, onAddToFolderClick, onAssignToFolder, onDeleteFolder, onDragStart, onDragEnd }: FolderRowProps) {
   const [open,      setOpen]      = useState(true);
   const [dragCount, setDragCount] = useState(0);
   const isOver = dragCount > 0;
@@ -295,16 +296,30 @@ function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onToggleP
         transition: 'background 0.1s, outline-color 0.1s',
       }}
     >
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold tracking-[0.08em] text-mm-t2 uppercase hover:text-mm-t1 transition-colors"
-      >
-        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="shrink-0 opacity-70">
-          <path d="M1 3.5C1 2.67 1.67 2 2.5 2H4.62l1 1.5H9.5c.83 0 1.5.67 1.5 1.5V9c0 .83-.67 1.5-1.5 1.5h-7C1.67 10.5 1 9.83 1 9V3.5z"/>
-        </svg>
-        <span className="flex-1 text-left">{folder.name}</span>
-        <IcoChevron size={9} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
-      </button>
+      <div className="group/folder flex items-center px-3 py-1.5">
+        {/* Collapse toggle */}
+        <div
+          onClick={() => setOpen(o => !o)}
+          className="flex-1 flex items-center gap-1.5 cursor-pointer text-[10px] font-bold tracking-[0.08em] text-mm-t2 uppercase hover:text-mm-t1 transition-colors min-w-0"
+        >
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="shrink-0 opacity-70">
+            <path d="M1 3.5C1 2.67 1.67 2 2.5 2H4.62l1 1.5H9.5c.83 0 1.5.67 1.5 1.5V9c0 .83-.67 1.5-1.5 1.5h-7C1.67 10.5 1 9.83 1 9V3.5z"/>
+          </svg>
+          <span className="flex-1 truncate">{folder.name}</span>
+          <IcoChevron size={9} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+        </div>
+        {/* Delete button — shown on hover */}
+        <button
+          onClick={() => onDeleteFolder(folder.id)}
+          title="Delete folder"
+          className="opacity-0 group-hover/folder:opacity-100 transition-opacity btn btn-ghost btn-square shrink-0 text-mm-t3 hover:text-error"
+          style={{ width: 20, height: 20, minHeight: 'unset', padding: 0 }}
+        >
+          <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <line x1="2" y1="2" x2="8" y2="8"/><line x1="8" y1="2" x2="2" y2="8"/>
+          </svg>
+        </button>
+      </div>
       {open && playlists.map(p => (
         <PlaylistRow key={p.id} item={p} activeId={activeId} depth={1}
           onSelect={onSelect} defaultOpen={p.id === activeId}
@@ -328,6 +343,7 @@ interface LibrarySidebarProps {
   folderAssignments: Record<string, number>;
   onRemoveFromFolder: (playlistId: string) => void;
   onAssignToFolder: (playlistId: string, folderId: number | null) => void;
+  onDeleteFolder: (folderId: number) => void;
   onOpenSettings: () => void;
   onAddToFolderClick: (item: Playlist) => void;
   onNewPlaylist: () => void;
@@ -336,7 +352,7 @@ interface LibrarySidebarProps {
 export default function LibrarySidebar({
   playlists, activePlaylistId, onSelectPlaylist,
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
-  pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder,
+  pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder, onDeleteFolder,
   onOpenSettings, onAddToFolderClick, onNewPlaylist,
 }: LibrarySidebarProps) {
   const [isDragging,    setIsDragging]    = useState(false);
@@ -374,9 +390,10 @@ export default function LibrarySidebar({
       <div style={{
         width: expanded ? panelWidth : 0,
         background: 'var(--bg-1)',
-        borderRight: expanded ? '1px solid var(--border-0)' : 'none',
+        borderRight: '1px solid var(--border-0)',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
         flexShrink: 0,
+        transition: 'width 220ms cubic-bezier(0.4, 0, 0.2, 1)',
       }}>
         <div className="px-3 py-2 border-b border-mm-b0 shrink-0 flex items-center justify-between">
           <span className="text-[10px] font-bold tracking-widest text-mm-t2 uppercase whitespace-nowrap">Playlists</span>
@@ -415,6 +432,7 @@ export default function LibrarySidebar({
                 pinnedIds={pinnedIds} onTogglePin={onTogglePin}
                 onAddToFolderClick={onAddToFolderClick}
                 onAssignToFolder={onAssignToFolder}
+                onDeleteFolder={onDeleteFolder}
                 onDragStart={handleDragStart} onDragEnd={handleDragEnd} />
             );
           })}

@@ -592,13 +592,15 @@ export function CommitGraphInline({ playlistId, branchName, refreshKey, onBranch
   );
 }
 
-export function CommitGraph({ onClose }: { onClose: () => void }) {
+export function CommitGraph({ onClose, closing }: { onClose: () => void; closing?: boolean }) {
   return (
     <div
+      className={closing ? 'mm-backdrop-exit' : 'mm-backdrop'}
       style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(8,6,4,0.82)', backdropFilter: 'blur(4px)' }}
       onClick={onClose}
     >
       <div
+        className={closing ? 'mm-modal-box-exit' : 'mm-modal-box'}
         onClick={e => e.stopPropagation()}
         style={{ width: '85vw', height: '80vh', maxWidth: 920, maxHeight: 660, background: 'var(--bg-1)', borderRadius: 10, border: '1px solid var(--border-2)', boxShadow: '0 24px 60px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >

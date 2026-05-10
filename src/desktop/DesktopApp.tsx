@@ -33,6 +33,7 @@ import MergeBranchModal from './components/MergeBranchModal';
 import MiniPlayer from './components/MiniPlayer';
 import QueuePanel from './components/QueuePanel';
 import { FiPlay, FiPause } from 'react-icons/fi';
+import { useAnimatedMount } from './hooks/useAnimatedMount';
 
 export type { AppSettings };
 
@@ -125,10 +126,17 @@ export default function DesktopApp() {
   const [showBranchModal, setShowBranchModal] = useState(false);
   const [showForkModal, setShowForkModal] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
+
+  const commitGraphAnim = useAnimatedMount(showCommitGraph);
+  const settingsAnim    = useAnimatedMount(showSettings);
+  const branchAnim      = useAnimatedMount(showBranchModal);
+  const forkAnim        = useAnimatedMount(showForkModal);
+  const mergeAnim       = useAnimatedMount(showMergeModal);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [activeBranch, setActiveBranch] = useState('main');
   const [playlistRecords, setPlaylistRecords] = useState<PlaylistRecord[]>([]);
   const [playlistTracks, setPlaylistTracks] = useState<Track[] | null>(null);
+  const [branchMeta, setBranchMeta] = useState<{ description: string | null } | null>(null);
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [showArtworkModal, setShowArtworkModal] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<{ message: string; execute: () => Promise<void> }[]>([]);
@@ -181,8 +189,12 @@ export default function DesktopApp() {
   const [appStats, setAppStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
 
   const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
-  // Fall back to first mock for the playlist header when no real playlist is selected
-  const playlistForHeader = activePlaylist ?? null;
+  // Override description with the branch-specific value from the tree blob.
+  // playlistRecords carries the SQL-cached description (last-write-wins across branches),
+  // while branchMeta comes from load_tree for the active branch specifically.
+  const playlistForHeader = activePlaylist && branchMeta
+    ? { ...activePlaylist, description: branchMeta.description }
+    : activePlaylist;
 
   // When a playlist is selected, the queue is its tracks; otherwise fall back to
   // the full library so the carousel is never empty.
@@ -310,7 +322,7 @@ export default function DesktopApp() {
       setIsShuffle(false);
     }
 
-    if (!activePlaylistId) { setPlaylistTracks(null); return; }
+    if (!activePlaylistId) { setPlaylistTracks(null); setBranchMeta(null); return; }
     invoke<TrackRecord[]>('playlist_get_tracks', {
       playlistId: activePlaylistId,
       branchName: activeBranch,
@@ -337,6 +349,13 @@ export default function DesktopApp() {
         }
       })
       .catch(() => setPlaylistTracks([]));
+
+    invoke<{ description: string | null }>('playlist_get_meta', {
+      playlistId: activePlaylistId,
+      branchName: activeBranch,
+    })
+      .then(meta => setBranchMeta({ description: meta.description }))
+      .catch(() => setBranchMeta(null));
   }, [activePlaylistId, activeBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Discord Rich Presence ─────────────────────────────────────────────────
@@ -579,6 +598,17 @@ export default function DesktopApp() {
     });
   };
 
+  const deleteFolder = (folderId: number) => {
+    setFolders(f => f.filter(folder => folder.id !== folderId));
+    setFolderAssignments(prev => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (next[key] === folderId) delete next[key];
+      }
+      return next;
+    });
+  };
+
   const handleReorder = (newOrder: Track[] | null) => {
     if (newOrder === null) {
       // Discard: restore the last committed state from the backend if available,
@@ -688,6 +718,18 @@ export default function DesktopApp() {
     } catch (e) { console.error(e); }
   }, [activePlaylistId, activeBranch, reloadPlaylists]);
 
+  const handleSetDescription = useCallback(async (desc: string | null) => {
+    if (!activePlaylistId) return;
+    try {
+      await invoke('playlist_set_description', { playlistId: activePlaylistId, branchName: activeBranch, description: desc });
+      setBranchMeta({ description: desc });
+      reloadPlaylists();
+      setCommitRefreshKey(k => k + 1);
+      setGitToast(desc ? 'Description updated' : 'Description cleared');
+      setTimeout(() => setGitToast(null), 2400);
+    } catch (e) { console.error(e); }
+  }, [activePlaylistId, activeBranch, reloadPlaylists]);
+
   const handleAbChange = (handle: 'A' | 'B', val: number) => {
     const hash = playQueue.find(t => t.id === activeTrackId)?.hash
                ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
@@ -702,23 +744,35 @@ export default function DesktopApp() {
 
     // Debounced commit — only when a playlist is active; uses sr.current so the
     // timeout always sees the final values after rapid dragging.
-    // Skip if A/B spans the whole track (no useful information to commit).
     if (activePlaylistId) {
       if (abCommitRef.current) clearTimeout(abCommitRef.current);
       const playlistId = activePlaylistId;
       const branchName = activeBranch;
+      // Capture whether this track has committed A/B points at drag-start so
+      // returning to full-range can send null to clear them from the tree.
+      const hadPoints = hash in trackAbPoints;
       abCommitRef.current = setTimeout(() => {
         const a = sr.current.abA;
         const b = sr.current.abB;
         const dur = sr.current.durationMs;
         if (dur <= 0) return;
-        if (a < 0.001 && b > 0.999) return; // full-track — nothing meaningful to commit
+        const isFullRange = a < 0.001 && b > 0.999;
+        if (isFullRange && !hadPoints) return; // never committed, nothing to clear
         invoke('playlist_set_ab_loop', {
           playlistId,
           branchName,
           trackHash: hash,
-          abStartMs: Math.round(a * dur),
-          abEndMs:   Math.round(b * dur),
+          abStartMs: isFullRange ? null : Math.round(a * dur),
+          abEndMs:   isFullRange ? null : Math.round(b * dur),
+        }).then(() => {
+          setCommitRefreshKey(k => k + 1);
+          if (isFullRange) {
+            setTrackAbPoints(p => { const next = { ...p }; delete next[hash]; return next; });
+            setGitToast('A/B loop cleared');
+          } else {
+            setGitToast('A/B loop saved');
+          }
+          setTimeout(() => setGitToast(null), 2400);
         }).catch(console.error);
       }, 1500);
     }
@@ -908,6 +962,7 @@ export default function DesktopApp() {
               if (folderId == null) removeFromFolder(playlistId);
               else setFolderAssignments(prev => ({ ...prev, [playlistId]: folderId }));
             }}
+            onDeleteFolder={deleteFolder}
             onOpenSettings={() => setShowSettings(true)}
             onAddToFolderClick={setFolderPopupItem}
             onNewPlaylist={() => setShowNewPlaylist(true)}
@@ -1101,6 +1156,7 @@ export default function DesktopApp() {
                     playlist={playlistForHeader}
                     onDelete={handleDeletePlaylist}
                     onRename={handleRenamePlaylist}
+                    onSetDescription={handleSetDescription}
                   />
                 )}
               </>
@@ -1313,11 +1369,13 @@ export default function DesktopApp() {
         )}
 
 
-        {showMergeModal && activePlaylist && (
+        {mergeAnim.mounted && activePlaylist && (
           <MergeBranchModal
+            closing={mergeAnim.closing}
             playlist={activePlaylist}
             targetBranch={activeBranch}
             targetTrackHashes={(playlistTracks ?? []).map(t => t.hash)}
+            targetDescription={branchMeta?.description ?? null}
             onClose={() => setShowMergeModal(false)}
             onMerged={commitHash => {
               setShowMergeModal(false);
@@ -1325,6 +1383,9 @@ export default function DesktopApp() {
               invoke<TrackRecord[]>('playlist_get_tracks', {
                 playlistId: activePlaylist.id, branchName: activeBranch,
               }).then(r => setPlaylistTracks(r.map(trackRecordToTrack))).catch(console.error);
+              invoke<{ description: string | null }>('playlist_get_meta', {
+                playlistId: activePlaylist.id, branchName: activeBranch,
+              }).then(m => setBranchMeta({ description: m.description })).catch(console.error);
               setCommitRefreshKey(k => k + 1);
               setGitToast(`Merged into '${activeBranch}' · ${commitHash.slice(0, 7)}`);
               setTimeout(() => setGitToast(null), 2800);
@@ -1332,8 +1393,9 @@ export default function DesktopApp() {
           />
         )}
 
-        {showForkModal && activePlaylist && (
+        {forkAnim.mounted && activePlaylist && (
           <ForkPlaylistModal
+            closing={forkAnim.closing}
             source={activePlaylist}
             onClose={() => setShowForkModal(false)}
             onForked={newPlaylist => {
@@ -1347,8 +1409,9 @@ export default function DesktopApp() {
           />
         )}
 
-        {showBranchModal && activePlaylist && (
+        {branchAnim.mounted && activePlaylist && (
           <BranchModal
+            closing={branchAnim.closing}
             playlistId={activePlaylist.id}
             playlistName={activePlaylist.name}
             branchName={activeBranch}
@@ -1363,8 +1426,9 @@ export default function DesktopApp() {
           />
         )}
 
-        {showSettings && (
+        {settingsAnim.mounted && (
           <SettingsModal
+            closing={settingsAnim.closing}
             settings={settings}
             updateSetting={handleUpdateSetting}
             onClose={() => setShowSettings(false)}
@@ -1372,8 +1436,11 @@ export default function DesktopApp() {
           />
         )}
 
-        {showCommitGraph && (
-          <CommitGraph onClose={() => { setShowCommitGraph(false); setRailItem('playlists'); }} />
+        {commitGraphAnim.mounted && (
+          <CommitGraph
+            closing={commitGraphAnim.closing}
+            onClose={() => { setShowCommitGraph(false); setRailItem('playlists'); }}
+          />
         )}
 
         {/* Git operation toast */}

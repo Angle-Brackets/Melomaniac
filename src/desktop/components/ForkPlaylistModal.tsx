@@ -12,9 +12,10 @@ interface Props {
   source:   PlaylistRecord;
   onForked: (newPlaylist: PlaylistWithBranches) => void;
   onClose:  () => void;
+  closing?: boolean;
 }
 
-export default function ForkPlaylistModal({ source, onForked, onClose }: Props) {
+export default function ForkPlaylistModal({ source, onForked, onClose, closing }: Props) {
   const [name,        setName]        = useState(`${source.name} (fork)`);
   const [submitting,  setSubmitting]  = useState(false);
   const [err,         setErr]         = useState<string | null>(null);
@@ -38,6 +39,7 @@ export default function ForkPlaylistModal({ source, onForked, onClose }: Props) 
 
   return (
     <div
+      className={closing ? 'mm-backdrop-exit' : 'mm-backdrop'}
       style={{
         position: 'fixed', inset: 0, zIndex: 300,
         background: 'rgba(0,0,0,0.6)',
@@ -45,12 +47,14 @@ export default function ForkPlaylistModal({ source, onForked, onClose }: Props) 
       }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
-        width: 480, background: 'var(--bg-3)',
-        border: '1px solid var(--border-2)', borderRadius: 12,
-        padding: 30, display: 'flex', flexDirection: 'column', gap: 22,
-        boxShadow: '0 12px 40px rgba(0,0,0,0.65)',
-      }}>
+      <div
+        className={closing ? 'mm-modal-box-exit' : 'mm-modal-box'}
+        style={{
+          width: 480, background: 'var(--bg-3)',
+          border: '1px solid var(--border-2)', borderRadius: 12,
+          padding: 30, display: 'flex', flexDirection: 'column', gap: 22,
+          boxShadow: '0 12px 40px rgba(0,0,0,0.65)',
+        }}>
         {/* Title */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
