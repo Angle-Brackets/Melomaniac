@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:mobile": "VITE_PLATFORM=ios tauri dev --config '{\"app\":{\"windows\":[{\"title\":\"Melomaniac (Mobile)\",\"width\":393,\"height\":852,\"minWidth\":300,\"minHeight\":600,\"decorations\":false,\"resizable\":true}]}}'",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
