@@ -229,7 +229,6 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 
 ### Remaining desktop UI work
 
-- **Sublists (Phase 4)** — `playlist_add_include` / `playlist_remove_include` / `playlist_pin_include` Tauri commands; recursive resolver inside `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
 - **Platform routing** — `src/App.tsx` hardcodes `<DesktopApp />`; mobile entry point not yet built; should branch on `isTauri()` + mobile UA or a compile-time flag
 - **Android audio bridge** — ExoPlayer / Media3 implementation (see P0 section)
 
@@ -274,6 +273,14 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 - **Carousel wired to playlist**: `activeQueue = playlistTracks ?? trackOrder`; shuffle uses the correct source; queue resets on playlist/branch switch
 - **DevelopmentOnly playlist**: debug fixture recreated fresh each launch with all test tracks
 
+### Dropped: Sublists / playlist includes
+
+The tree schema has an `includes` array (reserved field). After design review, playlist includes were dropped — the feature doesn't carry its weight:
+- "Gym as subset of master" is already covered by branching (fork master, remove tracks)
+- "Party as union of sub-playlists" is better served by merge or just adding tracks directly
+- The git-submodule analogy breaks down: submodules exist because repos are separate and independently owned; playlists share one CAS store so "separate ownership" isn't a real constraint
+- The `includes` field remains in the schema as a no-op reserved slot; it is never written or read.
+
 ### Completed since 2026-05-09 (fourth pass)
 
 - **A/B loop backend wired** — `playlist_get_tracks` returns committed `ab_start_ms`/`ab_end_ms` per track entry; `playlist_set_ab_loop` writes them to the tree blob with amend-style commits; `playlist_reorder_tracks` preserves them via hash→entry map. Frontend seeds `trackAbPoints` from the committed tree on every branch load (backend wins over localStorage). Clearing A/B (drag to full range) now sends `null` to erase the committed values; commit graph refreshes and a toast fires on write/clear.
@@ -294,8 +301,7 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 
 ### Next steps (priority order)
 
-1. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin Tauri commands; recursive resolver in `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
-2. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime (e.g. `@tauri-apps/plugin-os` or user-agent check)
-3. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
+1. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime (e.g. `@tauri-apps/plugin-os` or user-agent check)
+2. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
 
 *Last updated: 2026-05-09.*
