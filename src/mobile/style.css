@@ -1,0 +1,28 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+/* ── Mobile root ────────────────────────────────────────────────────────────── */
+.mobile-root, .mobile-root *, .mobile-root *::before, .mobile-root *::after {
+  box-sizing: border-box;
+}
+
+.mobile-root {
+  width: 100vw;
+  height: 100vh;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-0);
+  overflow: hidden;
+  position: relative;
+  background: var(--bg-1);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────────────── */
+.mm-scroll::-webkit-scrollbar { display: none; }
+.mm-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Tap highlight ──────────────────────────────────────────────────────────── */
+.mobile-root button {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
