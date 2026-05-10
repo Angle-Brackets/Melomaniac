@@ -69,14 +69,18 @@ interface FolderItem { id: number; name: string; }
 interface AddToFolderPopupProps {
   item: Playlist;
   folders: FolderItem[];
+  currentFolderId?: number;
   onClose: () => void;
   onAddToFolder: (itemId: string, folderId: number) => void;
   onCreateFolder: (name: string, itemId: string) => void;
+  onRemoveFromFolder?: (itemId: string) => void;
 }
 
-export function AddToFolderPopup({ item, folders, onClose, onAddToFolder, onCreateFolder }: AddToFolderPopupProps) {
+export function AddToFolderPopup({ item, folders, currentFolderId, onClose, onAddToFolder, onCreateFolder, onRemoveFromFolder }: AddToFolderPopupProps) {
   const [newName,  setNewName]  = useState('');
   const [creating, setCreating] = useState(false);
+  const currentFolder = folders.find(f => f.id === currentFolderId);
+  const otherFolders  = folders.filter(f => f.id !== currentFolderId);
 
   return (
     <dialog className="modal modal-open" style={{ zIndex: 300 }}>
@@ -85,10 +89,27 @@ export function AddToFolderPopup({ item, folders, onClose, onAddToFolder, onCrea
           <p className="text-xs font-bold text-mm-t0">Add "{item.name}" to folder</p>
         </div>
         <div className="py-2">
-          {folders.length > 0 && (
+          {currentFolder && (
             <>
-              <p className="px-3.5 pb-1 text-[9px] font-bold uppercase tracking-widest text-mm-t2">Existing folders</p>
-              {folders.map(f => (
+              <p className="px-3.5 pb-1 text-[9px] font-bold uppercase tracking-widest text-mm-t2">Current folder</p>
+              <div className="flex items-center gap-1.5 px-3.5 py-1.5">
+                <span className="text-xs text-mm-t1 flex-1">📁 {currentFolder.name}</span>
+                {onRemoveFromFolder && (
+                  <button
+                    onClick={() => { onRemoveFromFolder(item.id); onClose(); }}
+                    className="btn btn-ghost btn-xs text-error hover:bg-error/10 font-normal"
+                  >Remove</button>
+                )}
+              </div>
+              <div className="h-px bg-mm-b0 mx-2.5 my-1" />
+            </>
+          )}
+          {otherFolders.length > 0 && (
+            <>
+              <p className="px-3.5 pb-1 text-[9px] font-bold uppercase tracking-widest text-mm-t2">
+                {currentFolder ? 'Move to' : 'Existing folders'}
+              </p>
+              {otherFolders.map(f => (
                 <button key={f.id}
                   onClick={() => { onAddToFolder(item.id, f.id); onClose(); }}
                   className="w-full flex items-center gap-1.5 px-3.5 py-1.5 text-xs text-mm-t1 hover:bg-mm-4 transition-colors text-left"
@@ -136,9 +157,11 @@ interface PlaylistRowProps {
   onSelect: (id: string) => void; defaultOpen?: boolean;
   pinnedIds: Set<string>; onTogglePin: (id: string) => void;
   onAddToFolderClick: (item: Playlist) => void; synced: boolean;
+  onDragStart?: (id: string) => void;
+  onDragEnd?: () => void;
 }
 
-function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, onTogglePin, onAddToFolderClick, synced }: PlaylistRowProps) {
+function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, onTogglePin, onAddToFolderClick, synced, onDragStart, onDragEnd }: PlaylistRowProps) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [hov,  setHov]  = useState(false);
   const isActive    = item.id === activeId;
@@ -148,10 +171,18 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
       <div
+        draggable={!!onDragStart}
+        onDragStart={onDragStart ? e => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', item.id);
+          onDragStart(item.id);
+        } : undefined}
+        onDragEnd={onDragEnd}
         onClick={() => hasChildren ? setOpen(!open) : onSelect(item.id)}
         style={{
           padding: `5px 10px 5px ${10 + depth * 12}px`,
-          cursor: 'pointer',
+          cursor: onDragStart ? 'grab' : 'pointer',
+          userSelect: 'none',
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
           background: isActive ? 'var(--bg-5)' : 'transparent',
           transition: 'background 0.1s',
@@ -218,7 +249,8 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
           {item.children!.map(child => (
             <PlaylistRow key={child.id} item={child} activeId={activeId} depth={depth + 1}
               onSelect={onSelect} pinnedIds={pinnedIds} onTogglePin={onTogglePin}
-              onAddToFolderClick={onAddToFolderClick} synced={!child.pull && !!child.commit} />
+              onAddToFolderClick={onAddToFolderClick} synced={!child.pull && !!child.commit}
+              onDragStart={onDragStart} onDragEnd={onDragEnd} />
           ))}
         </div>
       )}
@@ -226,6 +258,63 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
   );
 }
 
+
+// ── Folder row (collapsible group) ────────────────────────────────────────────
+interface FolderRowProps {
+  folder: FolderItem;
+  playlists: Playlist[];
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  pinnedIds: Set<string>;
+  onTogglePin: (id: string) => void;
+  onAddToFolderClick: (item: Playlist) => void;
+  onAssignToFolder: (playlistId: string, folderId: number) => void;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+}
+
+function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onTogglePin, onAddToFolderClick, onAssignToFolder, onDragStart, onDragEnd }: FolderRowProps) {
+  const [open,      setOpen]      = useState(true);
+  const [dragCount, setDragCount] = useState(0);
+  const isOver = dragCount > 0;
+
+  return (
+    <div
+      onDragEnter={e => { e.preventDefault(); setDragCount(c => c + 1); }}
+      onDragLeave={() => setDragCount(c => Math.max(0, c - 1))}
+      onDragOver={e => e.preventDefault()}
+      onDrop={e => {
+        e.preventDefault(); setDragCount(0);
+        const id = e.dataTransfer.getData('text/plain');
+        if (id) onAssignToFolder(id, folder.id);
+      }}
+      style={{
+        borderRadius: 6,
+        outline: isOver ? '1px solid var(--accent)' : '1px solid transparent',
+        background: isOver ? 'var(--bg-3)' : 'transparent',
+        transition: 'background 0.1s, outline-color 0.1s',
+      }}
+    >
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold tracking-[0.08em] text-mm-t2 uppercase hover:text-mm-t1 transition-colors"
+      >
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="shrink-0 opacity-70">
+          <path d="M1 3.5C1 2.67 1.67 2 2.5 2H4.62l1 1.5H9.5c.83 0 1.5.67 1.5 1.5V9c0 .83-.67 1.5-1.5 1.5h-7C1.67 10.5 1 9.83 1 9V3.5z"/>
+        </svg>
+        <span className="flex-1 text-left">{folder.name}</span>
+        <IcoChevron size={9} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+      </button>
+      {open && playlists.map(p => (
+        <PlaylistRow key={p.id} item={p} activeId={activeId} depth={1}
+          onSelect={onSelect} defaultOpen={p.id === activeId}
+          pinnedIds={pinnedIds} onTogglePin={onTogglePin}
+          onAddToFolderClick={onAddToFolderClick} synced={!p.pull && !!p.commit}
+          onDragStart={onDragStart} onDragEnd={onDragEnd} />
+      ))}
+    </div>
+  );
+}
 
 // ── LibrarySidebar ────────────────────────────────────────────────────────────
 interface LibrarySidebarProps {
@@ -235,6 +324,10 @@ interface LibrarySidebarProps {
   expanded: boolean; onToggleExpanded: () => void;
   panelWidth?: number;
   pinnedIds: Set<string>; onTogglePin: (id: string) => void;
+  folders: FolderItem[];
+  folderAssignments: Record<string, number>;
+  onRemoveFromFolder: (playlistId: string) => void;
+  onAssignToFolder: (playlistId: string, folderId: number | null) => void;
   onOpenSettings: () => void;
   onAddToFolderClick: (item: Playlist) => void;
   onNewPlaylist: () => void;
@@ -243,14 +336,17 @@ interface LibrarySidebarProps {
 export default function LibrarySidebar({
   playlists, activePlaylistId, onSelectPlaylist,
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
-  pinnedIds, onTogglePin, onOpenSettings, onAddToFolderClick, onNewPlaylist,
+  pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder,
+  onOpenSettings, onAddToFolderClick, onNewPlaylist,
 }: LibrarySidebarProps) {
-  const [sectionsOpen, setSectionsOpen] = useState({ repos: true });
-  const toggle = (k: keyof typeof sectionsOpen) => setSectionsOpen(s => ({ ...s, [k]: !s[k] }));
+  const [isDragging,    setIsDragging]    = useState(false);
+  const [noFolderCount, setNoFolderCount] = useState(0);
 
-  const sorted  = [...playlists].sort((a, b) => (pinnedIds.has(a.id) ? 0 : 1) - (pinnedIds.has(b.id) ? 0 : 1));
-  const pinned  = sorted.filter(p => pinnedIds.has(p.id));
-  const unpinned = sorted.filter(p => !pinnedIds.has(p.id));
+  const pinned     = playlists.filter(p => pinnedIds.has(p.id));
+  const unassigned = playlists.filter(p => !pinnedIds.has(p.id) && folderAssignments[p.id] == null);
+
+  const handleDragStart = (_id: string) => setIsDragging(true);
+  const handleDragEnd   = () => { setIsDragging(false); setNoFolderCount(0); };
 
   return (
     <div className="flex h-full">
@@ -292,39 +388,74 @@ export default function LibrarySidebar({
         </div>
 
         <div className="flex-1 overflow-y-auto styled-scroll">
-          {/* Repositories section */}
-          <div>
-            <button
-              onClick={() => toggle('repos')}
-              className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-bold tracking-[0.08em] text-mm-t2 uppercase hover:text-mm-t1 transition-colors"
-            >
-              <span>Repositories</span>
-              <IcoChevron size={9} style={{ transform: sectionsOpen.repos ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
-            </button>
 
-            {sectionsOpen.repos && (
-              <div>
-                {pinned.length > 0 && (
-                  <div className="flex items-center gap-1 px-3 py-0.5 text-[9px] font-bold uppercase tracking-widest text-mm-accent-dim">
-                    <IcoPin filled size={9} /> Pinned
-                  </div>
-                )}
-                {pinned.map(p => (
-                  <PlaylistRow key={p.id} item={p} activeId={activePlaylistId} depth={0}
-                    onSelect={onSelectPlaylist} defaultOpen={p.id === activePlaylistId}
-                    pinnedIds={pinnedIds} onTogglePin={onTogglePin}
-                    onAddToFolderClick={onAddToFolderClick} synced={!p.pull && !!p.commit} />
-                ))}
-                {pinned.length > 0 && unpinned.length > 0 && <div className="h-px bg-mm-b0 mx-2.5 my-1" />}
-                {unpinned.map(p => (
-                  <PlaylistRow key={p.id} item={p} activeId={activePlaylistId} depth={0}
-                    onSelect={onSelectPlaylist} defaultOpen={p.id === activePlaylistId}
-                    pinnedIds={pinnedIds} onTogglePin={onTogglePin}
-                    onAddToFolderClick={onAddToFolderClick} synced={!p.pull && !!p.commit} />
-                ))}
+          {/* Pinned */}
+          {pinned.length > 0 && (
+            <div>
+              <div className="flex items-center gap-1 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-mm-accent-dim">
+                <IcoPin filled size={9} /> Pinned
               </div>
-            )}
-          </div>
+              {pinned.map(p => (
+                <PlaylistRow key={p.id} item={p} activeId={activePlaylistId} depth={0}
+                  onSelect={onSelectPlaylist} defaultOpen={p.id === activePlaylistId}
+                  pinnedIds={pinnedIds} onTogglePin={onTogglePin}
+                  onAddToFolderClick={onAddToFolderClick} synced={!p.pull && !!p.commit}
+                  onDragStart={handleDragStart} onDragEnd={handleDragEnd} />
+              ))}
+              {(folders.length > 0 || unassigned.length > 0) && <div className="h-px bg-mm-b0 mx-2.5 my-1" />}
+            </div>
+          )}
+
+          {/* Folders */}
+          {folders.map(folder => {
+            const members = playlists.filter(p => !pinnedIds.has(p.id) && folderAssignments[p.id] === folder.id);
+            return (
+              <FolderRow key={folder.id} folder={folder} playlists={members}
+                activeId={activePlaylistId} onSelect={onSelectPlaylist}
+                pinnedIds={pinnedIds} onTogglePin={onTogglePin}
+                onAddToFolderClick={onAddToFolderClick}
+                onAssignToFolder={onAssignToFolder}
+                onDragStart={handleDragStart} onDragEnd={handleDragEnd} />
+            );
+          })}
+
+          {/* Unassigned */}
+          {folders.length > 0 && unassigned.length > 0 && (
+            <div className="h-px bg-mm-b0 mx-2.5 my-1" />
+          )}
+          {unassigned.map(p => (
+            <PlaylistRow key={p.id} item={p} activeId={activePlaylistId} depth={0}
+              onSelect={onSelectPlaylist} defaultOpen={p.id === activePlaylistId}
+              pinnedIds={pinnedIds} onTogglePin={onTogglePin}
+              onAddToFolderClick={onAddToFolderClick} synced={!p.pull && !!p.commit}
+              onDragStart={handleDragStart} onDragEnd={handleDragEnd} />
+          ))}
+
+          {/* No-folder drop zone — only shown while dragging with folders present */}
+          {isDragging && folders.length > 0 && (
+            <div
+              onDragEnter={e => { e.preventDefault(); setNoFolderCount(c => c + 1); }}
+              onDragLeave={() => setNoFolderCount(c => Math.max(0, c - 1))}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => {
+                e.preventDefault(); setNoFolderCount(0);
+                const id = e.dataTransfer.getData('text/plain');
+                if (id) { onAssignToFolder(id, null); setIsDragging(false); }
+              }}
+              style={{
+                margin: '6px 10px',
+                padding: '6px 10px',
+                borderRadius: 5,
+                border: `1px dashed ${noFolderCount > 0 ? 'var(--accent)' : 'var(--border-2)'}`,
+                background: noFolderCount > 0 ? 'var(--bg-3)' : 'transparent',
+                fontSize: 10, color: 'var(--text-3)',
+                textAlign: 'center', transition: 'all 0.1s',
+                cursor: 'copy',
+              }}
+            >
+              No folder
+            </div>
+          )}
 
         </div>
       </div>

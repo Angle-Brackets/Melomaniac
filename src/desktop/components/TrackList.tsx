@@ -217,11 +217,13 @@ export default function TrackList({
                       : art.gradient,
                   }} />
                 </div>
-                <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`} style={{ gap: 4 }}>
-                  <ScrollText text={t.title} style={{ flex: 1 }} />
-                  {favorites?.has(t.hash) && (
-                    <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
-                  )}
+                <div className={`tl-cell ${active ? 'bright font-semibold' : ''}`}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                    <ScrollText text={t.title} style={{ flex: '0 1 auto', minWidth: 0 }} />
+                    {favorites?.has(t.hash) && (
+                      <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
+                    )}
+                  </div>
                 </div>
                 <div className="tl-cell"><ScrollText text={t.artist} style={{ flex: 1 }} /></div>
                 <div className="tl-cell muted"><ScrollText text={t.album ?? ''} style={{ flex: 1 }} /></div>

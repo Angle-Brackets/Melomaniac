@@ -453,16 +453,18 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
               {/* Title + badges */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden', minWidth: 0 }}>
-                <ScrollText
-                  text={r.title}
-                  style={{ flex: 1 }}
-                  textStyle={{ fontSize: 12, color: sel ? 'var(--text-0)' : isPlaying ? 'var(--accent-light)' : 'var(--text-1)' }}
-                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                  <ScrollText
+                    text={r.title}
+                    style={{ flex: '0 1 auto', minWidth: 0 }}
+                    textStyle={{ fontSize: 12, color: sel ? 'var(--text-0)' : isPlaying ? 'var(--accent-light)' : 'var(--text-1)' }}
+                  />
+                  {favorites?.has(r.hash) && (
+                    <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
+                  )}
+                </div>
                 {isNew   && <Badge label="NEW"   accent />}
                 {isStray && <Badge label="STRAY" />}
-                {favorites?.has(r.hash) && (
-                  <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
-                )}
               </div>
 
               {/* Artist */}

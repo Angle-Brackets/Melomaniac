@@ -62,8 +62,8 @@
 
 ### React Frontend Scaffolding
 - [x] Set up Zustand store with slices for queue, playback state, library, and playlist (`src/store/`)
-- [ ] Implement `requestAnimationFrame` progress bar loop via `useRef` (no React re-renders)
-- [ ] Implement virtualized tracklist with `tanstack/react-virtual` (target: 10,000+ tracks)
+- [x] Implement `requestAnimationFrame` progress bar loop via `useRef` (no React re-renders) — `livePositionMsRef` written on every `PositionChanged` event; rAF loop in `PlayerControls` and `MiniPlayer` updates DOM directly, zero React re-renders per frame
+- [x] Implement virtualized tracklist with `tanstack/react-virtual` (target: 10,000+ tracks) — `useVirtualizer` with coordinate-based drag reorder
 - [x] Build player controls UI — play/pause, seek bar with real duration, volume slider, skip, shuffle, loop, A·B markers; all wired to Tauri invoke commands
 - [x] Build library view wired to SQLite metadata via Tauri invoke — `library_get_all` populates tracklist and carousel with real tracks; artwork fetched via `track_get_artwork` (BLAKE3 CAS lookup)
 - [x] Build playlist view wired to real backend — `playlist_get_all` sidebar, `playlist_get_tracks` populates tracklist and carousel, add/remove/reorder tracks all commit to CAS
@@ -166,6 +166,8 @@ Implemented 2026-05-02 from Claude Design handoff (`/tmp/melomaniac/project/`). 
 | `components/SettingsModal.tsx` | Named theme pills + Custom pill; accent hue slider; density, right-panel toggle, carousel size slider |
 | `components/EditorView.tsx` | MP3 metadata editor — title/artist/album fields, artwork replacement |
 | `components/MiniPlayer.tsx` | Persistent bottom bar (Spotify-style) — 3px drag-seek strip, artwork + title/artist, prev/play-pause/next, loop cycle button, volume slider, collapse to slim strip |
+| `components/QueuePanel.tsx` | Floating queue panel — spring cubic-bezier enter/exit animation, staggered row cascade (28 ms/row), Now Playing / Up Next (manual queue with × remove + clear all) / Coming Up sections |
+| `components/ScrollText.tsx` | Inline text with seamless marquee on hover — measures overflow on `mouseenter`, animates two copies of the text side-by-side so the loop point is invisible; shows `text-overflow: ellipsis` at rest |
 
 ### Toolchain
 
@@ -221,11 +223,30 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 - **Library**: every audio file in `tests/audio/` is ingested at startup (idempotent — same hash skips the write)
 - **DevelopmentOnly playlist**: `dev_seed_dev_playlist` (called from `lib.rs`) destroys and recreates a "DevelopmentOnly" playlist on every launch, seeded with all test-audio tracks. History does not accumulate — it always starts clean. This is the fixture for exercising the carousel and playback UI. Never appears in production builds.
 
-### Known bugs / remaining work
+### Known bugs
 
-- Rail git icon: clicking the git rail icon while the CommitGraph overlay is open doesn't reset the highlighted rail icon when navigating away
+- ~~Rail git icon: clicking the git rail icon while the CommitGraph overlay is open doesn't reset the highlighted rail icon when navigating away~~ **Fixed**
 
-### Completed since 2026-05-09
+### Remaining desktop UI work
+
+- **A/B loop backend** — `ab_start_ms`/`ab_end_ms` are present in the tree manifest schema but `playlist_get_tracks` and `playlist_reorder_tracks` don't read/write them; frontend stores A/B points in `localStorage` only
+- **Sublists (Phase 4)** — `playlist_add_include` / `playlist_remove_include` / `playlist_pin_include` Tauri commands; recursive resolver inside `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
+- **Platform routing** — `src/App.tsx` hardcodes `<DesktopApp />`; mobile entry point not yet built; should branch on `isTauri()` + mobile UA or a compile-time flag
+- **Android audio bridge** — ExoPlayer / Media3 implementation (see P0 section)
+
+### Completed since 2026-05-09 (second pass)
+
+- **rAF seek bars** — `PlayerControls` and `MiniPlayer` both receive `positionMsRef` (a ref, not state); a `requestAnimationFrame` loop writes directly to `seekFillRef.style.width` and `posTextRef.textContent`, eliminating all React re-renders from `PositionChanged` events
+- **Virtual tracklist** — `useVirtualizer` from `@tanstack/react-virtual`; header row pinned outside the scroll container; drag reorder uses coordinate math `Math.round(relY / rowHeight)` instead of iterating row refs — works for off-screen rows
+- **QueuePanel** — floating queue panel with spring enter/exit animation and staggered row cascade; Now Playing / Up Next (manual queue) / Coming Up sections; queue icon in both `PlayerControls` and `MiniPlayer` toggles it; outside-click dismiss uses a 0 ms `setTimeout` to avoid closing on the open click
+- **Shuffle persistence** — branch-change and playlist-change distinguished via `prevPlaylistIdRef`; playlist change resets shuffle, branch change rebuilds the shuffled queue from the new track list
+- **Play/pause resilience** — `handlePlayPause` checks `loadedHash` first so toggling the currently-loaded track always works even when it isn't in the active playlist branch
+- **A/B loop + favorites persistence** — both written to `localStorage` on change; `trackAbPoints` keyed by track hash; `favorites` is a `Set<string>` of hashes, never committed to git
+- **Favorites heart** — filled `FiHeart` shown in `TrackList` title cell (left of text) and `LibraryView` title cell for any track whose hash is in `favorites`; heart hugs the title text using `flex: '0 1 auto'` on `ScrollText` so it sits immediately after the last visible character
+- **TrackList search** — filter bar above the column headers; `displayTracks` useMemo filters on title/artist/album; count shows "X of Y tracks" when a query is active
+- **Seamless marquee scroll** (`ScrollText`) — on hover the component renders two copies of the text in an `inline-flex` row; animates `translateX(0)` → `translateX(-(textWidth + gap))`; at the loop point the second copy is visually identical to the start, so no jump-back is visible; replaces the old `mm-scroll` oscillating keyframe
+
+### Completed since 2026-05-09 (first pass)
 
 - **MiniPlayer**: persistent Spotify-style bottom bar visible on any page whenever a track is loaded — 3px draggable seek strip, artwork thumbnail, title/artist, prev/play-pause/next transport, loop cycle button, volume slider; collapses to a 22px slim strip with track title and play/pause indicator; `^` chevron dismisses, clicking the strip restores
 - **Skip handlers**: `handleSkipNext` / `handleSkipPrev` advance through `playQueue` by matching `loadedHash`; wired to both `PlayerControls` prev/next buttons and `MiniPlayer` transport
@@ -254,11 +275,22 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 - **Carousel wired to playlist**: `activeQueue = playlistTracks ?? trackOrder`; shuffle uses the correct source; queue resets on playlist/branch switch
 - **DevelopmentOnly playlist**: debug fixture recreated fresh each launch with all test tracks
 
-### Next steps
+### Completed since 2026-05-09 (third pass)
 
-1. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin commands; recursive resolver in `playlist_get_tracks`; "Includes" section in Playlist Settings
-2. **Android audio bridge** — ExoPlayer / Media3 implementation
-3. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime
-4. **Virtualized tracklist** — `tanstack/react-virtual` for 10 000+ track libraries
+- **A/B loop fixed** — three-layer bug: (1) A/B check was inside the 600 ms seek throttle gate — moved before it with early `return`; (2) `sr.current.durationMs` was stale on first `PositionChanged` after load — synchronous assignment added at every track-load site; (3) `track_active` not reset in the fallback seek path — fixed in `audio.rs`
+- **`try_seek(0)` no-op fixed** — MP3 decoders return `Ok(())` but don't rewind on `try_seek(Duration::ZERO)`; fallback file-reload path now skips `try_seek` entirely when target is 0 (freshly opened decoder is already at position 0)
+- **MiniPlayer A/B markers** — diamond SVG icons (not text labels) centred on the seek strip at the A and B positions; no lines, just the diamonds
+- **A/B commit message timestamps** — `storage.rs` formats loop-point commits as `"A/B: {title} [start → end]"` with human-readable `mm:ss` timestamps
+- **Sidebar folder support** — real folder grouping replaces the mock "Repositories" collapsible; folders and assignments persist to `localStorage`; `FolderRow` is a collapsible group with a folder icon; unassigned playlists list below folder groups
+- **Pinning persistence** — `pinnedIds` initialised from and written to `localStorage`; survives reload
+- **AddToFolderPopup** — shows current folder with a "Remove" button when the item is already assigned; folder list becomes "Move to" instead of "Existing folders"
+- **Playlist drag-and-drop into folders** — HTML5 DnD; `draggable` + `userSelect: none` on rows; `dataTransfer.setData/getData` used for the playlist ID (required by WebKit/Tauri — without `setData`, WebKit silently cancels the drag); `FolderRow` highlights with accent outline on hover; a "No folder" dashed drop zone appears at the bottom while dragging when folders exist
+
+### Next steps (priority order)
+
+1. **A/B loop backend** — read/write `ab_start_ms`/`ab_end_ms` in the Rust tree manifest so loop points are committed with the playlist and survive across devices
+2. **Sublists (Phase 4)** — `playlist_add_include` / remove / pin / unpin Tauri commands; recursive resolver in `playlist_get_tracks`; "Includes" section in `PlaylistSettingsPanel`
+3. **Platform routing** — `src/App.tsx` should detect desktop vs. mobile at runtime (e.g. `@tauri-apps/plugin-os` or user-agent check)
+4. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
 
 *Last updated: 2026-05-09.*

@@ -441,7 +441,16 @@ pub async fn playlist_set_ab_loop(
         .map_err(|e| e.to_string())?
         .map(|r| r.title)
         .unwrap_or_else(|| track_hash[..8].to_string());
-    let message = Some(format!("A/B: {title}"));
+
+    fn fmt_ms(ms: u64) -> String {
+        let total_s = ms / 1000;
+        let m = total_s / 60;
+        let s = total_s % 60;
+        format!("{m}:{s:02}")
+    }
+    let start_fmt = ab_start_ms.map(fmt_ms).unwrap_or_else(|| "0:00".to_string());
+    let end_fmt   = ab_end_ms.map(fmt_ms).unwrap_or_else(|| "?".to_string());
+    let message = Some(format!("A/B: {title} [{start_fmt} → {end_fmt}]"));
 
     // Check whether HEAD is an A/B commit — if so, amend by using its parent.
     let db = &storage.db;

@@ -237,16 +237,25 @@ fn handle_cmd(
             let dur = duration_ms.load(Ordering::Relaxed);
             // Only clamp if duration is known; 0 means unknown.
             let target = if dur > 0 { pos_ms.min(dur) } else { pos_ms };
-            match p.try_seek(Duration::from_millis(target)) {
-                Ok(_) => {
+
+            // try_seek(0) is unreliable on many decoders — it may return Ok but
+            // leave the playhead where it was (no actual rewind). Always reload
+            // from file when target == 0 to guarantee a clean rewind.
+            let inline_ok = if target > 0 {
+                p.try_seek(Duration::from_millis(target)).ok()
+            } else {
+                None
+            };
+
+            match inline_ok {
+                Some(()) => {
                     position_ms.store(target, Ordering::Relaxed);
                 }
-                Err(_) => {
-                    // Backward seek might fail if RandomAccess is not supported by Decoder.
-                    // Fallback: reload the source and seek forward.
+                None => {
+                    // Fallback: reload the source file and seek forward if needed.
                     if let Some(path) = active_path.as_ref() {
                         let is_paused = p.is_paused();
-                        
+
                         let file = File::open(path)
                             .map_err(|_| AudioError::SourceNotFound(path.display().to_string()))?;
                         let source = Decoder::new(BufReader::new(file))
@@ -256,13 +265,18 @@ fn handle_cmd(
                         new_player.set_volume(*volume);
                         new_player.pause();
                         new_player.append(source);
-                        new_player.try_seek(Duration::from_millis(target))
-                            .map_err(|e| AudioError::Playback(e.to_string()))?;
+                        // Freshly opened source is already at position 0; only
+                        // call try_seek when we actually need to advance forward.
+                        if target > 0 {
+                            new_player.try_seek(Duration::from_millis(target))
+                                .map_err(|e| AudioError::Playback(e.to_string()))?;
+                        }
                         if !is_paused {
                             new_player.play();
                         }
-                        
+
                         *player = Some(new_player);
+                        *track_active = true;
                         position_ms.store(target, Ordering::Relaxed);
                     } else {
                         return Err(AudioError::NotLoaded);

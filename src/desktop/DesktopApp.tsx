@@ -134,7 +134,9 @@ export default function DesktopApp() {
   const [pendingChanges, setPendingChanges] = useState<{ message: string; execute: () => Promise<void> }[]>([]);
   const [railItem, setRailItem] = useState('playlists');
   const [activeTab, setActiveTab] = useState('Tracks');
-  const [pinnedIds, setPinnedIds] = useState<Set<string>>(new Set());
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('melomaniac.pinned') ?? '[]') as string[]); } catch { return new Set(); }
+  });
   const [trackOrder, setTrackOrder] = useState<Track[]>(TRACKS);
   const [hasUncommitted, setHasUncommitted] = useState(false);
   const [abA, setAbA] = useState(0);
@@ -145,7 +147,12 @@ export default function DesktopApp() {
     try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
   });
   const [folderPopupItem, setFolderPopupItem] = useState<Playlist | null>(null);
-  const [folders, setFolders] = useState([{ id: 4, name: 'Gaming Sessions' }]);
+  const [folders, setFolders] = useState<{ id: number; name: string }[]>(() => {
+    try { return JSON.parse(localStorage.getItem('melomaniac.folders') ?? '[]'); } catch { return []; }
+  });
+  const [folderAssignments, setFolderAssignments] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('melomaniac.folder_assignments') ?? '{}'); } catch { return {}; }
+  });
   const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
   const [activeTrackId, setActiveTrackId] = useState(1);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -396,6 +403,7 @@ export default function DesktopApp() {
       setActiveTrackId(track.id);
       setLoadedHash(track.hash);
       setDurationMs(track.duration_ms);
+      sr.current.durationMs = track.duration_ms;
       setPositionMs(0);
       livePositionMsRef.current = 0;
       setIsPlaying(true);
@@ -406,19 +414,20 @@ export default function DesktopApp() {
     listen<AudioPayload>('audio://event', ({ payload }) => {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
         const posMs = payload.PositionChanged;
+        // ── A·B loop enforcement — runs regardless of seek throttle ──────────
+        const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
+        if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+          const aMs = Math.round(a * dur);
+          lastSeekTime.current = Date.now(); // throttle visual updates during seek
+          livePositionMsRef.current = aMs;
+          sr.current.positionMs = aMs;
+          invoke('audio_seek', { positionMs: aMs }).catch(console.error);
+          return; // skip visual update below — we already set livePositionMsRef
+        }
+        // Update the live ref — no React re-render; rAF in seek components reads it
         if (Date.now() - lastSeekTime.current > 600) {
-          // Update the live ref — no React re-render; rAF in seek components reads it
           livePositionMsRef.current = posMs;
           sr.current.positionMs = posMs;
-          // ── A·B loop enforcement ──────────────────────────────────────────
-          const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
-          if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
-            const aMs = Math.floor(a * dur);
-            lastSeekTime.current = Date.now();
-            livePositionMsRef.current = aMs;
-            sr.current.positionMs = aMs;
-            invoke('audio_seek', { positionMs: aMs }).catch(console.error);
-          }
         }
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
@@ -518,7 +527,19 @@ export default function DesktopApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylist?.id, activeBranch]);
 
-  // ── Persist A·B points and favorites to localStorage ─────────────────────
+  // ── Persist sidebar state to localStorage ────────────────────────────────
+  useEffect(() => {
+    localStorage.setItem('melomaniac.pinned', JSON.stringify([...pinnedIds]));
+  }, [pinnedIds]);
+
+  useEffect(() => {
+    localStorage.setItem('melomaniac.folders', JSON.stringify(folders));
+  }, [folders]);
+
+  useEffect(() => {
+    localStorage.setItem('melomaniac.folder_assignments', JSON.stringify(folderAssignments));
+  }, [folderAssignments]);
+
   useEffect(() => {
     localStorage.setItem('melomaniac.ab_points', JSON.stringify(trackAbPoints));
   }, [trackAbPoints]);
@@ -527,14 +548,21 @@ export default function DesktopApp() {
     localStorage.setItem('melomaniac.favorites', JSON.stringify([...favorites]));
   }, [favorites]);
 
-  // ── Sync A·B handles on track change ──────────────────────────────────────
+  // ── Sync A·B handles on track change OR when committed points load ────────
+  // Also writes sr.current immediately so the PositionChanged handler doesn't
+  // wait for the next render to see the correct A/B values.
   useEffect(() => {
     const hash = playQueue.find(t => t.id === activeTrackId)?.hash
                ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
     const pts = hash ? trackAbPoints[hash] : undefined;
-    if (pts) { setAbA(pts.a); setAbB(pts.b); }
-    else { setAbA(0); setAbB(1); }
-  }, [activeTrackId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (pts) {
+      setAbA(pts.a); setAbB(pts.b);
+      sr.current.abA = pts.a; sr.current.abB = pts.b;
+    } else {
+      setAbA(0); setAbB(1);
+      sr.current.abA = 0; sr.current.abB = 1;
+    }
+  }, [activeTrackId, trackAbPoints]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const togglePin = (id: string) => setPinnedIds(prev => {
@@ -542,6 +570,14 @@ export default function DesktopApp() {
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
+
+  const removeFromFolder = (playlistId: string) => {
+    setFolderAssignments(prev => {
+      const next = { ...prev };
+      delete next[playlistId];
+      return next;
+    });
+  };
 
   const handleReorder = (newOrder: Track[] | null) => {
     if (newOrder === null) {
@@ -567,18 +603,27 @@ export default function DesktopApp() {
   const handleShuffle = () => {
     if (!isShuffle) {
       updateSetting('shuffleMode', 'fisher-yates');
-      setShuffledQueue(buildShuffledQueue(activeQueue, 'fisher-yates'));
+      const newQ = buildShuffledQueue(activeQueue, 'fisher-yates');
+      sr.current.playQueue = newQ; // sync update so TrackEnded sees it before next render
+      sr.current.isShuffle = true;
+      setShuffledQueue(newQ);
       setIsShuffle(true);
       toast('Shuffle: True Shuffle');
     } else if (settings.shuffleMode === 'fisher-yates') {
       updateSetting('shuffleMode', 'balanced');
-      setShuffledQueue(buildShuffledQueue(activeQueue, 'balanced'));
+      const newQ = buildShuffledQueue(activeQueue, 'balanced');
+      sr.current.playQueue = newQ;
+      setShuffledQueue(newQ);
       toast('Shuffle: Balanced');
     } else if (settings.shuffleMode === 'balanced') {
       updateSetting('shuffleMode', 'random');
-      setShuffledQueue(buildShuffledQueue(activeQueue, 'random'));
+      const newQ = buildShuffledQueue(activeQueue, 'random');
+      sr.current.playQueue = newQ;
+      setShuffledQueue(newQ);
       toast('Shuffle: Random');
     } else {
+      sr.current.playQueue = activeQueue;
+      sr.current.isShuffle = false;
       setShuffledQueue(null);
       setIsShuffle(false);
       toast('Shuffle: Off');
@@ -648,37 +693,42 @@ export default function DesktopApp() {
                ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
     if (!hash) return;
     if (handle === 'A') {
-      setAbA(val);
+      setAbA(val); sr.current.abA = val;
       setTrackAbPoints(p => ({ ...p, [hash]: { ...(p[hash] ?? { a: 0, b: 1 }), a: val } }));
     } else {
-      setAbB(val);
+      setAbB(val); sr.current.abB = val;
       setTrackAbPoints(p => ({ ...p, [hash]: { ...(p[hash] ?? { a: 0, b: 1 }), b: val } }));
     }
 
     // Debounced commit — only when a playlist is active; uses sr.current so the
     // timeout always sees the final values after rapid dragging.
+    // Skip if A/B spans the whole track (no useful information to commit).
     if (activePlaylistId) {
       if (abCommitRef.current) clearTimeout(abCommitRef.current);
-      const playlistId  = activePlaylistId;
-      const branchName  = activeBranch;
-      const durationMs  = sr.current.durationMs;
+      const playlistId = activePlaylistId;
+      const branchName = activeBranch;
       abCommitRef.current = setTimeout(() => {
-        const pts = sr.current.abA !== undefined
-          ? { a: sr.current.abA, b: sr.current.abB }
-          : null;
-        if (!pts || durationMs <= 0) return;
+        const a = sr.current.abA;
+        const b = sr.current.abB;
+        const dur = sr.current.durationMs;
+        if (dur <= 0) return;
+        if (a < 0.001 && b > 0.999) return; // full-track — nothing meaningful to commit
         invoke('playlist_set_ab_loop', {
           playlistId,
           branchName,
-          trackHash:  hash,
-          abStartMs:  Math.round(pts.a * durationMs),
-          abEndMs:    Math.round(pts.b * durationMs),
+          trackHash: hash,
+          abStartMs: Math.round(a * dur),
+          abEndMs:   Math.round(b * dur),
         }).catch(console.error);
       }, 1500);
     }
   };
 
-  const handleLoopCycle = () => setLoopMode(m => m === 'off' ? 'one' : m === 'one' ? 'ab' : 'off');
+  const handleLoopCycle = () => setLoopMode(m => {
+    const next = m === 'off' ? 'one' : m === 'one' ? 'ab' : 'off';
+    sr.current.loopMode = next; // sync update so TrackEnded sees it before next render
+    return next;
+  });
 
   // Intercept accent-hue changes: write to the CUSTOM slot and activate it.
   // Switching to a named theme resets accentHue to that theme's default.
@@ -736,6 +786,9 @@ export default function DesktopApp() {
       invoke('track_play', { hash: track.hash }).catch(console.error);
       setIsPlaying(true);
       setLoadedHash(track.hash);
+      setDurationMs(track.duration_ms);
+      sr.current.durationMs = track.duration_ms;
+      setPositionMs(0); livePositionMsRef.current = 0;
     }
   };
 
@@ -749,6 +802,7 @@ export default function DesktopApp() {
       setIsPlaying(true);
       setLoadedHash(next.hash);
       setDurationMs(next.duration_ms);
+      sr.current.durationMs = next.duration_ms;
       setPositionMs(0); livePositionMsRef.current = 0;
       return;
     }
@@ -763,6 +817,7 @@ export default function DesktopApp() {
     setIsPlaying(true);
     setLoadedHash(next.hash);
     setDurationMs(next.duration_ms);
+    sr.current.durationMs = next.duration_ms;
     setPositionMs(0); livePositionMsRef.current = 0;
   };
   skipNextRef.current = handleSkipNext;
@@ -786,6 +841,7 @@ export default function DesktopApp() {
     setIsPlaying(true);
     setLoadedHash(prev.hash);
     setDurationMs(prev.duration_ms);
+    sr.current.durationMs = prev.duration_ms;
     setPositionMs(0); livePositionMsRef.current = 0;
   };
   skipPrevRef.current = handleSkipPrev;
@@ -809,6 +865,7 @@ export default function DesktopApp() {
       invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
       setLoadedHash(queueTrack.hash);
       setDurationMs(queueTrack.duration_ms);
+      sr.current.durationMs = queueTrack.duration_ms;
       setPositionMs(0); livePositionMsRef.current = 0;
       setIsPlaying(true);
       return;
@@ -819,6 +876,7 @@ export default function DesktopApp() {
     invoke('track_play', { hash: track.hash }).catch(console.error);
     setLoadedHash(track.hash);
     setDurationMs(track.duration_ms);
+    sr.current.durationMs = track.duration_ms;
     setPositionMs(0); livePositionMsRef.current = 0;
     setIsPlaying(true);
   };
@@ -843,6 +901,13 @@ export default function DesktopApp() {
             panelWidth={sidebarWidth}
             pinnedIds={pinnedIds}
             onTogglePin={togglePin}
+            folders={folders}
+            folderAssignments={folderAssignments}
+            onRemoveFromFolder={removeFromFolder}
+            onAssignToFolder={(playlistId, folderId) => {
+              if (folderId == null) removeFromFolder(playlistId);
+              else setFolderAssignments(prev => ({ ...prev, [playlistId]: folderId }));
+            }}
             onOpenSettings={() => setShowSettings(true)}
             onAddToFolderClick={setFolderPopupItem}
             onNewPlaylist={() => setShowNewPlaylist(true)}
@@ -1096,6 +1161,8 @@ export default function DesktopApp() {
             positionMsRef={livePositionMsRef}
             durationMs={durationMs}
             loopMode={loopMode}
+            abA={abA}
+            abB={abB}
             volume={volume}
             onPlayPause={handlePlayPause}
             onSkipNext={handleSkipNext}
@@ -1177,14 +1244,23 @@ export default function DesktopApp() {
           <AddToFolderPopup
             item={folderPopupItem}
             folders={folders}
+            currentFolderId={folderAssignments[folderPopupItem.id]}
             onClose={() => setFolderPopupItem(null)}
-            onAddToFolder={(_itemId, folderId) => {
+            onAddToFolder={(itemId, folderId) => {
+              setFolderAssignments(prev => ({ ...prev, [itemId]: folderId }));
               setGitToast(`Added to ${folders.find(f => f.id === folderId)?.name ?? 'folder'}`);
               setTimeout(() => setGitToast(null), 2400);
             }}
-            onCreateFolder={(name, _itemId) => {
-              setFolders(f => [...f, { id: Date.now(), name }]);
-              setGitToast(`Folder '${name}' created`);
+            onCreateFolder={(name, itemId) => {
+              const id = Date.now();
+              setFolders(f => [...f, { id, name }]);
+              setFolderAssignments(prev => ({ ...prev, [itemId]: id }));
+              setGitToast(`Folder "${name}" created`);
+              setTimeout(() => setGitToast(null), 2400);
+            }}
+            onRemoveFromFolder={itemId => {
+              removeFromFolder(itemId);
+              setGitToast('Removed from folder');
               setTimeout(() => setGitToast(null), 2400);
             }}
           />

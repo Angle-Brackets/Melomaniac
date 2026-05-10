@@ -2,21 +2,23 @@ import { useRef, useState } from 'react';
 
 interface ScrollTextProps {
   text:       string;
-  style?:     React.CSSProperties; // applied to the outer (layout) container
-  textStyle?: React.CSSProperties; // applied to the inner text span (font, color, weight)
+  style?:     React.CSSProperties;
+  textStyle?: React.CSSProperties;
   className?: string;
 }
 
+const GAP = 60; // px between the two copies
+
 /**
  * Renders text with overflow ellipsis normally.
- * On hover, if the text is actually truncated, scrolls it back-and-forth
- * so the full string is visible — no tooltip needed.
+ * On hover, if the text is actually truncated, runs a seamless marquee:
+ * two copies side-by-side scroll left continuously — no jump-back.
  */
 export default function ScrollText({ text, style, textStyle, className }: ScrollTextProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLSpanElement>(null);
-  const [ov, setOv]     = useState(0);
-  const [anim, setAnim] = useState(false);
+  const [textW, setTextW] = useState(0);
+  const [anim, setAnim]   = useState(false);
 
   return (
     <div
@@ -28,27 +30,37 @@ export default function ScrollText({ text, style, textStyle, className }: Scroll
         const inner = innerRef.current;
         if (!outer || !inner) return;
         const overflow = inner.scrollWidth - outer.clientWidth;
-        if (overflow > 4) { setOv(overflow); setAnim(true); }
+        if (overflow > 4) { setTextW(inner.scrollWidth); setAnim(true); }
       }}
       onMouseLeave={() => setAnim(false)}
     >
-      <span
-        ref={innerRef}
-        style={anim ? {
-          display: 'inline-block',
-          animation: `mm-scroll ${Math.max(2, 1 + ov / 50).toFixed(2)}s linear 0.3s infinite`,
-          ['--mm-ov' as string]: `-${ov}px`,
-          ...textStyle,
-        } : {
-          display: 'block',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          ...textStyle,
-        }}
-      >
-        {text}
-      </span>
+      {anim ? (
+        <span
+          style={{
+            display: 'inline-flex',
+            gap: `${GAP}px`,
+            animation: `mm-marquee ${Math.max(2, (textW + GAP) / 80).toFixed(2)}s linear 0.4s infinite`,
+            ['--mm-dist' as string]: `${-(textW + GAP)}px`,
+            ...textStyle,
+          }}
+        >
+          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
+          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
+        </span>
+      ) : (
+        <span
+          ref={innerRef}
+          style={{
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            ...textStyle,
+          }}
+        >
+          {text}
+        </span>
+      )}
     </div>
   );
 }

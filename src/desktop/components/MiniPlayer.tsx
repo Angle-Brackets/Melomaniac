@@ -10,6 +10,8 @@ interface MiniPlayerProps {
   positionMsRef: React.MutableRefObject<number>;
   durationMs:    number;
   loopMode:      LoopMode;
+  abA:           number;
+  abB:           number;
   volume:        number;
   onPlayPause:   () => void;
   onSkipNext:    () => void;
@@ -25,7 +27,7 @@ interface MiniPlayerProps {
 
 export default function MiniPlayer({
   track, artworkUrl, isPlaying, positionMsRef, durationMs,
-  loopMode, volume, onPlayPause, onSkipNext, onSkipPrev,
+  loopMode, abA, abB, volume, onPlayPause, onSkipNext, onSkipPrev,
   onLoopCycle, onSeek, onVolume, showQueue, onQueueToggle, onCollapse, onStop,
 }: MiniPlayerProps) {
   const seekBarRef  = useRef<HTMLDivElement>(null);
@@ -92,6 +94,24 @@ export default function MiniPlayer({
             borderRadius: '0 2px 2px 0',
           }}
         />
+        {loopMode === 'ab' && (
+          <>
+            <svg width="7" height="7" viewBox="0 0 7 7" style={{
+              position: 'absolute', top: '50%', left: `${abA * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              overflow: 'visible', pointerEvents: 'none',
+            }}>
+              <polygon points="3.5,0 7,3.5 3.5,7 0,3.5" fill="var(--accent-light)" opacity="0.9" />
+            </svg>
+            <svg width="7" height="7" viewBox="0 0 7 7" style={{
+              position: 'absolute', top: '50%', left: `${abB * 100}%`,
+              transform: 'translate(-50%, -50%)',
+              overflow: 'visible', pointerEvents: 'none',
+            }}>
+              <polygon points="3.5,0 7,3.5 3.5,7 0,3.5" fill="var(--accent-light)" opacity="0.9" />
+            </svg>
+          </>
+        )}
       </div>
 
       {/* Controls row */}
