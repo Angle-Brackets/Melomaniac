@@ -1,11 +1,25 @@
 use std::{path::PathBuf, sync::Arc};
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use melomaniac_storage::{
     ArtworkLibraryEntry, BranchRecord, CasStore, CommitRecord, Database, Indexer,
     PlaylistMeta, PlaylistRecord, TrackRecord, TreeBlob,
 };
 use serde::Serialize;
 use tauri::State;
+
+fn bytes_to_data_url(bytes: &[u8]) -> String {
+    let mime = if bytes.starts_with(b"\xFF\xD8") {
+        "image/jpeg"
+    } else if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+    format!("data:{};base64,{}", mime, BASE64.encode(bytes))
+}
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -116,13 +130,13 @@ pub async fn library_remove_track(
     storage.db.remove_track(&hash).await.map_err(|e| e.to_string())
 }
 
-/// Return the raw artwork bytes (JPEG or PNG) for a track.
+/// Return a base64 data URL for the artwork of a track.
 /// Returns an error if the track has no artwork or if it hasn't been ingested yet.
 #[tauri::command]
 pub async fn track_get_artwork(
     hash: String,
     storage: State<'_, StorageState>,
-) -> Result<Vec<u8>, String> {
+) -> Result<String, String> {
     let record = storage
         .db
         .get_track(&hash)
@@ -134,11 +148,12 @@ pub async fn track_get_artwork(
         .artwork_hash
         .ok_or_else(|| "no artwork for this track".to_string())?;
 
-    storage
+    let bytes = storage
         .cas
         .read_blob(&artwork_hash)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(bytes_to_data_url(&bytes))
 }
 
 /// All distinct artworks in the library — for the artwork picker grid.
@@ -149,9 +164,22 @@ pub async fn get_artwork_library(
     storage.db.get_artwork_library().await.map_err(|e| e.to_string())
 }
 
-/// Read a CAS blob by its artwork hash directly — used by the artwork picker thumbnails.
+/// Read a CAS blob by artwork hash — returns a base64 data URL.
+/// The separate bytes-only path for library_set_artwork still works via
+/// get_artwork_blob_bytes (internal, not a command).
 #[tauri::command]
 pub async fn get_artwork_blob(
+    artwork_hash: String,
+    storage: State<'_, StorageState>,
+) -> Result<String, String> {
+    let bytes = storage.cas.read_blob(&artwork_hash).await.map_err(|e| e.to_string())?;
+    Ok(bytes_to_data_url(&bytes))
+}
+
+/// Return raw bytes for an artwork blob — used internally when we need to
+/// re-apply bytes to library_set_artwork / file_set_artwork.
+#[tauri::command]
+pub async fn get_artwork_blob_bytes(
     artwork_hash: String,
     storage: State<'_, StorageState>,
 ) -> Result<Vec<u8>, String> {
@@ -687,20 +715,21 @@ pub async fn playlist_set_artwork(
     Ok(commit_hash)
 }
 
-/// Return the raw artwork bytes for a playlist branch.
+/// Return a base64 data URL for a playlist branch's artwork.
 /// Reads from the branch tree so each branch can have independent artwork.
 #[tauri::command]
 pub async fn playlist_get_artwork(
     playlist_id: String,
     branch_name: String,
     storage:     State<'_, StorageState>,
-) -> Result<Vec<u8>, String> {
+) -> Result<String, String> {
     let tree = load_tree(&storage, &playlist_id, &branch_name).await?;
 
     let hash = tree.meta.artwork_hash
         .ok_or_else(|| "no artwork for this playlist branch".to_string())?;
 
-    storage.cas.read_blob(&hash).await.map_err(|e| e.to_string())
+    let bytes = storage.cas.read_blob(&hash).await.map_err(|e| e.to_string())?;
+    Ok(bytes_to_data_url(&bytes))
 }
 
 /// Wipe all playlists, branches, and commits. Debug builds only.

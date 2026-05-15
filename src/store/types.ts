@@ -49,5 +49,20 @@ export type PlaylistRecord = {
   branches:    BranchRecord[]
 }
 
+// PlaylistTrackRecord is TrackRecord + A/B loop points from the manifest
+// (Rust: #[serde(flatten)] on the inner TrackRecord)
+export type PlaylistTrackRecord = TrackRecord & {
+  ab_start_ms: number | null
+  ab_end_ms:   number | null
+}
+
+export type CommitRecord = {
+  hash:      string
+  tree_hash: string
+  timestamp: number   // Unix seconds (i64 in Rust)
+  device_id: string
+  message:   string | null
+}
+
 // Shared across library and playlist slices — avoids repeating the same union in each slice type
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'

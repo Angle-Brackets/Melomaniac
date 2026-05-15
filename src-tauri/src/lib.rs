@@ -161,6 +161,7 @@ pub fn run() {
             editor::file_set_artwork,
             storage::get_artwork_library,
             storage::get_artwork_blob,
+            storage::get_artwork_blob_bytes,
             storage::library_get_stray_tracks,
             stats::get_system_stats,
             network::fetch_image_url,

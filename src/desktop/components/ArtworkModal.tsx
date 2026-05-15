@@ -193,10 +193,9 @@ export default function ArtworkModal({ trackHash, trackPath, tracks = [], onSave
   useEffect(() => {
     for (const entry of artLibrary) {
       if (thumbUrls[entry.artwork_hash]) continue;
-      invoke<number[]>('get_artwork_blob', { artworkHash: entry.artwork_hash })
-        .then(bytes => {
-          const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
-          setThumbUrls(prev => ({ ...prev, [entry.artwork_hash]: url }));
+      invoke<string>('get_artwork_blob', { artworkHash: entry.artwork_hash })
+        .then(dataUrl => {
+          setThumbUrls(prev => ({ ...prev, [entry.artwork_hash]: dataUrl }));
         })
         .catch(console.error);
     }
@@ -288,7 +287,7 @@ export default function ArtworkModal({ trackHash, trackPath, tracks = [], onSave
     setIsSaving(true);
     setSaveErr(null);
     try {
-      const bytes  = await invoke<number[]>('get_artwork_blob', { artworkHash: entry.artwork_hash });
+      const bytes  = await invoke<number[]>('get_artwork_blob_bytes', { artworkHash: entry.artwork_hash });
       const arr    = new Uint8Array(bytes);
       const newUrl = URL.createObjectURL(new Blob([arr]));
       if (trackHash) {

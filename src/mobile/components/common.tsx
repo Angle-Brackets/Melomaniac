@@ -5,16 +5,21 @@ import type { Album } from '../data';
 export type TabId = 'library' | 'playlists' | 'now' | 'discover' | 'settings';
 
 // ── Album cover
-export function MMArt({ album, size = 64, radius = 10, glow = false, style = {} }: {
-  album: Album; size?: number; radius?: number; glow?: boolean; style?: React.CSSProperties;
+export function MMArt({ album, src, size = 64, radius = 10, glow = false, style = {} }: {
+  album?: Album; src?: string; size?: number; radius?: number; glow?: boolean; style?: React.CSSProperties;
 }) {
+  const accent = album?.accent ?? 'var(--accent)';
+  const bg = src ? 'transparent' : (album?.gradient ?? 'var(--bg-3)');
   return (
     <div style={{
       width: size, height: size, borderRadius: radius,
-      background: album.gradient, position: 'relative', overflow: 'hidden',
+      background: bg,
+      backgroundImage: src ? `url(${src})` : undefined,
+      backgroundSize: 'cover', backgroundPosition: 'center',
+      position: 'relative', overflow: 'hidden',
       flexShrink: 0,
       boxShadow: glow
-        ? `0 6px 22px rgba(0,0,0,0.55), 0 0 32px ${album.accent}44`
+        ? `0 6px 22px rgba(0,0,0,0.55), 0 0 32px ${accent}44`
         : '0 2px 8px rgba(0,0,0,0.45)',
       ...style,
     }}>
@@ -24,12 +29,12 @@ export function MMArt({ album, size = 64, radius = 10, glow = false, style = {} 
         pointerEvents: 'none',
       }}/>
       <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0, height: '55%',
-        background: 'linear-gradient(transparent, rgba(0,0,0,0.55))', pointerEvents: 'none',
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: '28%',
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.45))', pointerEvents: 'none',
       }}/>
       <div style={{
         position: 'absolute', top: 0, left: 0, right: 0, height: '40%',
-        background: `radial-gradient(ellipse at 60% 0%, ${album.accent}55 0%, transparent 75%)`, pointerEvents: 'none',
+        background: `radial-gradient(ellipse at 60% 0%, ${accent}55 0%, transparent 75%)`, pointerEvents: 'none',
       }}/>
     </div>
   );
@@ -95,7 +100,7 @@ export function MMTabBar({ active, onTab }: { active: TabId; onTab: (id: TabId) 
   const tabs: { id: TabId; label: string; Icon: (p: { size?: number }) => React.ReactElement; center?: boolean }[] = [
     { id: 'library',   label: 'Library',   Icon: Icons.library },
     { id: 'playlists', label: 'Playlists', Icon: Icons.stack },
-    { id: 'now',       label: 'Now',       Icon: Icons.playCircle, center: true },
+    { id: 'now',       label: 'Player',    Icon: Icons.playCircle, center: true },
     { id: 'discover',  label: 'Discover',  Icon: Icons.sparkles },
     { id: 'settings',  label: 'Settings',  Icon: Icons.gear },
   ];

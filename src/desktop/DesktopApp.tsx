@@ -519,10 +519,9 @@ export default function DesktopApp() {
       if (!track?.artwork_hash) continue;
       if (fetchedHashesRef.current.has(track.hash)) continue;
       fetchedHashesRef.current.add(track.hash);
-      invoke<number[]>('track_get_artwork', { hash: track.hash })
-        .then(bytes => {
-          const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
-          setArtworkUrls(prev => ({ ...prev, [track.hash]: url }));
+      invoke<string>('track_get_artwork', { hash: track.hash })
+        .then(dataUrl => {
+          setArtworkUrls(prev => ({ ...prev, [track.hash]: dataUrl }));
         })
         .catch(console.error);
     }
@@ -534,13 +533,11 @@ export default function DesktopApp() {
     if (!activePlaylist) return;
     const key = `pl_${activePlaylist.id}::${activeBranch}`;
     if (artworkUrls[key]) return;
-    invoke<number[]>('playlist_get_artwork', { playlistId: activePlaylist.id, branchName: activeBranch })
-      .then(bytes => {
-        const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
-        setArtworkUrls(prev => ({ ...prev, [key]: url }));
+    invoke<string>('playlist_get_artwork', { playlistId: activePlaylist.id, branchName: activeBranch })
+      .then(dataUrl => {
+        setArtworkUrls(prev => ({ ...prev, [key]: dataUrl }));
       })
       .catch(() => {
-        // Branch has no artwork — mark as empty so we don't retry
         setArtworkUrls(prev => ({ ...prev, [key]: '' }));
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps

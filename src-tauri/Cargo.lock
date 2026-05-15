@@ -2326,6 +2326,7 @@ dependencies = [
 name = "melomaniac"
 version = "0.1.0-alpha"
 dependencies = [
+ "base64 0.22.1",
  "discord-rich-presence",
  "melomaniac-audio",
  "melomaniac-storage",

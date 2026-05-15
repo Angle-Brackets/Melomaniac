@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import './style.css';
 import { applyTheme } from '../shared/themes';
+import { useStore } from '../store';
+import { RepeatMode } from '../store/types';
+import { positionMsRef } from './playerContext';
 import { NowPlaying } from './components/NowPlaying';
 import { Library, PlaylistsList } from './components/Library';
 import { PlaylistDetail } from './components/PlaylistDetail';
@@ -12,8 +17,102 @@ export default function MobileApp() {
   const [tab, setTab] = useState<TabId>('now');
   const [playlistDetailOpen, setPlaylistDetailOpen] = useState(false);
 
-  // Apply warm theme on mount (mobile has no settings persistence yet)
-  useEffect(() => { applyTheme('warm'); }, []);
+  const loadLibrary   = useStore(s => s.loadLibrary);
+  const loadPlaylists = useStore(s => s.loadPlaylists);
+
+  useEffect(() => {
+    applyTheme('warm');
+    loadLibrary();
+    // Restore last-selected playlist after playlists load
+    loadPlaylists().then(() => {
+      const saved = localStorage.getItem('mm_last_playlist');
+      if (!saved) return;
+      const { playlists, setCurrentPlaylist } = useStore.getState();
+      if (playlists.find(p => p.id === saved)) setCurrentPlaylist(saved);
+    });
+  }, []);
+
+  // Persist playlist selection so it survives app restarts
+  useEffect(() => {
+    return useStore.subscribe(state => {
+      const id = state.currentPlaylistId;
+      if (id) localStorage.setItem('mm_last_playlist', id);
+    });
+  }, []);
+
+  // Lives outside NowPlaying so it stays active when the user switches tabs
+  useEffect(() => {
+    type AudioPayload =
+      | 'TrackEnded' | 'RemotePlay' | 'RemotePause'
+      | 'RemoteNextTrack' | 'RemotePreviousTrack' | 'RemoteTogglePlayPause'
+      | { PositionChanged: number }
+      | { DurationKnown: number }
+      | { Error: string };
+
+    const playNext = () => {
+      const s = useStore.getState();
+      s.advance();
+      const hash = useStore.getState().currentHash();
+      if (!hash) { s.setPlaying(false); return; }
+      const track = useStore.getState().tracks.find(t => t.hash === hash);
+      if (!track) { s.setPlaying(false); return; }
+      s.setLoaded(track.hash, track.duration_ms);
+      positionMsRef.current = 0;
+      invoke('track_play', { hash: track.hash }).catch(console.error);
+      s.setPlaying(true);
+    };
+
+    const playPrev = () => {
+      const s = useStore.getState();
+      s.retreat();
+      const hash = useStore.getState().currentHash();
+      if (!hash) return;
+      const track = useStore.getState().tracks.find(t => t.hash === hash);
+      if (!track) return;
+      s.setLoaded(track.hash, track.duration_ms);
+      positionMsRef.current = 0;
+      invoke('track_play', { hash: track.hash }).catch(console.error);
+      s.setPlaying(true);
+    };
+
+    let unlisten: (() => void) | undefined;
+    listen<AudioPayload>('audio://event', ({ payload }) => {
+      if (typeof payload === 'object' && 'PositionChanged' in payload) {
+        positionMsRef.current = payload.PositionChanged;
+        return;
+      }
+      if (typeof payload === 'object' && 'DurationKnown' in payload) {
+        if (payload.DurationKnown > 0) {
+          const { loadedTrackHash, setLoaded } = useStore.getState();
+          if (loadedTrackHash) setLoaded(loadedTrackHash, payload.DurationKnown);
+        }
+        return;
+      }
+      if (payload === 'TrackEnded') {
+        positionMsRef.current = 0;
+        const s = useStore.getState();
+        if (s.repeat === RepeatMode.One) {
+          const hash = s.currentHash();
+          if (hash) invoke('track_play', { hash }).catch(console.error);
+          s.setPlaying(true);
+          return;
+        }
+        playNext();
+        return;
+      }
+      if (payload === 'RemotePlay')  { useStore.getState().setPlaying(true); return; }
+      if (payload === 'RemotePause') { useStore.getState().setPlaying(false); return; }
+      if (payload === 'RemoteTogglePlayPause') {
+        const s = useStore.getState();
+        s.setPlaying(!s.isPlaying);
+        return;
+      }
+      if (payload === 'RemoteNextTrack')     { playNext(); return; }
+      if (payload === 'RemotePreviousTrack') { playPrev(); return; }
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleTab = (id: TabId) => {
     setPlaylistDetailOpen(false);
@@ -21,11 +120,21 @@ export default function MobileApp() {
   };
 
   const handlePlaylistDetail = () => setPlaylistDetailOpen(true);
-  const handlePlaylistBack = () => setPlaylistDetailOpen(false);
+  const handlePlaylistBack   = () => setPlaylistDetailOpen(false);
+
+  // Thin drag region at the very top so the undecorated window is moveable on desktop.
+  // Has no visual presence and is a no-op on real mobile.
+  const dragStrip = (
+    <div
+      data-tauri-drag-region
+      style={{ position: 'fixed', top: 0, left: 0, right: 0, height: 16, zIndex: 9999 }}
+    />
+  );
 
   if (playlistDetailOpen) {
     return (
       <div className="mobile-root">
+        {dragStrip}
         <PlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
       </div>
     );
@@ -33,6 +142,7 @@ export default function MobileApp() {
 
   return (
     <div className="mobile-root">
+      {dragStrip}
       {tab === 'library'   && <Library onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
       {tab === 'playlists' && <PlaylistsList onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
       {tab === 'now'       && <NowPlaying onTab={handleTab}/>}
