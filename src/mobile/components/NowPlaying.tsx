@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import { RepeatMode, ShuffleMode } from '../../store/types';
@@ -73,18 +73,20 @@ function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick }: {
   );
 }
 
-function MMCoverflow({ tracks, activeIndex, size = 200 }: {
+function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
   tracks: TrackRecord[];
   activeIndex: number;
+  onBrowse?: (idx: number) => void;
   size?: number;
 }) {
-  const wrapRef   = useRef<HTMLDivElement>(null);
-  const cardRefs  = useRef<(HTMLDivElement | null)[]>([]);
-  const posRef    = useRef(activeIndex);
-  const dragX     = useRef<number | null>(null);
-  const dragP     = useRef(0);
-  const dragging  = useRef(false);
-  const animFr    = useRef<number | null>(null);
+  const wrapRef       = useRef<HTMLDivElement>(null);
+  const cardRefs      = useRef<(HTMLDivElement | null)[]>([]);
+  const posRef        = useRef(activeIndex);
+  const dragX         = useRef<number | null>(null);
+  const dragP         = useRef(0);
+  const dragging      = useRef(false);
+  const animFr        = useRef<number | null>(null);
+  const lastBrowseRef = useRef(activeIndex); // tracks last integer position reported to parent
   // centeredIdx is React state purely for the glow re-render — updated only at drag/anim end
   const [centeredIdx, setCenteredIdx] = useState(activeIndex);
 
@@ -101,14 +103,31 @@ function MMCoverflow({ tracks, activeIndex, size = 200 }: {
     });
   }, [size]);
 
-  // After every React render (tracks added/removed, parent state change) re-sync transforms
-  useEffect(() => { applyTransforms(posRef.current); });
+  // Tracks whether we've seen a non-empty tracks array yet — used to snap on first load
+  const hadTracksRef = useRef(tracks.length > 0);
 
-  // When the playing track changes, animate the coverflow to the new position
+  // Sync transforms before paint. Snaps posRef to activeIndex when tracks
+  // first become available (empty→non-empty) so the correct card is centered
+  // on the very first paint. Inline transforms in JSX also guarantee correct
+  // initial renders independently of this effect.
+  useLayoutEffect(() => {
+    const justLoaded = !hadTracksRef.current && tracks.length > 0;
+    hadTracksRef.current = hadTracksRef.current || tracks.length > 0;
+    if (justLoaded) {
+      posRef.current        = activeIndex;
+      prevActiveRef.current = activeIndex;
+      lastBrowseRef.current = activeIndex;
+      setCenteredIdx(activeIndex);
+    }
+    applyTransforms(posRef.current);
+  });
+
+  // When the playing track changes after initial load, animate to the new position
   const prevActiveRef = useRef(activeIndex);
   useEffect(() => {
     if (prevActiveRef.current === activeIndex) return;
     prevActiveRef.current = activeIndex;
+    lastBrowseRef.current = activeIndex;
     animateTo(activeIndex);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex]);
@@ -142,6 +161,12 @@ function MMCoverflow({ tracks, activeIndex, size = 200 }: {
     const w = wrapRef.current?.offsetWidth || 360;
     posRef.current = Math.max(0, Math.min(tracks.length - 1, dragP.current - dx / (w / 2.5)));
     applyTransforms(posRef.current);
+    // Notify parent only when we've crossed an integer boundary (new card centered)
+    const rounded = Math.round(posRef.current);
+    if (rounded !== lastBrowseRef.current) {
+      lastBrowseRef.current = rounded;
+      onBrowse?.(rounded);
+    }
   };
   const endDrag = () => {
     if (dragX.current === null) return;
@@ -149,6 +174,8 @@ function MMCoverflow({ tracks, activeIndex, size = 200 }: {
     dragX.current = null; dragging.current = false;
     if (!was) return;
     const snapped = Math.max(0, Math.min(tracks.length - 1, Math.round(posRef.current)));
+    lastBrowseRef.current = snapped;
+    onBrowse?.(snapped);
     animateTo(snapped);
   };
 
@@ -176,15 +203,30 @@ function MMCoverflow({ tracks, activeIndex, size = 200 }: {
         touchAction: 'pan-y', userSelect: 'none', cursor: 'grab',
       }}
     >
-      {tracks.map((track, i) => (
-        <div
-          key={track.hash}
-          ref={el => { cardRefs.current[i] = el; }}
-          style={{ position: 'absolute', left: '50%', marginLeft: -size / 2, willChange: 'transform' }}
-        >
-          <CoverflowCard track={track} size={size} glow={i === centeredIdx}/>
-        </div>
-      ))}
+      {tracks.map((track, i) => {
+        // Compute initial transforms inline so the very first paint is correct.
+        // applyTransforms will overwrite these imperatively on every frame/layout,
+        // but JSX-computed values serve as the correct baseline for React reconciliation.
+        const off = i - posRef.current;
+        const abs = Math.abs(off);
+        const hidden = abs > 2.5;
+        return (
+          <div
+            key={track.hash}
+            ref={el => { cardRefs.current[i] = el; }}
+            style={{
+              position: 'absolute', left: '50%', marginLeft: -size / 2,
+              willChange: 'transform',
+              display: hidden ? 'none' : '',
+              transform: hidden ? undefined : `translateX(${off * (size * 0.62)}px) scale(${1 - Math.min(abs, 2) * 0.18}) rotateY(${-off * 26}deg) translateZ(${-Math.min(abs, 2) * 60}px)`,
+              opacity: hidden ? undefined : Math.max(0.18, 1 - abs * 0.32),
+              zIndex: hidden ? undefined : Math.round(10 - abs),
+            }}
+          >
+            <CoverflowCard track={track} size={size} glow={i === centeredIdx}/>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -200,6 +242,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const currentIndex       = useStore(s => s.currentIndex);
   const advance            = useStore(s => s.advance);
   const retreat            = useStore(s => s.retreat);
+  const jumpTo             = useStore(s => s.jumpTo);
   const loadQueue          = useStore(s => s.loadQueue);
   const shuffle            = useStore(s => s.shuffle);
   const repeat             = useStore(s => s.repeat);
@@ -213,7 +256,17 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const currentPlaylist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const [showSwitcher, setShowSwitcher] = useState(false);
 
+  const queueRecords: TrackRecord[] = queueTracks
+    .map(h => tracks.find(t => t.hash === h))
+    .filter((t): t is TrackRecord => t !== undefined);
+
+  // browseIndex tracks which coverflow card is centered; resets when the playing track changes
+  const [browseIndex, setBrowseIndex] = useState(currentIndex);
+  useEffect(() => { setBrowseIndex(currentIndex); }, [currentIndex]);
+
   const currentTrack = tracks.find(t => t.hash === loadedTrackHash) ?? null;
+  const browseTrack  = queueRecords[browseIndex] ?? currentTrack;
+  const isBrowsing   = browseTrack !== null && browseTrack.hash !== (loadedTrackHash ?? '');
   // Prefetch current track artwork into the shared cache; CoverflowCard will pick it up instantly
   useTrackArtwork(loadedTrackHash ?? '', currentTrack?.artwork_hash ?? null);
 
@@ -247,9 +300,6 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const queueRecords: TrackRecord[] = queueTracks
-    .map(h => tracks.find(t => t.hash === h))
-    .filter((t): t is TrackRecord => t !== undefined);
   const nextTrack = queueRecords[currentIndex + 1] ?? null;
 
   const playTrack = (track: TrackRecord) => {
@@ -260,6 +310,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   };
 
   const handlePlayPause = () => {
+    if (isBrowsing && browseTrack) {
+      jumpTo(browseIndex);
+      playTrack(browseTrack);
+      return;
+    }
     if (isPlaying) {
       invoke('audio_pause').catch(console.error);
       setPlaying(false);
@@ -371,18 +426,19 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           <MMCoverflow
             tracks={coverflowItems}
             activeIndex={Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
+            onBrowse={setBrowseIndex}
             size={208}
           />
         </div>
 
-        {/* track info */}
+        {/* track info — shows browsed track while scrolling */}
         <div style={{ padding: '8px 28px 0', textAlign: 'center' }}>
           <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-0)', letterSpacing: -0.3, lineHeight: 1.15 }}>
-            {currentTrack?.title ?? '—'}
+            {browseTrack?.title ?? '—'}
           </div>
-          <div style={{ fontSize: 14, color: 'var(--text-1)', marginTop: 4 }}>
-            {currentTrack
-              ? `${currentTrack.artist}${currentTrack.album ? ` · ${currentTrack.album}` : ''}`
+          <div style={{ fontSize: 14, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', marginTop: 4 }}>
+            {browseTrack
+              ? `${browseTrack.artist ?? 'Unknown Artist'}${browseTrack.album ? ` · ${browseTrack.album}` : ''}`
               : 'No track loaded'}
           </div>
         </div>
@@ -424,7 +480,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             boxShadow: `0 8px 26px ${accent}66, inset 0 1px 0 rgba(255,255,255,0.25)`,
             color: 'var(--bg-0)', cursor: 'pointer',
           }}>
-            {isPlaying ? <Icons.pause size={28}/> : <Icons.play size={28}/>}
+            {isBrowsing ? <Icons.play size={28}/> : isPlaying ? <Icons.pause size={28}/> : <Icons.play size={28}/>}
           </button>
           <button style={btnStyle()} onClick={handleSeekFwd}><Icons.skipFwd size={28} stroke="var(--text-1)"/></button>
           <button style={btnStyle()} onClick={handleNext}><Icons.next size={26} stroke="var(--text-0)"/></button>
@@ -435,9 +491,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           <SecondaryBtn Icon={Icons.shuffle} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle}/>
           <SecondaryBtn
             Icon={Icons.heartFill}
-            active={currentTrack?.favorited ?? false}
+            active={browseTrack?.favorited ?? false}
             color={accent}
-            onClick={() => currentTrack && toggleFavorite(currentTrack.hash)}
+            onClick={() => browseTrack && toggleFavorite(browseTrack.hash)}
           />
           <SecondaryBtn
             Icon={repeat === RepeatMode.One ? Icons.loopOne : Icons.loop}

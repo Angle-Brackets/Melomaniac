@@ -35,16 +35,37 @@ async function fetchWithThrottle<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+// ── Subscriber registry — notifies useSyncExternalStore subscribers
+type Listener = () => void;
+const trackListeners    = new Map<string, Set<Listener>>();
+const playlistListeners = new Map<string, Set<Listener>>();
+
+function notify(map: Map<string, Set<Listener>>, key: string) {
+  map.get(key)?.forEach(fn => fn());
+}
+
+export function subscribeTrackArtwork(trackHash: string, cb: Listener): () => void {
+  if (!trackListeners.has(trackHash)) trackListeners.set(trackHash, new Set());
+  trackListeners.get(trackHash)!.add(cb);
+  return () => trackListeners.get(trackHash)?.delete(cb);
+}
+
+export function subscribePlaylistArtwork(key: string, cb: Listener): () => void {
+  if (!playlistListeners.has(key)) playlistListeners.set(key, new Set());
+  playlistListeners.get(key)!.add(cb);
+  return () => playlistListeners.get(key)?.delete(cb);
+}
+
+// ── Synchronous cache reads (used as useSyncExternalStore snapshots)
 export function getCachedTrackArtwork(trackHash: string): string | null {
-  const v = trackUrlCache.get(trackHash);
-  return v || null;
+  return trackUrlCache.get(trackHash) || null;
 }
 
 export function getCachedPlaylistArtwork(playlistId: string, branchName: string = 'main'): string | null {
-  const v = playlistUrlCache.get(`${playlistId}::${branchName}`);
-  return v || null;
+  return playlistUrlCache.get(`${playlistId}::${branchName}`) || null;
 }
 
+// ── Async fetch (idempotent — safe to call during render or effect)
 export function getTrackArtwork(trackHash: string, _artworkHash: string): Promise<string | null> {
   const cached = trackUrlCache.get(trackHash);
   if (cached !== undefined) return Promise.resolve(cached || null);
@@ -57,9 +78,10 @@ export function getTrackArtwork(trackHash: string, _artworkHash: string): Promis
   ).then(dataUrl => {
     trackUrlCache.set(trackHash, dataUrl);
     inFlight.delete(trackHash);
+    notify(trackListeners, trackHash);
     return dataUrl;
   }).catch(() => {
-    inFlight.delete(trackHash); // remove from in-flight so a later mount can retry
+    inFlight.delete(trackHash);
     return null;
   });
 
@@ -80,6 +102,7 @@ export function getPlaylistArtwork(playlistId: string, branchName: string = 'mai
   ).then(dataUrl => {
     playlistUrlCache.set(key, dataUrl);
     inFlight.delete(key);
+    notify(playlistListeners, key);
     return dataUrl;
   }).catch(() => {
     inFlight.delete(key);

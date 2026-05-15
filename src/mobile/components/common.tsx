@@ -9,13 +9,10 @@ export function MMArt({ album, src, size = 64, radius = 10, glow = false, style 
   album?: Album; src?: string; size?: number; radius?: number; glow?: boolean; style?: React.CSSProperties;
 }) {
   const accent = album?.accent ?? 'var(--accent)';
-  const bg = src ? 'transparent' : (album?.gradient ?? 'var(--bg-3)');
   return (
     <div style={{
       width: size, height: size, borderRadius: radius,
-      background: bg,
-      backgroundImage: src ? `url(${src})` : undefined,
-      backgroundSize: 'cover', backgroundPosition: 'center',
+      background: src ? 'transparent' : (album?.gradient ?? 'var(--bg-3)'),
       position: 'relative', overflow: 'hidden',
       flexShrink: 0,
       boxShadow: glow
@@ -23,6 +20,20 @@ export function MMArt({ album, src, size = 64, radius = 10, glow = false, style 
         : '0 2px 8px rgba(0,0,0,0.45)',
       ...style,
     }}>
+      {/* Use <img> instead of background-image so WebKit compositing layers
+          render at device pixel ratio, not CSS pixel ratio. */}
+      {src && (
+        <img
+          src={src}
+          alt=""
+          style={{
+            position: 'absolute', inset: 0,
+            width: '100%', height: '100%',
+            objectFit: 'cover', objectPosition: 'center',
+            display: 'block',
+          }}
+        />
+      )}
       <div style={{
         position: 'absolute', inset: 0, opacity: 0.55, mixBlendMode: 'overlay',
         backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.75\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'0.08\'/%3E%3C/svg%3E")',

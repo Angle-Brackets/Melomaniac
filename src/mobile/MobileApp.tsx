@@ -6,6 +6,7 @@ import { applyTheme } from '../shared/themes';
 import { useStore } from '../store';
 import { RepeatMode } from '../store/types';
 import { positionMsRef } from './playerContext';
+import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
 import { Library, PlaylistsList } from './components/Library';
 import { PlaylistDetail } from './components/PlaylistDetail';
@@ -22,13 +23,26 @@ export default function MobileApp() {
 
   useEffect(() => {
     applyTheme('warm');
-    loadLibrary();
-    // Restore last-selected playlist after playlists load
+    // Load library then eagerly prefetch all track artwork into the cache.
+    // By the time the user sees Library or NowPlaying the images are ready.
+    loadLibrary().then(() => {
+      const { tracks } = useStore.getState();
+      tracks.forEach(t => { if (t.artwork_hash) getTrackArtwork(t.hash, t.artwork_hash); });
+    });
+    // Restore last-selected playlist after playlists load and pre-populate the queue
     loadPlaylists().then(() => {
       const saved = localStorage.getItem('mm_last_playlist');
       if (!saved) return;
-      const { playlists, setCurrentPlaylist } = useStore.getState();
-      if (playlists.find(p => p.id === saved)) setCurrentPlaylist(saved);
+      const { playlists, setCurrentPlaylist, loadQueue } = useStore.getState();
+      const pl = playlists.find(p => p.id === saved);
+      if (!pl) return;
+      setCurrentPlaylist(saved);
+      const branchName = pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
+      invoke<{ hash: string }[]>('playlist_get_tracks', { playlistId: saved, branchName })
+        .then(ptracks => { loadQueue(ptracks.map(t => t.hash)); })
+        .catch(() => {});
+      // Prefetch playlist artworks
+      playlists.forEach(p => getPlaylistArtwork(p.id));
     });
   }, []);
 
