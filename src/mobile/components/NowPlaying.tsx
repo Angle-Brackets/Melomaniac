@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useStore } from '../../store';
 import { RepeatMode, ShuffleMode } from '../../store/types';
 import type { TrackRecord, PlaylistRecord, PlaylistTrackRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
-import { positionMsRef } from '../playerContext';
+import { positionMsRef, loopStateRef } from '../playerContext';
 import { Icons } from '../icons';
 import { MMArt, MMSheet, MMTabBar } from './common';
 import type { TabId } from './common';
@@ -20,16 +21,106 @@ function CoverflowCard({ track, size, glow }: { track: TrackRecord; size: number
   return <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>;
 }
 
-function UpNextCard({ track }: { track: TrackRecord }) {
+
+function QueueSheetRow({ track }: { track: TrackRecord }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
   return (
-    <>
-      <MMArt src={artUrl ?? undefined} size={28} radius={5}/>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
+      <MMArt src={artUrl ?? undefined} size={36} radius={6}/>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist ?? 'Unknown Artist'}</div>
       </div>
-    </>
+    </div>
+  );
+}
+
+const QUEUE_ROW_H = 52;
+const MARQUEE_GAP = 48;
+
+function MarqueeText({ text, active, style, textStyle }: {
+  text: string; active: boolean;
+  style?: React.CSSProperties; textStyle?: React.CSSProperties;
+}) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLSpanElement>(null);
+  const [marq, setMarq] = useState<{ w: number; on: boolean }>({ w: 0, on: false });
+
+  useEffect(() => {
+    if (!active) { setMarq(m => m.on ? { w: 0, on: false } : m); return; }
+    const o = outerRef.current, i = innerRef.current;
+    if (!o || !i) return;
+    if (i.scrollWidth - o.clientWidth > 4) setMarq({ w: i.scrollWidth, on: true });
+  }, [active, text]);
+
+  return (
+    <div ref={outerRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', minWidth: 0, ...style }}>
+      {marq.on ? (
+        <span style={{
+          display: 'inline-flex', gap: `${MARQUEE_GAP}px`,
+          animation: `mm-marquee ${Math.max(2, (marq.w + MARQUEE_GAP) / 60).toFixed(2)}s linear 0.8s infinite`,
+          ['--mm-dist' as string]: `${-(marq.w + MARQUEE_GAP)}px`,
+          ...textStyle,
+        }}>
+          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
+          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
+        </span>
+      ) : (
+        <span ref={innerRef} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...textStyle }}>
+          {text}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function QueueRow({ track, isActive, isPlaying, onClick }: {
+  track: TrackRecord;
+  isActive: boolean;
+  isPlaying: boolean;
+  onClick: () => void;
+}) {
+  const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        height: QUEUE_ROW_H, display: 'flex', alignItems: 'center', gap: 8,
+        padding: '0 0 0 4px', cursor: 'pointer',
+        background: isActive ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'transparent',
+        borderLeft: `2.5px solid ${isActive ? 'var(--accent)' : 'transparent'}`,
+      }}
+    >
+      <div style={{ width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        {isActive
+          ? <span style={{ color: 'var(--accent)', display: 'flex' }}>{isPlaying ? <Icons.pause size={13}/> : <Icons.play size={13}/>}</span>
+          : <span style={{ color: 'var(--text-3)', display: 'flex' }}><Icons.play size={12}/></span>
+        }
+      </div>
+      <MMArt src={artUrl ?? undefined} size={34} radius={6}/>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <MarqueeText
+          text={track.title}
+          active={isActive}
+          textStyle={{ fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--accent)' : 'var(--text-0)' }}
+        />
+        <div style={{
+          fontSize: 11, color: 'var(--text-2)', marginTop: 1,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{track.artist ?? 'Unknown Artist'}</div>
+      </div>
+      {/* drag handle — touch-action:none so browser won't intercept as scroll */}
+      <div style={{
+        width: 40, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0, touchAction: 'none', cursor: 'grab',
+      }}>
+        <svg width="12" height="10" viewBox="0 0 12 10" fill="currentColor" style={{ color: 'var(--text-3)', opacity: 0.6 }}>
+          <rect x="0" y="0" width="12" height="1.5" rx="0.75"/>
+          <rect x="0" y="4.25" width="12" height="1.5" rx="0.75"/>
+          <rect x="0" y="8.5" width="12" height="1.5" rx="0.75"/>
+        </svg>
+      </div>
+    </div>
   );
 }
 
@@ -54,21 +145,22 @@ function PlaylistSwitcherCard({ playlist, active, onSelect }: {
   );
 }
 
-function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick }: {
+function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 40 }: {
   Icon: (p: { size?: number }) => React.ReactElement;
   active: boolean;
   color?: string;
   onClick?: () => void;
+  size?: number;
 }) {
   return (
     <button onClick={onClick} style={{
-      width: 46, height: 46, borderRadius: 23,
+      width: size, height: size, borderRadius: size / 2,
       background: active ? `${color}1c` : 'transparent',
       border: active ? `1px solid ${color}55` : '1px solid transparent',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'pointer', color: active ? color : 'var(--text-1)',
     }}>
-      <Icon size={20}/>
+      <Icon size={Math.round(size * 0.45)}/>
     </button>
   );
 }
@@ -245,9 +337,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const jumpTo             = useStore(s => s.jumpTo);
   const loadQueue          = useStore(s => s.loadQueue);
   const shuffle            = useStore(s => s.shuffle);
-  const repeat             = useStore(s => s.repeat);
   const setShuffle         = useStore(s => s.setShuffle);
   const setRepeat          = useStore(s => s.setRepeat);
+  const shuffledQueue      = useStore(s => s.shuffledQueue);
+  const shuffleIndex       = useStore(s => s.shuffleIndex);
   const toggleFavorite     = useStore(s => s.toggleFavorite);
   const playlists          = useStore(s => s.playlists);
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
@@ -255,14 +348,61 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   const currentPlaylist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [showQueue, setShowQueue] = useState(false);
+  const [listScrolled, setListScrolled] = useState(false);
+  const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Drag-to-reorder state
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
+  const [ghostTop, setGhostTop] = useState(0);
+  const isDraggingRef      = useRef(false);
+  const draggingIdxRef     = useRef<number | null>(null);
+  const dropTargetIdxRef   = useRef<number | null>(null);
+  const dragGhostRef       = useRef<HTMLDivElement>(null);
+  const queueRecordsRef    = useRef<TrackRecord[]>([]);
+  const queueTracksRef     = useRef<string[]>([]);
+  const currentPlaylistIdRef = useRef<string | null>(null);
+  const loadQueueRef       = useRef(loadQueue);
+
+  const handleListScroll = useCallback(() => {
+    if (!listParentRef.current) return;
+    if (listParentRef.current.scrollTop <= 40) {
+      if (inactivityRef.current) { clearTimeout(inactivityRef.current); inactivityRef.current = null; }
+      setListScrolled(false);
+      return;
+    }
+    setListScrolled(true);
+    if (inactivityRef.current) clearTimeout(inactivityRef.current);
+    inactivityRef.current = setTimeout(() => setListScrolled(false), 2500);
+  }, []);
+
+  type LoopMode = 'off' | 'one' | 'ab';
+  const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  const [abA, setAbA] = useState(0);
+  const [abB, setAbB] = useState(1);
+  const [trackAbPoints, setTrackAbPoints] = useState<Record<string, { a: number; b: number }>>(() => {
+    try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
+  });
+  const abPointsRef      = useRef(trackAbPoints);
+  abPointsRef.current    = trackAbPoints;
+  const abCommitRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abDragging       = useRef<'A' | 'B' | null>(null);
+  const isSeekDragging   = useRef(false);
+  const seekBarRef       = useRef<HTMLDivElement>(null);
+  const browseTrackRef   = useRef<TrackRecord | null>(null);
+  const isBrowsingRef    = useRef(false);
 
   const queueRecords: TrackRecord[] = queueTracks
     .map(h => tracks.find(t => t.hash === h))
     .filter((t): t is TrackRecord => t !== undefined);
 
+  const listParentRef = useRef<HTMLDivElement>(null);
+  const activeListIndex = queueRecords.findIndex(t => t.hash === loadedTrackHash);
+
   // browseIndex tracks which coverflow card is centered; resets when the playing track changes
-  const [browseIndex, setBrowseIndex] = useState(currentIndex);
-  useEffect(() => { setBrowseIndex(currentIndex); }, [currentIndex]);
+  const [browseIndex, setBrowseIndex] = useState(Math.max(0, activeListIndex));
+  useEffect(() => { if (activeListIndex >= 0) setBrowseIndex(activeListIndex); }, [activeListIndex]);
 
   const currentTrack = tracks.find(t => t.hash === loadedTrackHash) ?? null;
   const browseTrack  = queueRecords[browseIndex] ?? currentTrack;
@@ -276,14 +416,29 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const durTextRef  = useRef<HTMLSpanElement>(null);
   const thumbRef    = useRef<HTMLDivElement>(null);
   const durRef      = useRef(duration_ms);
-  useEffect(() => { durRef.current = duration_ms; }, [duration_ms]);
+  useEffect(() => { durRef.current = duration_ms; loopStateRef.durMs = duration_ms; }, [duration_ms]);
+
+  useEffect(() => {
+    if (!loadedTrackHash) return;
+    const pts = abPointsRef.current[loadedTrackHash];
+    const a = pts?.a ?? 0, b = pts?.b ?? 1;
+    setAbA(a); setAbB(b);
+    loopStateRef.abA = a; loopStateRef.abB = b;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedTrackHash]);
 
   useEffect(() => {
     let rafId: number;
     const tick = () => {
       const pos = positionMsRef.current;
       const dur = durRef.current;
-      if (dur > 0) {
+      if (isBrowsingRef.current && browseTrackRef.current) {
+        const bd = browseTrackRef.current.duration_ms;
+        if (seekFillRef.current) seekFillRef.current.style.width = '0%';
+        if (thumbRef.current)    thumbRef.current.style.left    = '0%';
+        if (posTextRef.current)  posTextRef.current.textContent = '0:00';
+        if (durTextRef.current)  durTextRef.current.textContent = bd > 0 ? fmtMs(bd) : '0:00';
+      } else if (dur > 0) {
         const pct = Math.min(pos / dur, 1) * 100;
         if (seekFillRef.current) seekFillRef.current.style.width = `${pct}%`;
         if (thumbRef.current)    thumbRef.current.style.left    = `${pct}%`;
@@ -299,8 +454,6 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     return () => cancelAnimationFrame(rafId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const nextTrack = queueRecords[currentIndex + 1] ?? null;
 
   const playTrack = (track: TrackRecord) => {
     setLoaded(track.hash, track.duration_ms);
@@ -345,50 +498,213 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     }
   };
 
-  const handleSeekBack = () => {
-    const newPos = Math.max(0, positionMsRef.current - 10000);
-    positionMsRef.current = newPos;
-    invoke('audio_seek', { positionMs: newPos }).catch(console.error);
+  // Coverflow browsing is purely visual — never touches the queue cursor.
+  // currentIndex only changes via advance/retreat/explicit play so auto-advance stays correct.
+
+  const handleShuffle = () => {
+    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random] as const;
+    setShuffle(cycle[(cycle.indexOf(shuffle) + 1) % cycle.length]);
   };
 
-  const handleSeekFwd = () => {
-    const dur = durRef.current;
-    if (dur <= 0) return;
-    const newPos = Math.min(dur - 1000, positionMsRef.current + 10000);
-    positionMsRef.current = newPos;
-    invoke('audio_seek', { positionMs: newPos }).catch(console.error);
+  const scheduleAbCommit = (a: number, b: number) => {
+    if (!loadedTrackHash) return;
+    const hash = loadedTrackHash;
+    const updated = { ...abPointsRef.current, [hash]: { a, b } };
+    setTrackAbPoints(updated);
+    abPointsRef.current = updated;
+    localStorage.setItem('melomaniac.ab_points', JSON.stringify(updated));
+    if (!currentPlaylistId) return;
+    if (abCommitRef.current) clearTimeout(abCommitRef.current);
+    abCommitRef.current = setTimeout(() => {
+      const dur = loopStateRef.durMs;
+      if (dur <= 0) return;
+      const isFullRange = a < 0.001 && b > 0.999;
+      invoke('playlist_set_ab_loop', {
+        playlistId: currentPlaylistId,
+        branchName: 'main',
+        trackHash: hash,
+        abStartMs: isFullRange ? null : Math.round(a * dur),
+        abEndMs:   isFullRange ? null : Math.round(b * dur),
+      }).catch(console.error);
+    }, 1500);
   };
 
-  const handleSeekClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const handleLoopCycle = () => {
+    setLoopMode(prev => {
+      const next: LoopMode = prev === 'off' ? 'one' : prev === 'one' ? 'ab' : 'off';
+      loopStateRef.loopMode = next;
+      setRepeat(next === 'one' ? RepeatMode.One : RepeatMode.None);
+      return next;
+    });
+  };
+
+  const getSeekPct = (clientX: number) => {
+    if (!seekBarRef.current) return 0;
+    const r = seekBarRef.current.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  };
+
+  const handleSeekPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const pct = getSeekPct(e.clientX);
+    if (loopMode === 'ab') {
+      if (Math.abs(pct - abA) < 0.05) { abDragging.current = 'A'; return; }
+      if (Math.abs(pct - abB) < 0.05) { abDragging.current = 'B'; return; }
+    }
+    isSeekDragging.current = true;
     const newPos = Math.round(pct * durRef.current);
     positionMsRef.current = newPos;
     invoke('audio_seek', { positionMs: newPos }).catch(console.error);
   };
 
-  // Coverflow browsing is purely visual — never touches the queue cursor.
-  // currentIndex only changes via advance/retreat/explicit play so auto-advance stays correct.
-
-  const handleShuffle = () => {
-    setShuffle(shuffle === ShuffleMode.Off ? ShuffleMode.Smart : ShuffleMode.Off);
+  const handleSeekPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (abDragging.current) {
+      const pct = getSeekPct(e.clientX);
+      if (abDragging.current === 'A') {
+        const val = Math.min(pct, abB - 0.02);
+        setAbA(val); loopStateRef.abA = val;
+        scheduleAbCommit(val, abB);
+      } else {
+        const val = Math.max(pct, abA + 0.02);
+        setAbB(val); loopStateRef.abB = val;
+        scheduleAbCommit(abA, val);
+      }
+      return;
+    }
+    if (!isSeekDragging.current) return;
+    const pct = getSeekPct(e.clientX);
+    const newPos = Math.round(pct * durRef.current);
+    positionMsRef.current = newPos;
+    invoke('audio_seek', { positionMs: newPos }).catch(console.error);
   };
 
-  const handleRepeat = () => {
-    const cycle = [RepeatMode.None, RepeatMode.All, RepeatMode.One] as const;
-    setRepeat(cycle[(cycle.indexOf(repeat) + 1) % cycle.length]);
-  };
+  const handleSeekPointerUp = () => { abDragging.current = null; isSeekDragging.current = false; };
+
+  loopStateRef.loopMode = loopMode;
+  loopStateRef.abA = abA;
+  loopStateRef.abB = abB;
+  browseTrackRef.current     = browseTrack;
+  isBrowsingRef.current      = isBrowsing;
+  queueRecordsRef.current    = queueRecords;
+  queueTracksRef.current     = queueTracks;
+  currentPlaylistIdRef.current = currentPlaylistId ?? null;
+  loadQueueRef.current       = loadQueue;
+  draggingIdxRef.current     = draggingIdx;
+  dropTargetIdxRef.current   = dropTargetIdx;
+
 
   const accent = 'var(--accent)';
-  const btnStyle = (): React.CSSProperties => ({
-    width: 44, height: 44, background: 'transparent', border: 'none',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    cursor: 'pointer', borderRadius: 22,
-  });
 
   const coverflowItems = queueRecords.length > 0
     ? queueRecords
     : currentTrack ? [currentTrack] : [];
+
+  const queueVirtualizer = useVirtualizer({
+    count: queueRecords.length,
+    getScrollElement: () => listParentRef.current,
+    estimateSize: () => QUEUE_ROW_H,
+    overscan: 5,
+  });
+
+  useEffect(() => {
+    if (activeListIndex >= 0) {
+      queueVirtualizer.scrollToIndex(activeListIndex, { align: 'center', behavior: 'smooth' });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeListIndex]);
+
+  // Imperative drag-to-reorder — non-passive listeners so we can preventDefault()
+  // before the browser commits to scroll. Works for both touch (mobile) and mouse (desktop).
+  useEffect(() => {
+    const el = listParentRef.current;
+    if (!el) return;
+    const HANDLE_PX = 40;
+
+    const activate = (clientX: number, clientY: number): boolean => {
+      const rect = el.getBoundingClientRect();
+      if (clientX < rect.right - HANDLE_PX) return false;
+      const idx = Math.floor((clientY - rect.top + el.scrollTop) / QUEUE_ROW_H);
+      if (idx < 0 || idx >= queueRecordsRef.current.length) return false;
+      isDraggingRef.current = true;
+      draggingIdxRef.current = idx;
+      dropTargetIdxRef.current = idx;
+      setDraggingIdx(idx);
+      setDropTargetIdx(idx);
+      setGhostTop(clientY - QUEUE_ROW_H / 2);
+      if (navigator.vibrate) navigator.vibrate(30);
+      return true;
+    };
+
+    const move = (clientY: number) => {
+      if (!isDraggingRef.current) return;
+      if (dragGhostRef.current) dragGhostRef.current.style.top = `${clientY - QUEUE_ROW_H / 2}px`;
+      const rect = el.getBoundingClientRect();
+      const idx = Math.min(Math.max(0, Math.floor((clientY - rect.top + el.scrollTop) / QUEUE_ROW_H)), queueRecordsRef.current.length - 1);
+      if (idx !== dropTargetIdxRef.current) {
+        dropTargetIdxRef.current = idx;
+        setDropTargetIdx(idx);
+      }
+    };
+
+    const finish = () => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      const from = draggingIdxRef.current, to = dropTargetIdxRef.current;
+      draggingIdxRef.current = null;
+      dropTargetIdxRef.current = null;
+      setDraggingIdx(null);
+      setDropTargetIdx(null);
+      if (from !== null && to !== null && from !== to) {
+        const newHashes = [...queueTracksRef.current];
+        const [moved] = newHashes.splice(from, 1);
+        newHashes.splice(to, 0, moved);
+        loadQueueRef.current(newHashes);
+        const plId = currentPlaylistIdRef.current;
+        if (plId) invoke('playlist_reorder_tracks', { playlistId: plId, branchName: 'main', orderedHashes: newHashes }).catch(console.error);
+      }
+    };
+
+    // Touch
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      if (activate(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isDraggingRef.current || e.touches.length !== 1) return;
+      e.preventDefault();
+      move(e.touches[0].clientY);
+    };
+
+    // Mouse
+    const onMouseDown = (e: MouseEvent) => {
+      if (!activate(e.clientX, e.clientY)) return;
+      e.preventDefault();
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup',   onMouseUp);
+    };
+    const onMouseMove = (e: MouseEvent) => move(e.clientY);
+    const onMouseUp   = () => {
+      finish();
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup',   onMouseUp);
+    };
+
+    el.addEventListener('touchstart',  onTouchStart, { passive: false });
+    el.addEventListener('touchmove',   onTouchMove,  { passive: false });
+    el.addEventListener('touchend',    finish);
+    el.addEventListener('touchcancel', finish);
+    el.addEventListener('mousedown',   onMouseDown);
+    return () => {
+      el.removeEventListener('touchstart',  onTouchStart);
+      el.removeEventListener('touchmove',   onTouchMove);
+      el.removeEventListener('touchend',    finish);
+      el.removeEventListener('touchcancel', finish);
+      el.removeEventListener('mousedown',   onMouseDown);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup',   onMouseUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueRecords.length > 0]);
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
@@ -402,7 +718,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
 
         {/* header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 22px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 22px 8px' }}>
           <button
             onClick={() => setShowSwitcher(true)}
             style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
@@ -417,23 +733,23 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-2)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>
             <Icons.sync size={13} stroke="var(--green)"/>
-            <span>{queueTracks.length > 0 ? `${currentIndex + 1} / ${queueTracks.length}` : '—'}</span>
+            <span>{queueTracks.length > 0 ? `${Math.max(0, activeListIndex) + 1} / ${queueTracks.length}` : '—'}</span>
           </div>
         </div>
 
         {/* coverflow */}
-        <div style={{ flexShrink: 0, marginTop: 12, marginBottom: 18 }}>
+        <div style={{ flexShrink: 0, marginTop: 6, marginBottom: 8 }}>
           <MMCoverflow
             tracks={coverflowItems}
-            activeIndex={Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
+            activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
             onBrowse={setBrowseIndex}
-            size={208}
+            size={180}
           />
         </div>
 
         {/* track info — shows browsed track while scrolling */}
-        <div style={{ padding: '8px 28px 0', textAlign: 'center' }}>
-          <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--text-0)', letterSpacing: -0.3, lineHeight: 1.15 }}>
+        <div style={{ padding: '4px 28px 0', textAlign: 'center' }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-0)', letterSpacing: -0.3, lineHeight: 1.15 }}>
             {browseTrack?.title ?? '—'}
           </div>
           <div style={{ fontSize: 14, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', marginTop: 4 }}>
@@ -441,26 +757,63 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               ? `${browseTrack.artist ?? 'Unknown Artist'}${browseTrack.album ? ` · ${browseTrack.album}` : ''}`
               : 'No track loaded'}
           </div>
+          {loopMode === 'ab' && duration_ms > 0 && (
+            <div style={{ fontSize: 10.5, color: 'var(--accent)', marginTop: 3, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.05 }}>
+              A·B {fmtMs(abA * duration_ms)} → {fmtMs(abB * duration_ms)}
+            </div>
+          )}
         </div>
 
         {/* seek bar */}
-        <div style={{ padding: '22px 28px 12px' }}>
+        <div style={{ padding: '12px 28px 8px' }}>
           <div
-            onClick={handleSeekClick}
-            style={{ position: 'relative', height: 28, display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+            ref={seekBarRef}
+            onPointerDown={handleSeekPointerDown}
+            onPointerMove={handleSeekPointerMove}
+            onPointerUp={handleSeekPointerUp}
+            style={{ position: 'relative', height: 36, display: 'flex', alignItems: 'center', cursor: loopMode === 'ab' ? 'default' : 'pointer', touchAction: 'none' }}
           >
             <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'var(--bg-3)', position: 'relative', overflow: 'visible' }}>
+              {loopMode === 'ab' && (
+                <div style={{
+                  position: 'absolute', left: `${abA * 100}%`, width: `${(abB - abA) * 100}%`,
+                  top: 0, bottom: 0, borderRadius: 2,
+                  background: 'var(--accent)', opacity: 0.25, pointerEvents: 'none',
+                }}/>
+              )}
               <div ref={seekFillRef} style={{
                 position: 'absolute', left: 0, top: 0, bottom: 0, width: '0%',
                 background: `linear-gradient(90deg, ${accent}, var(--accent-light))`, borderRadius: 2,
                 boxShadow: `0 0 12px ${accent}88`,
               }}/>
-              <div ref={thumbRef} style={{
-                position: 'absolute', left: '0%', top: '50%',
-                width: 14, height: 14, transform: 'translate(-50%,-50%)',
-                background: 'var(--text-0)', borderRadius: '50%',
-                boxShadow: `0 0 8px ${accent}, 0 2px 6px rgba(0,0,0,0.5)`,
-              }}/>
+              {loopMode !== 'ab' && (
+                <div ref={thumbRef} style={{
+                  position: 'absolute', left: '0%', top: '50%',
+                  width: 14, height: 14, transform: 'translate(-50%,-50%)',
+                  background: 'var(--text-0)', borderRadius: '50%',
+                  boxShadow: `0 0 8px ${accent}, 0 2px 6px rgba(0,0,0,0.5)`,
+                }}/>
+              )}
+              {loopMode === 'ab' && (
+                <>
+                  <div style={{
+                    position: 'absolute', left: `${abA * 100}%`, top: '50%',
+                    transform: 'translate(-50%,-50%)',
+                    width: 16, height: 24, borderRadius: 4,
+                    background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 8, fontWeight: 700, color: 'var(--bg-0)', fontFamily: 'JetBrains Mono, monospace',
+                    cursor: 'ew-resize',
+                  }}>A</div>
+                  <div style={{
+                    position: 'absolute', left: `${abB * 100}%`, top: '50%',
+                    transform: 'translate(-50%,-50%)',
+                    width: 16, height: 24, borderRadius: 4,
+                    background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 8, fontWeight: 700, color: 'var(--bg-0)', fontFamily: 'JetBrains Mono, monospace',
+                    cursor: 'ew-resize',
+                  }}>B</div>
+                </>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
@@ -469,68 +822,157 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           </div>
         </div>
 
-        {/* transport */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 36px 4px' }}>
-          <button style={btnStyle()} onClick={handlePrev}><Icons.prev size={26} stroke="var(--text-0)"/></button>
-          <button style={btnStyle()} onClick={handleSeekBack}><Icons.skipBack size={28} stroke="var(--text-1)"/></button>
-          <button onClick={handlePlayPause} style={{
-            width: 70, height: 70, borderRadius: 35, border: 'none',
-            background: `linear-gradient(135deg, var(--accent-light), ${accent})`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: `0 8px 26px ${accent}66, inset 0 1px 0 rgba(255,255,255,0.25)`,
-            color: 'var(--bg-0)', cursor: 'pointer',
-          }}>
-            {isBrowsing ? <Icons.play size={28}/> : isPlaying ? <Icons.pause size={28}/> : <Icons.play size={28}/>}
-          </button>
-          <button style={btnStyle()} onClick={handleSeekFwd}><Icons.skipFwd size={28} stroke="var(--text-1)"/></button>
-          <button style={btnStyle()} onClick={handleNext}><Icons.next size={26} stroke="var(--text-0)"/></button>
-        </div>
+        {/* controls — shuffle / heart / prev / play / next / loop / queue */}
+        {(() => {
+          const ShuffleIco = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
+          const LoopIco = loopMode === 'ab' ? Icons.ab : loopMode === 'one' ? Icons.loopOne : Icons.loop;
+          const tBtn = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
+            <button onClick={onClick} style={{
+              width: 44, height: 44, background: 'transparent', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', borderRadius: 22, flexShrink: 0,
+            }}>{children}</button>
+          );
+          return (
+            <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 8px' }}>
+              <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={36}/>
+              <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
+              {tBtn(handlePrev, <Icons.prev size={24} stroke="var(--text-0)"/>)}
+              <button onClick={handlePlayPause} style={{
+                width: 68, height: 68, borderRadius: 34, border: 'none', flexShrink: 0,
+                background: `linear-gradient(135deg, var(--accent-light), ${accent})`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: `0 6px 22px ${accent}66, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                color: 'var(--bg-0)', cursor: 'pointer',
+              }}>
+                {isBrowsing ? <Icons.play size={28}/> : isPlaying ? <Icons.pause size={28}/> : <Icons.play size={28}/>}
+              </button>
+              {tBtn(handleNext, <Icons.next size={24} stroke="var(--text-0)"/>)}
+              <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={36}/>
+              <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
+            </div>
+          );
+        })()}
 
-        {/* secondary controls */}
-        <div style={{ display: 'flex', justifyContent: 'space-around', padding: '20px 32px 8px' }}>
-          <SecondaryBtn Icon={Icons.shuffle} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle}/>
-          <SecondaryBtn
-            Icon={Icons.heartFill}
-            active={browseTrack?.favorited ?? false}
-            color={accent}
-            onClick={() => browseTrack && toggleFavorite(browseTrack.hash)}
-          />
-          <SecondaryBtn
-            Icon={repeat === RepeatMode.One ? Icons.loopOne : Icons.loop}
-            active={repeat !== RepeatMode.None}
-            onClick={handleRepeat}
-          />
-          <SecondaryBtn Icon={Icons.queue} active={false}/>
-        </div>
-
-        {/* spacer so secondary controls don't sit against the Up Next card */}
-        <div style={{ flex: 1, minHeight: 8 }}/>
+        {/* Playlist / library song list */}
+        {queueRecords.length > 0 ? (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', borderTop: '0.5px solid var(--border-0)', marginTop: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 20px 4px', flexShrink: 0 }}>
+              <span style={{ fontSize: 10.5, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: 0.1, fontFamily: 'JetBrains Mono, monospace' }}>
+                {currentPlaylist?.name ?? 'Library'}
+              </span>
+              <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+                {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
+              </span>
+            </div>
+            <div
+              ref={listParentRef}
+              onScroll={handleListScroll}
+              style={{ flex: 1, overflowY: 'auto' }}
+              className="mm-scroll"
+            >
+              <div style={{ height: queueVirtualizer.getTotalSize(), position: 'relative' }}>
+                {queueVirtualizer.getVirtualItems().map(vItem => {
+                  const track = queueRecords[vItem.index];
+                  if (!track) return null;
+                  const isDropTarget = dropTargetIdx === vItem.index && draggingIdx !== null && draggingIdx !== vItem.index;
+                  return (
+                    <div
+                      key={track.hash}
+                      style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, height: QUEUE_ROW_H,
+                        transform: `translateY(${vItem.start}px)`,
+                        borderTop: isDropTarget ? '2px solid var(--accent)' : '2px solid transparent',
+                        opacity: draggingIdx === vItem.index ? 0.3 : 1,
+                      }}
+                    >
+                      <QueueRow
+                        track={track}
+                        isActive={track.hash === loadedTrackHash}
+                        isPlaying={isPlaying}
+                        onClick={() => { if (draggingIdx === null) { jumpTo(vItem.index); playTrack(track); } }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {/* tab bar clearance */}
+              <div style={{ height: 86 }}/>
+            </div>
+          </div>
+        ) : (
+          <div style={{ flex: 1, minHeight: 8 }}/>
+        )}
       </div>
 
-      {/* Up Next — pinned above tab bar, never overlaps layout flow */}
-      {nextTrack && (
-        <div style={{
-          position: 'absolute', left: 16, right: 16, bottom: 94, zIndex: 20,
-          padding: '10px 14px',
-          background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
-          borderRadius: 16, display: 'flex', alignItems: 'center', gap: 12,
-          backdropFilter: 'blur(8px)',
+      <MMTabBar active="now" onTab={onTab} style={{
+        transform: listScrolled ? 'translateY(86px)' : 'translateY(0)',
+        transition: 'transform 0.35s ease',
+      }}/>
+
+      {/* Drag ghost */}
+      {draggingIdx !== null && (
+        <div ref={dragGhostRef} style={{
+          position: 'fixed', left: 12, right: 12, height: QUEUE_ROW_H,
+          top: ghostTop, zIndex: 200, pointerEvents: 'none',
+          background: 'var(--bg-3)', borderRadius: 10, opacity: 0.92,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px 0 10px',
         }}>
-          <div style={{ fontSize: 10, letterSpacing: 0.15, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>Up next</div>
-          <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center', minWidth: 0 }}>
-            <UpNextCard track={nextTrack}/>
+          <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor" style={{ color: 'var(--text-3)', flexShrink: 0 }}>
+            <rect x="0" y="0" width="14" height="1.5" rx="0.75"/>
+            <rect x="0" y="4.25" width="14" height="1.5" rx="0.75"/>
+            <rect x="0" y="8.5" width="14" height="1.5" rx="0.75"/>
+          </svg>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {queueRecords[draggingIdx]?.title ?? ''}
           </div>
-          <div style={{ flexShrink: 0 }}><Icons.chevRight size={16} stroke="var(--text-2)"/></div>
         </div>
       )}
 
-      <MMTabBar active="now" onTab={onTab}/>
+      {/* Queue sheet */}
+      {showQueue && (() => {
+        const nowPlaying = currentTrack;
+        const comingUp = shuffle !== ShuffleMode.Off
+          ? shuffledQueue.slice(shuffleIndex + 1, shuffleIndex + 11)
+              .map(h => tracks.find(t => t.hash === h))
+              .filter((t): t is TrackRecord => t !== undefined)
+          : queueRecords.slice(currentIndex + 1, currentIndex + 11);
+        return (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+            <div onClick={() => setShowQueue(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
+            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowQueue(false)}>
+              {nowPlaying && (
+                <>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginBottom: 2 }}>Now Playing</div>
+                  <div style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: '0ms' }}>
+                    <QueueSheetRow track={nowPlaying}/>
+                  </div>
+                </>
+              )}
+              {comingUp.length > 0 && (
+                <>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Coming Up</div>
+                  {comingUp.map((t, i) => (
+                    <div key={t.hash} style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: `${i * 40}ms` }}>
+                      <QueueSheetRow track={t}/>
+                    </div>
+                  ))}
+                </>
+              )}
+              {!nowPlaying && comingUp.length === 0 && (
+                <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Nothing in the queue yet</div>
+              )}
+            </MMSheet>
+          </div>
+        );
+      })()}
 
       {/* Playlist quick switcher */}
       {showSwitcher && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
           <div onClick={() => setShowSwitcher(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-          <MMSheet title="Switch Source" subtitle={`${playlists.length} playlists`} height="70%">
+          <MMSheet title="Switch Source" subtitle={`${playlists.length} playlists`} height="70%" animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowSwitcher(false)}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* Library option */}
               <div onClick={() => {

@@ -4,8 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import './style.css';
 import { applyTheme } from '../shared/themes';
 import { useStore } from '../store';
-import { RepeatMode } from '../store/types';
-import { positionMsRef } from './playerContext';
+import { positionMsRef, loopStateRef } from './playerContext';
 import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
 import { Library, PlaylistsList } from './components/Library';
@@ -92,11 +91,20 @@ export default function MobileApp() {
     let unlisten: (() => void) | undefined;
     listen<AudioPayload>('audio://event', ({ payload }) => {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
-        positionMsRef.current = payload.PositionChanged;
+        const posMs = payload.PositionChanged;
+        const { loopMode: lm, abA: a, abB: b, durMs: dur } = loopStateRef;
+        if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+          const aMs = Math.round(a * dur);
+          positionMsRef.current = aMs;
+          invoke('audio_seek', { positionMs: aMs }).catch(console.error);
+          return;
+        }
+        positionMsRef.current = posMs;
         return;
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
         if (payload.DurationKnown > 0) {
+          loopStateRef.durMs = payload.DurationKnown;
           const { loadedTrackHash, setLoaded } = useStore.getState();
           if (loadedTrackHash) setLoaded(loadedTrackHash, payload.DurationKnown);
         }
@@ -104,11 +112,20 @@ export default function MobileApp() {
       }
       if (payload === 'TrackEnded') {
         positionMsRef.current = 0;
-        const s = useStore.getState();
-        if (s.repeat === RepeatMode.One) {
+        const { loopMode: lm, abA: a, durMs: dur } = loopStateRef;
+        if (lm === 'one') {
+          const s = useStore.getState();
           const hash = s.currentHash();
           if (hash) invoke('track_play', { hash }).catch(console.error);
           s.setPlaying(true);
+          return;
+        }
+        if (lm === 'ab') {
+          const aMs = Math.round(a * dur);
+          positionMsRef.current = aMs;
+          invoke('audio_seek', { positionMs: aMs }).catch(console.error);
+          invoke('audio_play').catch(console.error);
+          useStore.getState().setPlaying(true);
           return;
         }
         playNext();

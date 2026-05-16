@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { Icons } from '../icons';
 import type { Album } from '../data';
 
@@ -107,7 +107,7 @@ export function MMIsland({ branch, syncing = false }: { branch: string; syncing?
 }
 
 // ── Bottom tab bar
-export function MMTabBar({ active, onTab }: { active: TabId; onTab: (id: TabId) => void }) {
+export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: TabId) => void; style?: React.CSSProperties }) {
   const tabs: { id: TabId; label: string; Icon: (p: { size?: number }) => React.ReactElement; center?: boolean }[] = [
     { id: 'library',   label: 'Library',   Icon: Icons.library },
     { id: 'playlists', label: 'Playlists', Icon: Icons.stack },
@@ -120,8 +120,9 @@ export function MMTabBar({ active, onTab }: { active: TabId; onTab: (id: TabId) 
       position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30,
       height: 86, paddingBottom: 26,
       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-around',
-      background: 'linear-gradient(to top, var(--bg-0) 55%, transparent)',
+      background: 'var(--bg-0)',
       borderTop: '0.5px solid var(--border-0)',
+      ...style,
     }}>
       {tabs.map(t => {
         const on = active === t.id;
@@ -153,10 +154,20 @@ export function MMTabBar({ active, onTab }: { active: TabId; onTab: (id: TabId) 
 }
 
 // ── Bottom sheet
-export function MMSheet({ title, subtitle, children, height = '72%', accessory }: {
+export function MMSheet({ title, subtitle, children, height = '72%', accessory, animStyle, onClose }: {
   title: string; subtitle?: string; children: React.ReactNode;
-  height?: string; accessory?: React.ReactNode;
+  height?: string; accessory?: React.ReactNode; animStyle?: React.CSSProperties;
+  onClose?: () => void;
 }) {
+  const startYRef  = useRef<number | null>(null);
+  const [dismissing, setDismissing] = useState(false);
+
+  const dismiss = () => {
+    if (!onClose || dismissing) return;
+    setDismissing(true);
+    setTimeout(onClose, 270);
+  };
+
   return (
     <div style={{
       position: 'absolute', left: 0, right: 0, bottom: 0, height,
@@ -165,8 +176,20 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory }
       border: '0.5px solid var(--border-1)', borderBottom: 'none',
       boxShadow: '0 -20px 50px rgba(0,0,0,0.55)',
       display: 'flex', flexDirection: 'column', overflow: 'hidden', zIndex: 50,
+      ...animStyle,
+      animation: dismissing ? 'mmSheetDown 0.27s ease-in both' : animStyle?.animation,
     }}>
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 6px' }}>
+      {/* drag handle — touch here to swipe-dismiss */}
+      <div
+        onTouchStart={e => { startYRef.current = e.touches[0].clientY; }}
+        onTouchEnd={e => {
+          if (startYRef.current === null) return;
+          const dy = e.changedTouches[0].clientY - startYRef.current;
+          startYRef.current = null;
+          if (dy > 52) dismiss();
+        }}
+        style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 6px', touchAction: 'none' }}
+      >
         <div style={{ width: 38, height: 4, borderRadius: 2, background: 'var(--border-2)' }}/>
       </div>
       <div style={{ padding: '6px 20px 14px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
