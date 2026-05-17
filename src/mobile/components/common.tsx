@@ -160,16 +160,21 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
       ...style,
     }}>
       {tabs.map(t => {
+        const disabled = t.id === 'discover';
         const on = active === t.id;
         const color = on ? 'var(--accent)' : 'var(--text-2)';
         const popped = justSelected.current === t.id && on;
         if (popped) justSelected.current = null; // consume after first render
         return (
-          <button key={t.id} onClick={() => handleTab(t.id)} style={{
+          <button key={t.id} onClick={() => !disabled && handleTab(t.id)} style={{
             flex: 1, height: 60, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 2,
-            background: 'transparent', border: 'none', cursor: 'pointer', color,
+            background: 'transparent', border: 'none',
+            cursor: disabled ? 'default' : 'pointer',
+            color,
             paddingTop: t.center ? 0 : 8,
+            opacity: disabled ? 0.35 : 1,
+            pointerEvents: disabled ? 'none' : 'auto',
           }}>
             <div style={{
               width: t.center ? 44 : 26, height: t.center ? 44 : 26,
@@ -184,6 +189,7 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
               <t.Icon size={t.center ? 26 : 22}/>
             </div>
             <span style={{ fontSize: 10, fontWeight: on ? 600 : 500, letterSpacing: 0.02, transition: 'font-weight 0.15s' }}>{t.label}</span>
+            {disabled && <span style={{ fontSize: 8, color: 'var(--text-2)', letterSpacing: 0.05, marginTop: -1 }}>soon</span>}
           </button>
         );
       })}
