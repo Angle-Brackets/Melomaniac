@@ -188,6 +188,7 @@ pub fn run() {
             storage::playlist_get_graph,
             storage::get_commit_author,
             storage::set_commit_author,
+            storage::library_get_storage_bytes,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,
         ])

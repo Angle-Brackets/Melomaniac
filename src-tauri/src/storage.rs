@@ -1165,6 +1165,18 @@ pub fn set_commit_author(storage: State<'_, StorageState>, name: String) {
     *storage.commit_author.lock().unwrap() = name;
 }
 
+#[tauri::command]
+pub fn library_get_storage_bytes(storage: State<'_, StorageState>) -> u64 {
+    fn dir_size(path: &std::path::Path) -> u64 {
+        let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+        entries.flatten().map(|e| {
+            let p = e.path();
+            if p.is_dir() { dir_size(&p) } else { p.metadata().map(|m| m.len()).unwrap_or(0) }
+        }).sum()
+    }
+    dir_size(storage.cas.objects_dir())
+}
+
 // ── Initialisation helper ─────────────────────────────────────────────────────
 
 pub async fn init_storage(app_data_dir: std::path::PathBuf) -> Result<StorageState, String> {

@@ -8,6 +8,13 @@ import { applyTheme, writeCustomHue, NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
 
 const SETTINGS_KEY = 'melomaniac.settings';
+
+function fmtBytes(b: number): string {
+  if (b < 1024)            return `${b} B`;
+  if (b < 1024 ** 2)      return `${(b / 1024).toFixed(1)} KB`;
+  if (b < 1024 ** 3)      return `${(b / 1024 ** 2).toFixed(1)} MB`;
+  return `${(b / 1024 ** 3).toFixed(2)} GB`;
+}
 const GITHUB_URL   = 'https://github.com/Angle-Brackets/Melomaniac';
 const BUILD_DATE   = 'May 17, 2026';
 
@@ -89,7 +96,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft]     = useState(settings.commitAuthor);
   const authorInputRef = useRef<HTMLInputElement>(null);
-  const [stats, setStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
+  const [stats, setStats]         = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
+  const [storageBytes, setStorageBytes] = useState<number | null>(null);
 
   // Apply persisted theme once on mount
   useEffect(() => {
@@ -110,6 +118,11 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
     tick();
     const id = setInterval(tick, 2000);
     return () => clearInterval(id);
+  }, []);
+
+  // Storage size — read once on mount
+  useEffect(() => {
+    invoke<number>('library_get_storage_bytes').then(setStorageBytes).catch(() => {});
   }, []);
 
   // Focus author input when entering edit mode
@@ -260,9 +273,9 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           </div>
         </SettingsGroup>
 
-        {/* Library — greyed out, not yet implemented */}
+        {/* Library */}
         <SettingsGroup label="Library">
-          <Row title="Offline storage" detail="N/A" chev={false} muted/>
+          <Row title="Offline storage" detail={storageBytes !== null ? fmtBytes(storageBytes) : '…'} chev={false}/>
           <Row title="Streaming quality" detail="N/A" chev={false} muted/>
           <Row title="Crossfade" detail="N/A" chev={false} isLast muted/>
         </SettingsGroup>
