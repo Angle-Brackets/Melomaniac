@@ -4,13 +4,21 @@ import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import type { TrackRecord } from '../../store/types';
 import { Icons } from '../icons';
-import { MMArt, MMTabBar, MMHash, MMBranchPill, iconBtn } from './common';
+import { MMArt, MMTabBar, MMHash, MMBranchPill, MarqueeText, iconBtn } from './common';
 import type { TabId } from './common';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
 
-type FilterId = 'all' | 'favorites' | 'recent';
+type FilterId  = 'all' | 'favorites' | 'recent';
+type SortField = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
+type SortDir   = 'asc' | 'desc';
+
+const SORT_KEY = 'melo-lib-sort';
+function loadSort(): { field: SortField; dir: SortDir } {
+  try { const r = localStorage.getItem(SORT_KEY); if (r) return JSON.parse(r); } catch {}
+  return { field: 'ingested_at', dir: 'desc' };
+}
 
 function fmtDuration(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -85,31 +93,38 @@ function TrackRow({ track, idx, playing = false }: {
   track: TrackRecord; idx: number; playing?: boolean;
 }) {
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
+  const subtext = [track.artist ?? 'Unknown artist', track.album].filter(Boolean).join(' | ');
   return (
     <div style={{
       height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
       background: playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
       borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
     }}>
-      <span style={{ width: 18, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+      <span style={{ width: 18, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
         {String(idx).padStart(2, '0')}
       </span>
       <MMArt src={artworkUrl ?? undefined} size={42} radius={7}/>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {track.title}
-          </span>
-          {track.favorited && <Icons.heartFill size={11} stroke="var(--accent)"/>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+          <MarqueeText
+            text={track.title}
+            active={playing}
+            style={{ flex: 1, minWidth: 0 }}
+            textStyle={{ fontSize: 14, color: playing ? 'var(--accent)' : 'var(--text-0)', fontWeight: 500 }}
+          />
+          {track.favorited && <span style={{ flexShrink: 0, display: 'flex' }}><Icons.heartFill size={11} stroke="var(--accent)"/></span>}
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {track.artist ?? 'Unknown artist'}{track.album ? ` · ${track.album}` : ''}
-        </div>
+        <MarqueeText
+          text={subtext}
+          active={playing}
+          style={{ marginTop: 1 }}
+          textStyle={{ fontSize: 11.5, color: 'var(--text-2)' }}
+        />
       </div>
-      <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
+      <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
         {fmtDuration(track.duration_ms)}
       </span>
-      <Icons.moreV size={16} stroke="var(--text-3)"/>
+      <span style={{ flexShrink: 0, display: 'flex' }}><Icons.moreV size={16} stroke="var(--text-3)"/></span>
     </div>
   );
 }
@@ -219,12 +234,32 @@ export function MiniPlayer({ onTab }: { onTab?: (id: TabId) => void }) {
 
 const SECTION_LABELS = ['This week', 'This month', 'Older'] as const;
 
+const SORT_FIELDS: { field: SortField; label: string }[] = [
+  { field: 'ingested_at', label: 'Date Added' },
+  { field: 'title',       label: 'Title' },
+  { field: 'artist',      label: 'Artist' },
+  { field: 'album',       label: 'Album' },
+  { field: 'duration_ms', label: 'Duration' },
+];
+
 export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetail?: () => void }) {
-  const tracks        = useStore(s => s.tracks);
-  const libraryStatus = useStore(s => s.libraryStatus);
-  const [filter, setFilter] = useState<FilterId>('all');
-  const [query,  setQuery]  = useState('');
+  const tracks          = useStore(s => s.tracks);
+  const libraryStatus   = useStore(s => s.libraryStatus);
+  const loadedTrackHash = useStore(s => s.loadedTrackHash);
+  const [filter,    setFilter]    = useState<FilterId>('all');
+  const [query,     setQuery]     = useState('');
+  const [sortField, setSortField] = useState<SortField>(() => loadSort().field);
+  const [sortDir,   setSortDir]   = useState<SortDir>(() => loadSort().dir);
   const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem(SORT_KEY, JSON.stringify({ field: sortField, dir: sortDir }));
+  }, [sortField, sortDir]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir(field === 'ingested_at' ? 'desc' : 'asc'); }
+  };
 
   const favCount = useMemo(() => tracks.filter(t => t.favorited).length, [tracks]);
 
@@ -239,17 +274,22 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         (t.album ?? '').toLowerCase().includes(q)
       );
     }
-    return [...list].sort((a, b) => b.ingested_at - a.ingested_at);
-  }, [tracks, filter, query]);
+    return [...list].sort((a, b) => {
+      const av = a[sortField] ?? '', bv = b[sortField] ?? '';
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [tracks, filter, query, sortField, sortDir]);
 
+  // Date grouping only applies when sorting by date added and not searching/filtering by favorites
   const grouped = useMemo(() => {
-    if (query.trim() || filter === 'favorites') return null;
+    if (query.trim() || filter === 'favorites' || sortField !== 'ingested_at') return null;
     const groups: [typeof SECTION_LABELS[number], TrackRecord[]][] = [
       ['This week', []], ['This month', []], ['Older', []],
     ];
     displayed.forEach(t => groups[ageBucket(t.ingested_at)][1].push(t));
     return groups.filter(([, ts]) => ts.length > 0);
-  }, [displayed, query, filter]);
+  }, [displayed, query, filter, sortField]);
 
   // Flat item list for the virtualizer
   const flatItems = useMemo<FlatItem[]>(() => {
@@ -261,13 +301,13 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     if (grouped) {
       grouped.forEach(([label, sectionTracks]) => {
         items.push({ kind: 'section', label, trailing: String(sectionTracks.length) });
-        sectionTracks.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: false }));
+        sectionTracks.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: t.hash === loadedTrackHash }));
       });
     } else {
-      displayed.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: false }));
+      displayed.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: t.hash === loadedTrackHash }));
     }
     return items;
-  }, [displayed, grouped, query]);
+  }, [displayed, grouped, query, loadedTrackHash]);
 
   const virtualizer = useVirtualizer({
     count: flatItems.length,
@@ -296,10 +336,33 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         <div style={{ padding: '14px 22px 8px' }}>
           <MMSearchBar value={query} onChange={setQuery}/>
         </div>
-        <div style={{ display: 'flex', gap: 8, padding: '8px 22px 10px', overflowX: 'auto' }} className="mm-scroll">
+        <div style={{ display: 'flex', gap: 8, padding: '8px 22px 6px', overflowX: 'auto' }} className="mm-scroll">
           <FilterPill label="All"            active={filter === 'all'}       count={tracks.length}         onClick={() => setFilter('all')}/>
           <FilterPill label="Favorites"      active={filter === 'favorites'} count={favCount || undefined} onClick={() => setFilter('favorites')}/>
           <FilterPill label="Recently Added" active={filter === 'recent'}                                  onClick={() => setFilter('recent')}/>
+        </div>
+        {/* Sort pills */}
+        <div style={{ display: 'flex', gap: 6, padding: '2px 22px 10px', overflowX: 'auto' }} className="mm-scroll">
+          {SORT_FIELDS.map(({ field, label }) => {
+            const active = sortField === field;
+            const arrow  = active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+            return (
+              <button
+                key={field}
+                onClick={() => handleSort(field)}
+                style={{
+                  padding: '4px 11px', borderRadius: 99, whiteSpace: 'nowrap', flexShrink: 0,
+                  background: active ? 'color-mix(in srgb, var(--accent) 16%, transparent)' : 'var(--bg-2)',
+                  border: active ? '1px solid var(--accent)55' : '0.5px solid var(--border-1)',
+                  color: active ? 'var(--accent)' : 'var(--text-2)',
+                  fontSize: 11.5, fontWeight: active ? 600 : 400,
+                  fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer',
+                }}
+              >
+                {label}{arrow}
+              </button>
+            );
+          })}
         </div>
       </div>
 

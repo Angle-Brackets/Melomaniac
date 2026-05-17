@@ -8,7 +8,7 @@ import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef, loopStateRef } from '../playerContext';
 import { Icons } from '../icons';
-import { MMArt, MMSheet, MMTabBar } from './common';
+import { MMArt, MMSheet, MMTabBar, MarqueeText } from './common';
 import type { TabId } from './common';
 
 function fmtMs(ms: number): string {
@@ -36,43 +36,6 @@ function QueueSheetRow({ track }: { track: TrackRecord }) {
 }
 
 const QUEUE_ROW_H = 52;
-const MARQUEE_GAP = 48;
-
-function MarqueeText({ text, active, style, textStyle }: {
-  text: string; active: boolean;
-  style?: React.CSSProperties; textStyle?: React.CSSProperties;
-}) {
-  const outerRef = useRef<HTMLDivElement>(null);
-  const innerRef = useRef<HTMLSpanElement>(null);
-  const [marq, setMarq] = useState<{ w: number; on: boolean }>({ w: 0, on: false });
-
-  useEffect(() => {
-    if (!active) { setMarq(m => m.on ? { w: 0, on: false } : m); return; }
-    const o = outerRef.current, i = innerRef.current;
-    if (!o || !i) return;
-    if (i.scrollWidth - o.clientWidth > 4) setMarq({ w: i.scrollWidth, on: true });
-  }, [active, text]);
-
-  return (
-    <div ref={outerRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', minWidth: 0, ...style }}>
-      {marq.on ? (
-        <span style={{
-          display: 'inline-flex', gap: `${MARQUEE_GAP}px`,
-          animation: `mm-marquee ${Math.max(2, (marq.w + MARQUEE_GAP) / 60).toFixed(2)}s linear 0.8s infinite`,
-          ['--mm-dist' as string]: `${-(marq.w + MARQUEE_GAP)}px`,
-          ...textStyle,
-        }}>
-          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
-          <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
-        </span>
-      ) : (
-        <span ref={innerRef} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...textStyle }}>
-          {text}
-        </span>
-      )}
-    </div>
-  );
-}
 
 function QueueRow({ track, isActive, isPlaying, onClick }: {
   track: TrackRecord;
