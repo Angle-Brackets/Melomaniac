@@ -8,7 +8,7 @@ import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
 import { Icons } from '../icons';
 import {
-  MMArt, MMTabBar, MMHash, MMSheet, MMLoader, iconBtn,
+  MMArt, MMTabBar, MMHash, MMSheet, MMLoader, iconBtn, useMinDuration,
 } from './common';
 import type { TabId } from './common';
 import { MiniPlayer } from './Library';
@@ -455,7 +455,8 @@ function CommitGraphView({ playlistId, branchName, playlistName, onBack, onRefre
 }) {
   const [allNodes, setAllNodes] = useState<GraphNode[]>([]);
   const [layout,   setLayout]   = useState<GRowLayout[]>([]);
-  const [loading,  setLoading]  = useState(true);
+  const [loadingRaw, setLoading]  = useState(true);
+  const loading = useMinDuration(loadingRaw);
   const [selected, setSelected] = useState<GRowLayout | null>(null);
   const [newBranch, setNewBranch] = useState('');
   const [busy, setBusy]           = useState(false);
@@ -510,11 +511,15 @@ function CommitGraphView({ playlistId, branchName, playlistName, onBack, onRefre
           </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto' }} className="mm-scroll">
-          {loading && <MMLoader/>}
+        <div style={{ flex: 1, overflowY: loading ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }} className="mm-scroll">
+          {loading && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <MMLoader size={48}/>
+            </div>
+          )}
           {!loading && layout.length === 0 && <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>No commits yet.</div>}
 
-          {layout.map((row) => {
+          {!loading && layout.map((row) => {
             const isSel = selected?.commit.hash === row.commit.hash;
             return (
               <div key={row.commit.hash} onClick={() => setSelected(isSel ? null : row)}
@@ -560,7 +565,7 @@ function CommitGraphView({ playlistId, branchName, playlistName, onBack, onRefre
               </div>
             );
           })}
-          <div style={{ height: 32 }}/>
+          {!loading && <div style={{ height: 32 }}/>}
         </div>
       </div>
 
@@ -816,7 +821,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const artUrl   = usePlaylistArtwork(currentPlaylistId, currentBranchName);
 
   const [playlistTracks, setPlaylistTracks] = useState<PlaylistTrackRecord[]>([]);
-  const [tracksLoading, setTracksLoading]   = useState(true);
+  const [tracksLoadingRaw, setTracksLoading] = useState(true);
+  const tracksLoading = useMinDuration(tracksLoadingRaw);
   const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
   const [showHistory, setShowHistory]       = useState(false);
   // Branch-specific description from live tree (may differ from SQL cache)

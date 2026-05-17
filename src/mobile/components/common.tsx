@@ -4,6 +4,31 @@ import type { Album } from '../data';
 
 export type TabId = 'library' | 'playlists' | 'now' | 'discover' | 'settings';
 
+// ── Hook: keeps a loading flag visible for at least `minMs` milliseconds
+// so fast loads still show enough animation to be perceptible.
+export function useMinDuration(loading: boolean, minMs = 600): boolean {
+  const [visible, setVisible] = useState(loading);
+  const startRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (loading) {
+      startRef.current = Date.now();
+      setVisible(true);
+    } else if (startRef.current !== null) {
+      const elapsed = Date.now() - startRef.current;
+      const remaining = minMs - elapsed;
+      if (remaining <= 0) {
+        setVisible(false);
+      } else {
+        const t = setTimeout(() => setVisible(false), remaining);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [loading, minMs]);
+
+  return visible;
+}
+
 // ── Album cover
 export function MMArt({ album, src, size = 64, radius = 10, glow = false, style = {} }: {
   album?: Album; src?: string; size?: number; radius?: number; glow?: boolean; style?: React.CSSProperties;
@@ -255,15 +280,16 @@ export function iconBtn(s = 32): React.CSSProperties {
   };
 }
 
-// ── Loading indicator — dancing eighth note
-export function MMLoader({ size = 28, color = 'var(--accent)' }: { size?: number; color?: string }) {
+// ── Loading indicator — dancing eighth note (keyframe defined in main.css)
+export function MMLoader({ size = 36, color = 'var(--accent)' }: { size?: number; color?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '32px 0' }}>
       <span style={{
         fontSize: size, color,
         display: 'inline-block',
-        animation: 'mmNoteDance 0.9s ease-in-out infinite',
+        animation: 'mmNoteDance 1.1s ease-in-out infinite',
         transformOrigin: 'bottom center',
+        filter: `drop-shadow(0 0 8px ${color}88)`,
       }}>♪</span>
     </div>
   );
