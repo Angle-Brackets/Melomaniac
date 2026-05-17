@@ -314,18 +314,15 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const playlists          = useStore(s => s.playlists);
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
   const setCurrentPlaylist = useStore(s => s.setCurrentPlaylist);
+  const currentBranchName  = useStore(s => s.currentBranchName);
+  const setCurrentBranch   = useStore(s => s.setCurrentBranch);
 
   const currentPlaylist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showBranchSheet, setShowBranchSheet] = useState(false);
-  const [activeBranch, setActiveBranch] = useState(() => localStorage.getItem('mm_active_branch') ?? 'main');
-  const activeBranchRef = useRef(localStorage.getItem('mm_active_branch') ?? 'main');
-
-  const setAndPersistBranch = useCallback((name: string) => {
-    localStorage.setItem('mm_active_branch', name);
-    activeBranchRef.current = name;
-    setActiveBranch(name);
-  }, []);
+  // activeBranchRef kept for use in non-reactive callbacks (drag reorder, AB loop)
+  const activeBranchRef = useRef(currentBranchName);
+  useEffect(() => { activeBranchRef.current = currentBranchName; }, [currentBranchName]);
   const [showQueue, setShowQueue] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(() => localStorage.getItem('mm_queue_expanded') !== 'false');
   const [listScrolled, setListScrolled] = useState(false);
@@ -512,7 +509,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       const isFullRange = a < 0.001 && b > 0.999;
       invoke('playlist_set_ab_loop', {
         playlistId: currentPlaylistId,
-        branchName: activeBranch,
+        branchName: activeBranchRef.current,
         trackHash: hash,
         abStartMs: isFullRange ? null : Math.round(a * dur),
         abEndMs:   isFullRange ? null : Math.round(b * dur),
@@ -729,7 +726,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', borderRadius: 99, padding: '2px 8px 2px 6px', cursor: 'pointer', flexShrink: 0 }}
             >
               <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
-              <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'JetBrains Mono, monospace', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeBranch}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'JetBrains Mono, monospace', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentBranchName}</span>
               <Icons.chevDown size={10} stroke="var(--text-2)"/>
             </button>
           )}
@@ -999,13 +996,13 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           >
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {currentPlaylist.branches.map((b: BranchRecord, i: number) => {
-                const isActive = b.name === activeBranch;
+                const isActive = b.name === currentBranchName;
                 return (
                   <div
                     key={b.id}
                     onClick={async () => {
                       if (isActive) { setShowBranchSheet(false); return; }
-                      setAndPersistBranch(b.name);
+                      setCurrentBranch(b.name);
                       try {
                         const ptracks = await invoke<PlaylistTrackRecord[]>('playlist_get_tracks', {
                           playlistId: currentPlaylist.id, branchName: b.name,
@@ -1078,12 +1075,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   playlist={p}
                   active={p.id === currentPlaylistId}
                   onSelect={async () => {
-                    setCurrentPlaylist(p.id);
-                    const defaultBranch = p.branches.find(b => b.name === 'main')?.name ?? p.branches[0]?.name ?? 'main';
-                    setAndPersistBranch(defaultBranch);
+                    setCurrentPlaylist(p.id); // restores persisted branch for this playlist
+                    const restoredBranch = useStore.getState().currentBranchName;
                     try {
                       const ptracks = await invoke<PlaylistTrackRecord[]>('playlist_get_tracks', {
-                        playlistId: p.id, branchName: defaultBranch,
+                        playlistId: p.id, branchName: restoredBranch,
                       });
                       loadQueue(ptracks.map(t => t.hash));
                     } catch { /* keep existing queue */ }

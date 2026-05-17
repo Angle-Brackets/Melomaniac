@@ -188,7 +188,7 @@ function AddToPlaylistSheet({ hashes, onClose, onSuccess }: {
           <button key={pl.id} onClick={() => handlePlaylist(pl)} disabled={busy}
             style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 0', background: 'none', border: 'none', borderBottom: '0.5px solid var(--border-0)', cursor: 'pointer', color: 'inherit' }}
           >
-            <PlaylistArt playlistId={pl.id}/>
+            <PlaylistArt playlistId={pl.id} branch="main"/>
             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
               <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pl.name}</div>
               {pl.branches.length > 1 && (
@@ -738,8 +738,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
 }
 
 // ── PlaylistsList — still mock data until Phase 2
-function PlaylistArt({ playlistId }: { playlistId: string }) {
-  const url = usePlaylistArtwork(playlistId);
+function PlaylistArt({ playlistId, branch }: { playlistId: string; branch: string }) {
+  const url = usePlaylistArtwork(playlistId, branch);
   return <MMArt src={url ?? undefined} size={54} radius={9}/>;
 }
 
@@ -756,7 +756,7 @@ function PlaylistCard({ name, desc, branch, commit, branches, playlistId, pinned
       borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
       cursor: 'pointer',
     }}>
-      <PlaylistArt playlistId={playlistId}/>
+      <PlaylistArt playlistId={playlistId} branch={branch}/>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
@@ -791,6 +791,7 @@ function SectionHeadPlain({ label, trailing, collapsible }: { label: string; tra
 export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) => void; onPlaylistDetail: () => void }) {
   const playlists          = useStore(s => s.playlists);
   const setCurrentPlaylist = useStore(s => s.setCurrentPlaylist);
+  const branchByPlaylist   = useStore(s => s.branchByPlaylist);
   const [query, setQuery]  = useState('');
 
   const displayed = useMemo(() => {
@@ -823,15 +824,16 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
           <>
             <SectionHeadPlain label="All playlists" trailing={String(displayed.length)}/>
             {displayed.map(p => {
-              const mainBranch = p.branches.find(b => b.name === 'main') ?? p.branches[0];
-              const commit = mainBranch?.head_commit?.slice(0, 6) ?? '—';
+              const selectedBranchName = branchByPlaylist[p.id] ?? 'main';
+              const activeBranch = p.branches.find(b => b.name === selectedBranchName) ?? p.branches.find(b => b.name === 'main') ?? p.branches[0];
+              const commit = activeBranch?.head_commit?.slice(0, 6) ?? '—';
               return (
                 <PlaylistCard
                   key={p.id}
                   playlistId={p.id}
                   name={p.name}
                   desc={p.description ? p.description : `${p.branches.length} branch${p.branches.length !== 1 ? 'es' : ''}`}
-                  branch={mainBranch?.name ?? 'main'}
+                  branch={activeBranch?.name ?? selectedBranchName}
                   commit={commit}
                   branches={p.branches.length}
                   onPress={() => { setCurrentPlaylist(p.id); onPlaylistDetail(); }}

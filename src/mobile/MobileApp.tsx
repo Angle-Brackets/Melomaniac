@@ -35,14 +35,15 @@ export default function MobileApp() {
       const { playlists, setCurrentPlaylist, loadQueue } = useStore.getState();
       const pl = playlists.find(p => p.id === saved);
       if (!pl) return;
-      setCurrentPlaylist(saved);
-      const savedBranch = localStorage.getItem('mm_active_branch') ?? 'main';
-      const branchName = pl.branches.find(b => b.name === savedBranch)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
-      invoke<{ hash: string }[]>('playlist_get_tracks', { playlistId: saved, branchName })
+      setCurrentPlaylist(saved); // restores persisted branch from branchByPlaylist
+      const branchName = useStore.getState().currentBranchName;
+      const validBranch = pl.branches.find(b => b.name === branchName)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
+      invoke<{ hash: string }[]>('playlist_get_tracks', { playlistId: saved, branchName: validBranch })
         .then(ptracks => { loadQueue(ptracks.map(t => t.hash)); })
         .catch(() => {});
-      // Prefetch playlist artworks
-      playlists.forEach(p => getPlaylistArtwork(p.id));
+      // Prefetch playlist artworks (use persisted branch per playlist)
+      const { branchByPlaylist } = useStore.getState();
+      playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
     });
   }, []);
 
