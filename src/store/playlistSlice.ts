@@ -18,19 +18,22 @@ function loadBranchMap(): Record<string, string> {
 export type PlaylistSlice = {
   playlists:          PlaylistRecord[]
   currentPlaylistId:  string | null
-  currentBranchName:  string
+  currentBranchName:  string   // browsing branch — what's selected in PlaylistDetail
+  playingBranchName:  string   // playing branch — only updated when play is triggered
   branchByPlaylist:   Record<string, string>
   playlistStatus:     LoadStatus
 
   loadPlaylists: () => Promise<void>
   setCurrentPlaylist: (id: string) => void
   setCurrentBranch: (name: string) => void
+  setPlayingBranch: (name: string) => void
 }
 
 export const createPlaylistSlice: StateCreator<PlaylistSlice> = (set) => ({
   playlists:         [],
   currentPlaylistId: null,
   currentBranchName: 'main',
+  playingBranchName: 'main',
   branchByPlaylist:  loadBranchMap(),
   playlistStatus:    'idle',
 
@@ -55,4 +58,6 @@ export const createPlaylistSlice: StateCreator<PlaylistSlice> = (set) => ({
     try { localStorage.setItem(BRANCH_MAP_KEY, JSON.stringify(updated)) } catch {}
     return { currentBranchName: name, branchByPlaylist: updated }
   }),
+
+  setPlayingBranch: (name) => set({ playingBranchName: name }),
 })

@@ -32,12 +32,13 @@ export default function MobileApp() {
     loadPlaylists().then(() => {
       const saved = localStorage.getItem('mm_last_playlist');
       if (!saved) return;
-      const { playlists, setCurrentPlaylist, loadQueue } = useStore.getState();
+      const { playlists, setCurrentPlaylist, setPlayingBranch, loadQueue } = useStore.getState();
       const pl = playlists.find(p => p.id === saved);
       if (!pl) return;
-      setCurrentPlaylist(saved); // restores persisted branch from branchByPlaylist
+      setCurrentPlaylist(saved); // restores persisted browsing branch from branchByPlaylist
       const branchName = useStore.getState().currentBranchName;
       const validBranch = pl.branches.find(b => b.name === branchName)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
+      setPlayingBranch(validBranch); // initialize playing branch to match restored queue
       invoke<{ hash: string }[]>('playlist_get_tracks', { playlistId: saved, branchName: validBranch })
         .then(ptracks => { loadQueue(ptracks.map(t => t.hash)); })
         .catch(() => {});

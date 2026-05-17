@@ -801,6 +801,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
   const currentBranchName  = useStore(s => s.currentBranchName);
   const setCurrentBranch   = useStore(s => s.setCurrentBranch);
+  const setPlayingBranch   = useStore(s => s.setPlayingBranch);
   const playlists          = useStore(s => s.playlists);
   const loadPlaylists      = useStore(s => s.loadPlaylists);
   const loadedTrackHash    = useStore(s => s.loadedTrackHash);
@@ -878,6 +879,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     positionMsRef.current = 0;
     invoke('track_play', { hash: track.hash }).catch(console.error);
     setPlaying(true);
+    // Only now sync the playing branch to what's actually loaded
+    setPlayingBranch(currentBranchName);
   };
 
   const handleShufflePress = () => {
