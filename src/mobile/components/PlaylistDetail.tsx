@@ -1068,7 +1068,9 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const [tracksLoadingRaw, setTracksLoading] = useState(true);
   const tracksLoading = useMinDuration(tracksLoadingRaw);
   const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
-  const [showHistory, setShowHistory]       = useState(false);
+  const [historyMounted, setHistoryMounted] = useState(false);
+  const [historyActive,  setHistoryActive]  = useState(false);
+  const historyActiveRef = useRef(false);
   // Branch-specific description from live tree (may differ from SQL cache)
   const [liveDesc, setLiveDesc] = useState<string | null | undefined>(undefined);
   const [search, setSearch]                 = useState('');
@@ -1110,6 +1112,12 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     setForkToast(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setForkToast(null), 2800);
+  };
+
+  const handleHistoryBack = () => {
+    historyActiveRef.current = false;
+    setHistoryActive(false);
+    setTimeout(() => setHistoryMounted(false), 360);
   };
 
   if (!playlist) {
@@ -1157,21 +1165,6 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     loadTracks();
   };
 
-  if (showHistory) {
-    return (
-      <div className="mobile-root">
-        <CommitGraphView
-          playlistId={playlist.id}
-          branchName={currentBranchName}
-          playlistName={playlist.name}
-          branchNames={playlist.branches.map(b => b.name)}
-          onBack={() => setShowHistory(false)}
-          onRefresh={handleRefresh}
-        />
-      </div>
-    );
-  }
-
   const activeBranch = playlist.branches.find(b => b.name === currentBranchName)
     ?? playlist.branches[0];
   const pendingBranches = playlist.branches.filter(b => b.head_commit !== activeBranch?.head_commit).length;
@@ -1190,48 +1183,47 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
 
-        {/* nav bar */}
-        <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer' }}>
+        {/* nav bar — search expands inline from the search icon */}
+        <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}>
             <Icons.chevLeft size={18} stroke="var(--accent)"/>
             <span style={{ fontSize: 14 }}>Playlists</span>
           </button>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button
-              style={iconBtn(36)}
-              onClick={() => {
-                if (searchOpen) { setSearchOpen(false); setSearch(''); }
-                else setSearchOpen(true);
-              }}
-            >
-              {searchOpen
-                ? <Icons.x size={18} stroke="var(--text-1)"/>
-                : <Icons.search size={18} stroke="var(--text-1)"/>
-              }
-            </button>
-          </div>
-        </div>
-
-        {/* search bar */}
-        {searchOpen && (
-          <div style={{ padding: '8px 16px 0' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)' }}>
-              <Icons.search size={15} stroke="var(--text-3)"/>
+          <div style={{
+            flexGrow: searchOpen ? 1 : 0,
+            overflow: 'hidden',
+            minWidth: 0,
+            transition: 'flex-grow 0.32s cubic-bezier(0.22,1,0.36,1)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', opacity: searchOpen ? 1 : 0, transition: 'opacity 0.2s' }}>
               <input
                 ref={searchInputRef}
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search tracks…"
-                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-0)', fontSize: 14 }}
+                tabIndex={searchOpen ? 0 : -1}
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-0)', fontSize: 14, minWidth: 0 }}
               />
               {search && (
-                <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                   <Icons.x size={14} stroke="var(--text-3)"/>
                 </button>
               )}
             </div>
           </div>
-        )}
+          <button
+            style={{ ...iconBtn(36), flexShrink: 0 }}
+            onClick={() => {
+              if (searchOpen) { setSearchOpen(false); setSearch(''); }
+              else setSearchOpen(true);
+            }}
+          >
+            {searchOpen
+              ? <Icons.x size={18} stroke="var(--text-1)"/>
+              : <Icons.search size={18} stroke="var(--text-1)"/>
+            }
+          </button>
+        </div>
 
         {/* header */}
         <div style={{ display: 'flex', gap: 16, padding: '8px 22px 8px', alignItems: 'flex-end' }}>
@@ -1281,7 +1273,13 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             badge={pendingBranches > 0 ? String(pendingBranches) : undefined}
             onPress={() => setSheet('merge')}
           />
-          <ActionTile Icon={Icons.history} label="History" onPress={() => setShowHistory(true)}/>
+          <ActionTile Icon={Icons.history} label="History" onPress={() => {
+            setHistoryMounted(true);
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+              historyActiveRef.current = true;
+              setHistoryActive(true);
+            }));
+          }}/>
           <ActionTile Icon={Icons.gear} label="Edit" onPress={() => setSheet('edit')}/>
         </div>
 
@@ -1366,6 +1364,26 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           onSaved={() => handleRefresh()}
           onDeleted={() => onBack()}
         />
+      )}
+
+      {/* History — slides in from the right, kept mounted during exit animation */}
+      {historyMounted && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          transform: historyActive ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.36s cubic-bezier(0.22,1,0.36,1)',
+          willChange: 'transform',
+          boxShadow: historyActive ? '-12px 0 40px rgba(0,0,0,0.45)' : 'none',
+        }}>
+          <CommitGraphView
+            playlistId={playlist.id}
+            branchName={currentBranchName}
+            playlistName={playlist.name}
+            branchNames={playlist.branches.map(b => b.name)}
+            onBack={handleHistoryBack}
+            onRefresh={handleRefresh}
+          />
+        </div>
       )}
     </div>
   );

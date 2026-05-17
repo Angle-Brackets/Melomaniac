@@ -132,6 +132,8 @@ export function MMIsland({ branch, syncing = false }: { branch: string; syncing?
 }
 
 // ── Bottom tab bar
+const TAB_IDS: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
+
 export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: TabId) => void; style?: React.CSSProperties }) {
   const tabs: { id: TabId; label: string; Icon: (p: { size?: number }) => React.ReactElement; center?: boolean }[] = [
     { id: 'library',   label: 'Library',   Icon: Icons.library },
@@ -140,6 +142,16 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
     { id: 'discover',  label: 'Discover',  Icon: Icons.sparkles },
     { id: 'settings',  label: 'Settings',  Icon: Icons.gear },
   ];
+  const activeIdx = TAB_IDS.indexOf(active);
+  // Track which tab was previously active so we only animate newly-selected icons
+  const prevActiveRef = useRef(active);
+  const justSelected = useRef<TabId | null>(null);
+  const handleTab = (id: TabId) => {
+    justSelected.current = id;
+    prevActiveRef.current = active;
+    onTab(id);
+  };
+
   return (
     <div style={{
       position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30,
@@ -149,11 +161,24 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
       borderTop: '0.5px solid var(--border-0)',
       ...style,
     }}>
+      {/* Sliding indicator pill that moves under the active tab */}
+      <div style={{
+        position: 'absolute', top: 0,
+        left: `${activeIdx * 20}%`, width: '20%',
+        display: 'flex', justifyContent: 'center',
+        transition: 'left 0.3s cubic-bezier(0.22,1,0.36,1)',
+        pointerEvents: 'none',
+      }}>
+        <div style={{ width: 28, height: 2.5, borderRadius: 2, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)' }}/>
+      </div>
+
       {tabs.map(t => {
         const on = active === t.id;
         const color = on ? 'var(--accent)' : 'var(--text-2)';
+        const popped = justSelected.current === t.id && on;
+        if (popped) justSelected.current = null; // consume after first render
         return (
-          <button key={t.id} onClick={() => onTab(t.id)} style={{
+          <button key={t.id} onClick={() => handleTab(t.id)} style={{
             flex: 1, height: 60, display: 'flex', flexDirection: 'column',
             alignItems: 'center', justifyContent: 'center', gap: 2,
             background: 'transparent', border: 'none', cursor: 'pointer', color,
@@ -166,11 +191,12 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
               background: t.center && on ? 'var(--accent)' : 'transparent',
               boxShadow: t.center && on ? '0 6px 22px oklch(0.62 0.15 28 / 0.5)' : 'none',
               color: t.center && on ? 'var(--bg-0)' : color,
-              transition: 'all 0.2s',
+              transition: 'background 0.2s, box-shadow 0.2s, color 0.2s',
+              animation: popped ? 'mmTabPop 0.32s cubic-bezier(0.22,1,0.36,1) both' : 'none',
             }}>
               <t.Icon size={t.center ? 26 : 22}/>
             </div>
-            <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: 0.02 }}>{t.label}</span>
+            <span style={{ fontSize: 10, fontWeight: on ? 600 : 500, letterSpacing: 0.02, transition: 'font-weight 0.15s' }}>{t.label}</span>
           </button>
         );
       })}

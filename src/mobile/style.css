@@ -27,6 +27,21 @@
   outline: none;
 }
 
+/* ── Page slide transitions ─────────────────────────────────────────────────── */
+@keyframes mmSlideInRight {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes mmSlideInLeft {
+  from { transform: translateX(-40%); opacity: 0.6; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes mmTabPop {
+  0%   { transform: scale(0.82); }
+  65%  { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+
 /* ── Sheet & row animations ─────────────────────────────────────────────────── */
 @keyframes mmSheetUp {
   from { transform: translateY(60px); opacity: 0; }

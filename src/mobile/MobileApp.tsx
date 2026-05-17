@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import './style.css';
@@ -13,9 +13,17 @@ import { Discover } from './components/Discover';
 import { Settings } from './components/Settings';
 import type { TabId } from './components/common';
 
+const TAB_ORDER: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
+
 export default function MobileApp() {
   const [tab, setTab] = useState<TabId>('now');
-  const [playlistDetailOpen, setPlaylistDetailOpen] = useState(false);
+  const [tabKey,  setTabKey]  = useState(0);
+  const [tabDir,  setTabDir]  = useState<'right' | 'left'>('right');
+
+  // Detail overlay — kept mounted during exit animation so it can slide out
+  const [detailMounted, setDetailMounted] = useState(false);
+  const [detailActive,  setDetailActive]  = useState(false);
+  const detailActiveRef = useRef(false);
 
   const loadLibrary   = useStore(s => s.loadLibrary);
   const loadPlaylists = useStore(s => s.loadPlaylists);
@@ -149,12 +157,64 @@ export default function MobileApp() {
   }, []);
 
   const handleTab = (id: TabId) => {
-    setPlaylistDetailOpen(false);
+    const oldIdx = TAB_ORDER.indexOf(tab);
+    const newIdx = TAB_ORDER.indexOf(id);
+    setTabDir(newIdx >= oldIdx ? 'right' : 'left');
+    setTabKey(k => k + 1);
     setTab(id);
+    // Close detail without animation when switching tabs
+    detailActiveRef.current = false;
+    setDetailActive(false);
+    setDetailMounted(false);
   };
 
-  const handlePlaylistDetail = () => setPlaylistDetailOpen(true);
-  const handlePlaylistBack   = () => setPlaylistDetailOpen(false);
+  const handlePlaylistDetail = () => {
+    setDetailMounted(true);
+    // Double rAF ensures the element is painted before the transition starts
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      detailActiveRef.current = true;
+      setDetailActive(true);
+    }));
+    // Push history state so Android back / browser back triggers closeDetail
+    window.history.pushState({ mm: 'detail' }, '');
+  };
+
+  const handlePlaylistBack = () => {
+    detailActiveRef.current = false;
+    setDetailActive(false);
+    setTimeout(() => setDetailMounted(false), 360);
+  };
+
+  // Android hardware back button & browser back gesture via History API
+  useEffect(() => {
+    const onPop = () => {
+      if (detailActiveRef.current) {
+        window.history.pushState({ mm: 'detail' }, ''); // repush so next back still works
+        handlePlaylistBack();
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // iOS-style left-edge swipe to go back
+  useEffect(() => {
+    let startX = 0, startY = 0;
+    const onStart = (e: TouchEvent) => { startX = e.touches[0].clientX; startY = e.touches[0].clientY; };
+    const onEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = Math.abs(e.changedTouches[0].clientY - startY);
+      if (startX < 28 && dx > 60 && dy < 100 && detailActiveRef.current) handlePlaylistBack();
+    };
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchend',   onEnd,   { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchend',   onEnd);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Thin drag region at the very top so the undecorated window is moveable on desktop.
   // Has no visual presence and is a no-op on real mobile.
@@ -165,23 +225,41 @@ export default function MobileApp() {
     />
   );
 
-  if (playlistDetailOpen) {
-    return (
-      <div className="mobile-root">
-        {dragStrip}
-        <PlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
-      </div>
-    );
-  }
-
   return (
     <div className="mobile-root">
       {dragStrip}
-      {tab === 'library'   && <Library onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
-      {tab === 'playlists' && <PlaylistsList onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
-      {tab === 'now'       && <NowPlaying onTab={handleTab}/>}
-      {tab === 'discover'  && <Discover onTab={handleTab}/>}
-      {tab === 'settings'  && <Settings onTab={handleTab}/>}
+
+      {/* Tab content — key forces remount on tab change, triggering the slide animation */}
+      <div
+        key={tabKey}
+        style={{
+          position: 'absolute', inset: 0,
+          transform: detailActive ? 'translateX(-28%) scale(0.96)' : 'translateX(0) scale(1)',
+          transition: 'transform 0.36s cubic-bezier(0.22,1,0.36,1)',
+          transformOrigin: 'left center',
+          animation: `${tabDir === 'right' ? 'mmSlideInRight' : 'mmSlideInLeft'} 0.3s cubic-bezier(0.22,1,0.36,1) both`,
+          willChange: 'transform',
+        }}
+      >
+        {tab === 'library'   && <Library onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
+        {tab === 'playlists' && <PlaylistsList onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
+        {tab === 'now'       && <NowPlaying onTab={handleTab}/>}
+        {tab === 'discover'  && <Discover onTab={handleTab}/>}
+        {tab === 'settings'  && <Settings onTab={handleTab}/>}
+      </div>
+
+      {/* Playlist detail — slides over the tab content from the right */}
+      {detailMounted && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          transform: detailActive ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.36s cubic-bezier(0.22,1,0.36,1)',
+          willChange: 'transform',
+          boxShadow: detailActive ? '-12px 0 40px rgba(0,0,0,0.45)' : 'none',
+        }}>
+          <PlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
+        </div>
+      )}
     </div>
   );
 }
