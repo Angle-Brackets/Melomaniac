@@ -132,7 +132,6 @@ export function MMIsland({ branch, syncing = false }: { branch: string; syncing?
 }
 
 // ── Bottom tab bar
-const TAB_IDS: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
 
 export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: TabId) => void; style?: React.CSSProperties }) {
   const tabs: { id: TabId; label: string; Icon: (p: { size?: number }) => React.ReactElement; center?: boolean }[] = [
@@ -142,7 +141,6 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
     { id: 'discover',  label: 'Discover',  Icon: Icons.sparkles },
     { id: 'settings',  label: 'Settings',  Icon: Icons.gear },
   ];
-  const activeIdx = TAB_IDS.indexOf(active);
   // Track which tab was previously active so we only animate newly-selected icons
   const prevActiveRef = useRef(active);
   const justSelected = useRef<TabId | null>(null);
@@ -161,17 +159,6 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
       borderTop: '0.5px solid var(--border-0)',
       ...style,
     }}>
-      {/* Sliding indicator pill that moves under the active tab */}
-      <div style={{
-        position: 'absolute', top: 0,
-        left: `${activeIdx * 20}%`, width: '20%',
-        display: 'flex', justifyContent: 'center',
-        transition: 'left 0.3s cubic-bezier(0.22,1,0.36,1)',
-        pointerEvents: 'none',
-      }}>
-        <div style={{ width: 28, height: 2.5, borderRadius: 2, background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)' }}/>
-      </div>
-
       {tabs.map(t => {
         const on = active === t.id;
         const color = on ? 'var(--accent)' : 'var(--text-2)';
