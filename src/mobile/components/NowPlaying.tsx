@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useStore } from '../../store';
 import { RepeatMode, ShuffleMode } from '../../store/types';
-import type { TrackRecord, PlaylistRecord, PlaylistTrackRecord } from '../../store/types';
+import type { TrackRecord, PlaylistRecord, PlaylistTrackRecord, BranchRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef, loopStateRef } from '../playerContext';
@@ -165,6 +165,8 @@ function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 4
   );
 }
 
+const COVERFLOW_WINDOW = 4; // cards mounted on each side of the visible center
+
 function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
   tracks: TrackRecord[];
   activeIndex: number;
@@ -178,9 +180,16 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
   const dragP         = useRef(0);
   const dragging      = useRef(false);
   const animFr        = useRef<number | null>(null);
-  const lastBrowseRef = useRef(activeIndex); // tracks last integer position reported to parent
-  // centeredIdx is React state purely for the glow re-render — updated only at drag/anim end
-  const [centeredIdx, setCenteredIdx] = useState(activeIndex);
+  const lastBrowseRef = useRef(activeIndex);
+  // windowCenter drives both the glow and which cards are mounted.
+  // Updated on every integer-position crossing so the window follows during drag/animation.
+  const [windowCenter, setWindowCenter] = useState(activeIndex);
+  const lastWindowRef = useRef(activeIndex);
+
+  const nudgeWindow = (pos: number) => {
+    const r = Math.round(pos);
+    if (r !== lastWindowRef.current) { lastWindowRef.current = r; setWindowCenter(r); }
+  };
 
   // Write transforms imperatively — no React re-render per frame
   const applyTransforms = useCallback((pos: number) => {
@@ -189,19 +198,14 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
       const off = i - pos, abs = Math.abs(off);
       if (abs > 2.5) { el.style.display = 'none'; return; }
       el.style.display = '';
-      el.style.transform  = `translateX(${off * (size * 0.62)}px) scale(${1 - Math.min(abs, 2) * 0.18}) rotateY(${-off * 26}deg) translateZ(${-Math.min(abs, 2) * 60}px)`;
-      el.style.opacity    = String(Math.max(0.18, 1 - abs * 0.32));
-      el.style.zIndex     = String(Math.round(10 - abs));
+      el.style.transform = `translateX(${off * (size * 0.62)}px) scale(${1 - Math.min(abs, 2) * 0.18}) rotateY(${-off * 26}deg) translateZ(${-Math.min(abs, 2) * 60}px)`;
+      el.style.opacity   = String(Math.max(0.18, 1 - abs * 0.32));
+      el.style.zIndex    = String(Math.round(10 - abs));
     });
   }, [size]);
 
-  // Tracks whether we've seen a non-empty tracks array yet — used to snap on first load
   const hadTracksRef = useRef(tracks.length > 0);
 
-  // Sync transforms before paint. Snaps posRef to activeIndex when tracks
-  // first become available (empty→non-empty) so the correct card is centered
-  // on the very first paint. Inline transforms in JSX also guarantee correct
-  // initial renders independently of this effect.
   useLayoutEffect(() => {
     const justLoaded = !hadTracksRef.current && tracks.length > 0;
     hadTracksRef.current = hadTracksRef.current || tracks.length > 0;
@@ -209,12 +213,12 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
       posRef.current        = activeIndex;
       prevActiveRef.current = activeIndex;
       lastBrowseRef.current = activeIndex;
-      setCenteredIdx(activeIndex);
+      lastWindowRef.current = activeIndex;
+      setWindowCenter(activeIndex);
     }
     applyTransforms(posRef.current);
   });
 
-  // When the playing track changes after initial load, animate to the new position
   const prevActiveRef = useRef(activeIndex);
   useEffect(() => {
     if (prevActiveRef.current === activeIndex) return;
@@ -226,17 +230,21 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
 
   const animateTo = (t: number) => {
     if (animFr.current) cancelAnimationFrame(animFr.current);
-    // Clamp in case the queue changed while we were browsing
     posRef.current = Math.max(0, Math.min(tracks.length - 1, posRef.current));
     const s = posRef.current, d = t - s;
-    if (Math.abs(d) < 0.001) { posRef.current = t; applyTransforms(t); setCenteredIdx(Math.round(t)); return; }
+    if (Math.abs(d) < 0.001) {
+      posRef.current = t; applyTransforms(t);
+      lastWindowRef.current = Math.round(t); setWindowCenter(Math.round(t));
+      return;
+    }
     const t0 = performance.now(), dur = 340;
     const step = (now: number) => {
       const p = Math.min((now - t0) / dur, 1), e = 1 - Math.pow(1 - p, 3);
       posRef.current = s + d * e;
       applyTransforms(posRef.current);
+      nudgeWindow(posRef.current);
       if (p < 1) animFr.current = requestAnimationFrame(step);
-      else setCenteredIdx(Math.round(t));
+      else { lastWindowRef.current = Math.round(t); setWindowCenter(Math.round(t)); }
     };
     animFr.current = requestAnimationFrame(step);
   };
@@ -253,12 +261,9 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
     const w = wrapRef.current?.offsetWidth || 360;
     posRef.current = Math.max(0, Math.min(tracks.length - 1, dragP.current - dx / (w / 2.5)));
     applyTransforms(posRef.current);
-    // Notify parent only when we've crossed an integer boundary (new card centered)
+    nudgeWindow(posRef.current);
     const rounded = Math.round(posRef.current);
-    if (rounded !== lastBrowseRef.current) {
-      lastBrowseRef.current = rounded;
-      onBrowse?.(rounded);
-    }
+    if (rounded !== lastBrowseRef.current) { lastBrowseRef.current = rounded; onBrowse?.(rounded); }
   };
   const endDrag = () => {
     if (dragX.current === null) return;
@@ -296,9 +301,8 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
       }}
     >
       {tracks.map((track, i) => {
-        // Compute initial transforms inline so the very first paint is correct.
-        // applyTransforms will overwrite these imperatively on every frame/layout,
-        // but JSX-computed values serve as the correct baseline for React reconciliation.
+        // Skip mounting cards outside the window — no hook cost for off-screen tracks
+        if (Math.abs(i - windowCenter) > COVERFLOW_WINDOW) return null;
         const off = i - posRef.current;
         const abs = Math.abs(off);
         const hidden = abs > 2.5;
@@ -315,7 +319,7 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
               zIndex: hidden ? undefined : Math.round(10 - abs),
             }}
           >
-            <CoverflowCard track={track} size={size} glow={i === centeredIdx}/>
+            <CoverflowCard track={track} size={size} glow={i === windowCenter}/>
           </div>
         );
       })}
@@ -348,6 +352,15 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   const currentPlaylist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [showBranchSheet, setShowBranchSheet] = useState(false);
+  const [activeBranch, setActiveBranch] = useState(() => localStorage.getItem('mm_active_branch') ?? 'main');
+  const activeBranchRef = useRef(localStorage.getItem('mm_active_branch') ?? 'main');
+
+  const setAndPersistBranch = useCallback((name: string) => {
+    localStorage.setItem('mm_active_branch', name);
+    activeBranchRef.current = name;
+    setActiveBranch(name);
+  }, []);
   const [showQueue, setShowQueue] = useState(false);
   const [listScrolled, setListScrolled] = useState(false);
   const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -521,7 +534,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       const isFullRange = a < 0.001 && b > 0.999;
       invoke('playlist_set_ab_loop', {
         playlistId: currentPlaylistId,
-        branchName: 'main',
+        branchName: activeBranch,
         trackHash: hash,
         abStartMs: isFullRange ? null : Math.round(a * dur),
         abEndMs:   isFullRange ? null : Math.round(b * dur),
@@ -585,8 +598,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   loopStateRef.abB = abB;
   browseTrackRef.current     = browseTrack;
   isBrowsingRef.current      = isBrowsing;
-  queueRecordsRef.current    = queueRecords;
-  queueTracksRef.current     = queueTracks;
+  queueRecordsRef.current      = queueRecords;
+  queueTracksRef.current       = queueTracks;
   currentPlaylistIdRef.current = currentPlaylistId ?? null;
   loadQueueRef.current       = loadQueue;
   draggingIdxRef.current     = draggingIdx;
@@ -660,7 +673,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         newHashes.splice(to, 0, moved);
         loadQueueRef.current(newHashes);
         const plId = currentPlaylistIdRef.current;
-        if (plId) invoke('playlist_reorder_tracks', { playlistId: plId, branchName: 'main', orderedHashes: newHashes }).catch(console.error);
+        if (plId) invoke('playlist_reorder_tracks', { playlistId: plId, branchName: activeBranchRef.current, orderedHashes: newHashes }).catch(console.error);
       }
     };
 
@@ -718,20 +731,32 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
 
         {/* header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 22px 8px' }}>
-          <button
-            onClick={() => setShowSwitcher(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: 10.5, color: 'var(--text-2)', letterSpacing: 0.12, textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>Playing from</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, color: 'var(--text-0)', fontWeight: 500 }}>
-                {currentPlaylist?.name ?? currentTrack?.album ?? (loadedTrackHash ? 'Library' : 'Nothing Playing')}
-                <Icons.chevDown size={13} stroke="var(--text-2)"/>
-              </span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 22px 8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+            <span style={{ fontSize: 10.5, color: 'var(--text-2)', letterSpacing: 0.12, textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>Playing from</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                onClick={() => setShowSwitcher(true)}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                <span style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
+                  {currentPlaylist?.name ?? currentTrack?.album ?? (loadedTrackHash ? 'Library' : 'Nothing Playing')}
+                </span>
+                <Icons.chevDown size={12} stroke="var(--text-2)"/>
+              </button>
+              {currentPlaylist && currentPlaylist.branches.length > 0 && (
+                <button
+                  onClick={() => setShowBranchSheet(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', borderRadius: 99, padding: '2px 8px 2px 6px', cursor: 'pointer', flexShrink: 0 }}
+                >
+                  <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'JetBrains Mono, monospace', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeBranch}</span>
+                  <Icons.chevDown size={10} stroke="var(--text-2)"/>
+                </button>
+              )}
             </div>
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-2)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace' }}>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-2)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, paddingTop: 2 }}>
             <Icons.sync size={13} stroke="var(--green)"/>
             <span>{queueTracks.length > 0 ? `${Math.max(0, activeListIndex) + 1} / ${queueTracks.length}` : '—'}</span>
           </div>
@@ -968,6 +993,71 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         );
       })()}
 
+      {/* Branch switcher sheet */}
+      {showBranchSheet && currentPlaylist && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+          <div onClick={() => setShowBranchSheet(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
+          <MMSheet
+            title="Switch Branch"
+            subtitle={`${currentPlaylist.branches.length} branch${currentPlaylist.branches.length !== 1 ? 'es' : ''}`}
+            height="55%"
+            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+            onClose={() => setShowBranchSheet(false)}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {currentPlaylist.branches.map((b: BranchRecord, i: number) => {
+                const isActive = b.name === activeBranch;
+                return (
+                  <div
+                    key={b.id}
+                    onClick={async () => {
+                      if (isActive) { setShowBranchSheet(false); return; }
+                      setAndPersistBranch(b.name);
+                      try {
+                        const ptracks = await invoke<PlaylistTrackRecord[]>('playlist_get_tracks', {
+                          playlistId: currentPlaylist.id, branchName: b.name,
+                        });
+                        loadQueue(ptracks.map(t => t.hash));
+                      } catch { /* keep existing queue */ }
+                      setShowBranchSheet(false);
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '11px 4px',
+                      borderBottom: i < currentPlaylist.branches.length - 1 ? '0.5px solid var(--border-0)' : 'none',
+                      cursor: 'pointer',
+                      animation: `mmFadeSlide 0.22s ease both`,
+                      animationDelay: `${i * 35}ms`,
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10,
+                      background: isActive ? 'color-mix(in srgb, var(--accent) 18%, transparent)' : 'var(--bg-3)',
+                      border: isActive ? '1px solid var(--accent)44' : '1px solid var(--border-1)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 16, color: isActive ? 'var(--accent)' : 'var(--text-2)' }}>⎇</span>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, color: isActive ? 'var(--accent)' : 'var(--text-0)', fontWeight: isActive ? 600 : 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {b.name}
+                      </div>
+                      {b.head_commit && (
+                        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
+                          {b.head_commit.slice(0, 7)}
+                        </div>
+                      )}
+                    </div>
+                    {isActive && <Icons.check size={16} stroke="var(--accent)"/>}
+                  </div>
+                );
+              })}
+            </div>
+          </MMSheet>
+        </div>
+      )}
+
       {/* Playlist quick switcher */}
       {showSwitcher && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
@@ -996,9 +1086,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   active={p.id === currentPlaylistId}
                   onSelect={async () => {
                     setCurrentPlaylist(p.id);
+                    const defaultBranch = p.branches.find(b => b.name === 'main')?.name ?? p.branches[0]?.name ?? 'main';
+                    setAndPersistBranch(defaultBranch);
                     try {
                       const ptracks = await invoke<PlaylistTrackRecord[]>('playlist_get_tracks', {
-                        playlistId: p.id, branchName: 'main',
+                        playlistId: p.id, branchName: defaultBranch,
                       });
                       loadQueue(ptracks.map(t => t.hash));
                     } catch { /* keep existing queue */ }

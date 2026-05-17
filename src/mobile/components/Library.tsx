@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import type { TrackRecord } from '../../store/types';
@@ -73,13 +74,20 @@ function FilterPill({ label, active, count, onClick }: {
   );
 }
 
+const TRACK_H   = 62;
+const SECTION_H = 36;
+
+type FlatItem =
+  | { kind: 'section'; label: string; trailing?: string }
+  | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean };
+
 function TrackRow({ track, idx, playing = false }: {
   track: TrackRecord; idx: number; playing?: boolean;
 }) {
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+      height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
       background: playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
       borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
     }}>
@@ -212,14 +220,14 @@ export function MiniPlayer({ onTab }: { onTab?: (id: TabId) => void }) {
 const SECTION_LABELS = ['This week', 'This month', 'Older'] as const;
 
 export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetail?: () => void }) {
-  const tracks = useStore(s => s.tracks);
+  const tracks        = useStore(s => s.tracks);
   const libraryStatus = useStore(s => s.libraryStatus);
   const [filter, setFilter] = useState<FilterId>('all');
-  const [query, setQuery] = useState('');
+  const [query,  setQuery]  = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
 
   const favCount = useMemo(() => tracks.filter(t => t.favorited).length, [tracks]);
 
-  // Filtered + sorted track list
   const displayed = useMemo<TrackRecord[]>(() => {
     let list = tracks;
     if (filter === 'favorites') list = list.filter(t => t.favorited);
@@ -231,32 +239,50 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         (t.album ?? '').toLowerCase().includes(q)
       );
     }
-    // Most recently added first
     return [...list].sort((a, b) => b.ingested_at - a.ingested_at);
   }, [tracks, filter, query]);
 
-  // Grouped by recency (only when not searching and not in Favorites filter)
   const grouped = useMemo(() => {
     if (query.trim() || filter === 'favorites') return null;
     const groups: [typeof SECTION_LABELS[number], TrackRecord[]][] = [
-      ['This week', []],
-      ['This month', []],
-      ['Older', []],
+      ['This week', []], ['This month', []], ['Older', []],
     ];
     displayed.forEach(t => groups[ageBucket(t.ingested_at)][1].push(t));
-    return groups.filter(([, tracks]) => tracks.length > 0);
+    return groups.filter(([, ts]) => ts.length > 0);
   }, [displayed, query, filter]);
 
-  const subtitle = libraryStatus === 'loading'
-    ? 'Loading…'
-    : `${tracks.length} tracks`;
+  // Flat item list for the virtualizer
+  const flatItems = useMemo<FlatItem[]>(() => {
+    const items: FlatItem[] = [];
+    let rowIdx = 0;
+    if (query.trim() && displayed.length > 0) {
+      items.push({ kind: 'section', label: `${displayed.length} result${displayed.length !== 1 ? 's' : ''}` });
+    }
+    if (grouped) {
+      grouped.forEach(([label, sectionTracks]) => {
+        items.push({ kind: 'section', label, trailing: String(sectionTracks.length) });
+        sectionTracks.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: false }));
+      });
+    } else {
+      displayed.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: false }));
+    }
+    return items;
+  }, [displayed, grouped, query]);
 
-  // Running index for row numbering
-  let rowIdx = 0;
+  const virtualizer = useVirtualizer({
+    count: flatItems.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: i => flatItems[i]?.kind === 'section' ? SECTION_H : TRACK_H,
+    overscan: 6,
+  });
+
+  const subtitle = libraryStatus === 'loading' ? 'Loading…' : `${tracks.length} tracks`;
 
   return (
-    <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
+    <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
+
+      {/* Fixed header — title, search, filter pills */}
+      <div style={{ flexShrink: 0 }}>
         <div style={{ padding: '14px 22px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.5 }}>Library</h1>
           <div style={{ display: 'flex', gap: 6 }}>
@@ -267,43 +293,38 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         <div style={{ padding: '4px 22px 0', fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
           {subtitle}
         </div>
-
         <div style={{ padding: '14px 22px 8px' }}>
           <MMSearchBar value={query} onChange={setQuery}/>
         </div>
-
-        <div style={{ display: 'flex', gap: 8, padding: '8px 22px 14px', overflowX: 'auto' }} className="mm-scroll">
-          <FilterPill label="All"            active={filter === 'all'}       count={tracks.length}  onClick={() => setFilter('all')}/>
+        <div style={{ display: 'flex', gap: 8, padding: '8px 22px 10px', overflowX: 'auto' }} className="mm-scroll">
+          <FilterPill label="All"            active={filter === 'all'}       count={tracks.length}         onClick={() => setFilter('all')}/>
           <FilterPill label="Favorites"      active={filter === 'favorites'} count={favCount || undefined} onClick={() => setFilter('favorites')}/>
-          <FilterPill label="Recently Added" active={filter === 'recent'}    onClick={() => setFilter('recent')}/>
+          <FilterPill label="Recently Added" active={filter === 'recent'}                                  onClick={() => setFilter('recent')}/>
         </div>
+      </div>
 
-        {/* Track list */}
-        {query.trim() && (
-          <SectionHead label={`${displayed.length} result${displayed.length !== 1 ? 's' : ''}`}/>
-        )}
-
-        {grouped
-          ? grouped.map(([label, sectionTracks]) => (
-              <div key={label}>
-                <SectionHead label={label} trailing={`${sectionTracks.length}`}/>
-                {sectionTracks.map(t => (
-                  <TrackRow key={t.hash} track={t} idx={++rowIdx} playing={false}/>
-                ))}
-              </div>
-            ))
-          : displayed.map(t => (
-              <TrackRow key={t.hash} track={t} idx={++rowIdx} playing={false}/>
-            ))
-        }
-
-        {libraryStatus === 'ready' && displayed.length === 0 && (
+      {/* Virtualized track list */}
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 86 }} className="mm-scroll">
+        {libraryStatus === 'ready' && flatItems.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
             {query ? 'No tracks match your search.' : 'No tracks in library.'}
           </div>
+        ) : (
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map(vItem => {
+              const item = flatItems[vItem.index];
+              if (!item) return null;
+              return (
+                <div key={vItem.key} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${vItem.start}px)`, height: vItem.size }}>
+                  {item.kind === 'section'
+                    ? <SectionHead label={item.label} trailing={item.trailing}/>
+                    : <TrackRow track={item.track} idx={item.idx} playing={item.playing}/>
+                  }
+                </div>
+              );
+            })}
+          </div>
         )}
-
-        <div style={{ height: 12 }}/>
       </div>
 
       <MiniPlayer onTab={onTab}/>
