@@ -175,12 +175,24 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const activeBranchHead = playlist.branches.find(b => b.name === activeBranchName)?.head_commit ?? null;
 
   const handleCreate = () => {
     if (!newName.trim()) return;
     setBusy(true);
-    invoke('branch_create', { playlistId: playlist.id, name: newName.trim(), fromCommit: null })
+    // Branch from the active branch's HEAD so the new branch starts with its current state
+    invoke('branch_create', { playlistId: playlist.id, name: newName.trim(), fromCommit: activeBranchHead })
       .then(() => { onRefresh(); onSelect(newName.trim()); onClose(); })
+      .catch(console.error)
+      .finally(() => setBusy(false));
+  };
+
+  const handleDelete = (branchName: string) => {
+    setBusy(true);
+    invoke('branch_delete', { playlistId: playlist.id, name: branchName })
+      .then(() => { setConfirmDelete(null); onRefresh(); })
       .catch(console.error)
       .finally(() => setBusy(false));
   };
@@ -239,10 +251,29 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
                     {b.head_commit ? b.head_commit.slice(0, 6) : 'empty'}
                   </div>
                 </div>
-                {isCurrent
-                  ? <Icons.check size={18} stroke={color}/>
-                  : <button style={iconBtn(28)} onClick={e => e.stopPropagation()}><Icons.moreV size={16} stroke="var(--text-2)"/></button>
-                }
+                {isCurrent ? (
+                  <Icons.check size={18} stroke={color}/>
+                ) : confirmDelete === b.name ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={e => e.stopPropagation()}>
+                    <span style={{ fontSize: 11, color: '#f87171' }}>Delete?</span>
+                    <button
+                      onClick={() => handleDelete(b.name)}
+                      disabled={busy}
+                      style={{ padding: '3px 10px', borderRadius: 8, background: '#f87171', color: '#fff', border: 'none', fontSize: 11, fontWeight: 600, cursor: 'pointer', opacity: busy ? 0.5 : 1 }}
+                    >Yes</button>
+                    <button
+                      onClick={() => setConfirmDelete(null)}
+                      style={{ padding: '3px 10px', borderRadius: 8, background: 'var(--bg-4)', color: 'var(--text-1)', border: 'none', fontSize: 11, cursor: 'pointer' }}
+                    >No</button>
+                  </div>
+                ) : (
+                  <button
+                    style={iconBtn(28)}
+                    onClick={e => { e.stopPropagation(); setConfirmDelete(b.name); }}
+                  >
+                    <Icons.trash size={15} stroke="#f87171"/>
+                  </button>
+                )}
               </div>
             );
           })}
