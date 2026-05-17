@@ -10,14 +10,18 @@ import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
 
-type FilterId  = 'all' | 'favorites' | 'recent';
-type SortField = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
-type SortDir   = 'asc' | 'desc';
+type FilterId    = 'all' | 'favorites' | 'recent';
+type SortField   = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
+type SortDir     = 'asc' | 'desc';
+type SortCriterion = { field: SortField; dir: SortDir };
 
-const SORT_KEY = 'melo-lib-sort';
-function loadSort(): { field: SortField; dir: SortDir } {
+// Numeric/date fields default descending; text fields default ascending
+const defaultDir = (f: SortField): SortDir => (f === 'ingested_at' || f === 'duration_ms') ? 'desc' : 'asc';
+
+const SORT_KEY = 'mm-lib-sort-multi';
+function loadCriteria(): SortCriterion[] {
   try { const r = localStorage.getItem(SORT_KEY); if (r) return JSON.parse(r); } catch {}
-  return { field: 'ingested_at', dir: 'desc' };
+  return [{ field: 'ingested_at', dir: 'desc' }];
 }
 
 function fmtDuration(ms: number): string {
@@ -246,19 +250,27 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const tracks          = useStore(s => s.tracks);
   const libraryStatus   = useStore(s => s.libraryStatus);
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
-  const [filter,    setFilter]    = useState<FilterId>('all');
-  const [query,     setQuery]     = useState('');
-  const [sortField, setSortField] = useState<SortField>(() => loadSort().field);
-  const [sortDir,   setSortDir]   = useState<SortDir>(() => loadSort().dir);
+  const [filter,       setFilter]       = useState<FilterId>('all');
+  const [query,        setQuery]        = useState('');
+  const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(loadCriteria);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    localStorage.setItem(SORT_KEY, JSON.stringify({ field: sortField, dir: sortDir }));
-  }, [sortField, sortDir]);
+    localStorage.setItem(SORT_KEY, JSON.stringify(sortCriteria));
+  }, [sortCriteria]);
 
+  // Three-state cycle per field: inactive → defaultDir → opposite → removed
   const handleSort = (field: SortField) => {
-    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortField(field); setSortDir(field === 'ingested_at' ? 'desc' : 'asc'); }
+    setSortCriteria(prev => {
+      const idx = prev.findIndex(c => c.field === field);
+      if (idx === -1) return [...prev, { field, dir: defaultDir(field) }];
+      const cur = prev[idx];
+      // On second tap (opposite of default) → remove; otherwise → toggle direction
+      if (cur.dir !== defaultDir(field)) return prev.filter((_, i) => i !== idx);
+      const next = [...prev];
+      next[idx] = { field, dir: cur.dir === 'asc' ? 'desc' : 'asc' };
+      return next;
+    });
   };
 
   const favCount = useMemo(() => tracks.filter(t => t.favorited).length, [tracks]);
@@ -275,21 +287,24 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       );
     }
     return [...list].sort((a, b) => {
-      const av = a[sortField] ?? '', bv = b[sortField] ?? '';
-      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
-      return sortDir === 'asc' ? cmp : -cmp;
+      for (const { field, dir } of sortCriteria) {
+        const av = a[field] ?? '', bv = b[field] ?? '';
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
+      }
+      return 0;
     });
-  }, [tracks, filter, query, sortField, sortDir]);
+  }, [tracks, filter, query, sortCriteria]);
 
-  // Date grouping only applies when sorting by date added and not searching/filtering by favorites
+  // Date grouping only applies when primary sort is date added
   const grouped = useMemo(() => {
-    if (query.trim() || filter === 'favorites' || sortField !== 'ingested_at') return null;
+    if (query.trim() || filter === 'favorites' || sortCriteria[0]?.field !== 'ingested_at') return null;
     const groups: [typeof SECTION_LABELS[number], TrackRecord[]][] = [
       ['This week', []], ['This month', []], ['Older', []],
     ];
     displayed.forEach(t => groups[ageBucket(t.ingested_at)][1].push(t));
     return groups.filter(([, ts]) => ts.length > 0);
-  }, [displayed, query, filter, sortField]);
+  }, [displayed, query, filter, sortCriteria]);
 
   // Flat item list for the virtualizer
   const flatItems = useMemo<FlatItem[]>(() => {
@@ -336,16 +351,22 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         <div style={{ padding: '14px 22px 8px' }}>
           <MMSearchBar value={query} onChange={setQuery}/>
         </div>
-        <div style={{ display: 'flex', gap: 8, padding: '8px 22px 6px', overflowX: 'auto' }} className="mm-scroll">
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', touchAction: 'pan-x', padding: '8px 0 6px' }} className="mm-scroll">
+          <div style={{ width: 22, flexShrink: 0 }}/>
           <FilterPill label="All"            active={filter === 'all'}       count={tracks.length}         onClick={() => setFilter('all')}/>
           <FilterPill label="Favorites"      active={filter === 'favorites'} count={favCount || undefined} onClick={() => setFilter('favorites')}/>
           <FilterPill label="Recently Added" active={filter === 'recent'}                                  onClick={() => setFilter('recent')}/>
+          <div style={{ width: 22, flexShrink: 0 }}/>
         </div>
-        {/* Sort pills */}
-        <div style={{ display: 'flex', gap: 6, padding: '2px 22px 10px', overflowX: 'auto' }} className="mm-scroll">
+        {/* Sort pills — multi-select, tap cycles: add → toggle → remove */}
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', touchAction: 'pan-x', padding: '2px 0 10px' }} className="mm-scroll">
+          <div style={{ width: 22, flexShrink: 0 }}/>
           {SORT_FIELDS.map(({ field, label }) => {
-            const active = sortField === field;
-            const arrow  = active ? (sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+            const idx    = sortCriteria.findIndex(c => c.field === field);
+            const active = idx !== -1;
+            const dir    = active ? sortCriteria[idx].dir : null;
+            const arrow  = dir === 'asc' ? ' ↑' : dir === 'desc' ? ' ↓' : '';
+            const badge  = active && sortCriteria.length > 1 ? idx + 1 : null;
             return (
               <button
                 key={field}
@@ -357,12 +378,17 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                   color: active ? 'var(--accent)' : 'var(--text-2)',
                   fontSize: 11.5, fontWeight: active ? 600 : 400,
                   fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
                 }}
               >
+                {badge !== null && (
+                  <span style={{ fontSize: 9, opacity: 0.7, lineHeight: 1 }}>{badge}</span>
+                )}
                 {label}{arrow}
               </button>
             );
           })}
+          <div style={{ width: 22, flexShrink: 0 }}/>
         </div>
       </div>
 
