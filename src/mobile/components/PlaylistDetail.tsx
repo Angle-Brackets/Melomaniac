@@ -634,11 +634,12 @@ function CommitGraphView({ playlistId, branchName, playlistName, onBack, onRefre
 }
 
 // ── Merge sheet
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function MField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
-      <div style={{ marginBottom: 6 }}>
+      <div style={{ marginBottom: 6, display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span style={{ fontSize: 11, letterSpacing: 0.12, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{label}</span>
+        {hint && <span style={{ fontSize: 11, color: 'var(--text-3)' }}>{hint}</span>}
       </div>
       {children}
     </div>
@@ -667,42 +668,92 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
   const [sourceTracks, setSourceTracks] = useState<PlaylistTrackRecord[]>([]);
   const [busy, setBusy] = useState(false);
 
+  // Descriptions
+  const [targetDesc, setTargetDesc] = useState<string | null>(null);
+  const [sourceDesc, setSourceDesc] = useState<string | null>(null);
+  const [descChoice, setDescChoice] = useState<'target' | 'source' | 'custom'>('target');
+  const [customDesc, setCustomDesc] = useState('');
+
+  // Commit message
+  const [commitMsg, setCommitMsg] = useState('');
+
+  useEffect(() => {
+    invoke<{ description: string | null }>('playlist_get_meta', { playlistId: playlist.id, branchName: targetBranch })
+      .then(m => setTargetDesc(m.description)).catch(() => {});
+  }, [playlist.id, targetBranch]);
+
   useEffect(() => {
     if (!sourceBranch) return;
     invoke<PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: playlist.id, branchName: sourceBranch })
       .then(setSourceTracks).catch(() => {});
+    invoke<{ description: string | null }>('playlist_get_meta', { playlistId: playlist.id, branchName: sourceBranch })
+      .then(m => { setSourceDesc(m.description); setDescChoice('target'); }).catch(() => {});
   }, [sourceBranch, playlist.id]);
 
-  const targetHashes = new Set(targetTracks.map(t => t.hash));
-  const sourceHashes = new Set(sourceTracks.map(t => t.hash));
-  const added   = sourceTracks.filter(t => !targetHashes.has(t.hash)).length;
-  const removed = strategy === 'intersection' ? targetTracks.filter(t => !sourceHashes.has(t.hash)).length : 0;
-  const total   = strategy === 'union'
+  const targetHashes  = new Set(targetTracks.map(t => t.hash));
+  const sourceHashes  = new Set(sourceTracks.map(t => t.hash));
+  const targetIdxMap  = new Map(targetTracks.map((t, i) => [t.hash, i]));
+  const sourceIdxMap  = new Map(sourceTracks.map((t, i) => [t.hash, i]));
+
+  const addedTracks    = sourceTracks.filter(t => !targetHashes.has(t.hash));
+  const removedTracks  = strategy === 'intersection' ? targetTracks.filter(t => !sourceHashes.has(t.hash)) : [];
+  const reorderedTracks = sourceTracks.filter(t =>
+    targetHashes.has(t.hash) && (targetIdxMap.get(t.hash) ?? 0) !== (sourceIdxMap.get(t.hash) ?? 0)
+  );
+
+  const added    = addedTracks.length;
+  const removed  = removedTracks.length;
+  const reordered = reorderedTracks.length;
+  const total    = strategy === 'union'
     ? targetTracks.length + added
     : targetTracks.filter(t => sourceHashes.has(t.hash)).length;
+
+  // Build preview rows: added (green), removed (red), reordered (blue) — cap at 8
+  type DiffRow = { kind: 'added' | 'removed' | 'reordered'; title: string; detail?: string };
+  const previewRows: DiffRow[] = [
+    ...addedTracks.slice(0, 5).map(t => ({ kind: 'added' as const, title: t.title })),
+    ...removedTracks.slice(0, 3).map(t => ({ kind: 'removed' as const, title: t.title })),
+    ...reorderedTracks.slice(0, 3).map(t => ({
+      kind: 'reordered' as const,
+      title: t.title,
+      detail: `moved to #${(targetIdxMap.get(t.hash) ?? 0) + 1}`,
+    })),
+  ].slice(0, 8);
+  const hiddenCount = (added + removed + reordered) - previewRows.length;
+
+  const descConflict = sourceDesc !== null && targetDesc !== sourceDesc;
 
   const handleMerge = () => {
     if (!sourceBranch) return;
     setBusy(true);
+    let descOverride: string | null = null;
+    if (descConflict) {
+      if (descChoice === 'source')      descOverride = sourceDesc;
+      else if (descChoice === 'custom') descOverride = customDesc.trim() || null;
+      else                              descOverride = targetDesc;
+    }
     invoke<string>('branch_merge', {
       playlistId: playlist.id,
       targetBranch,
       sourceBranch,
       strategy,
-      message: null,
-      descriptionOverride: null,
+      message: commitMsg.trim() || null,
+      descriptionOverride: descOverride,
     }).then(() => { onMerged(); onClose(); })
       .catch(console.error)
       .finally(() => setBusy(false));
   };
 
+  const DIFF_COLOR = { added: 'var(--green)', removed: '#f87171', reordered: '#4dabf7' } as const;
+  const DIFF_SYM   = { added: '+', removed: '−', reordered: '↕' } as const;
+
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }}/>
-      <MMSheet title={`Merge into ${targetBranch}`} subtitle={`${playlist.branches.length} branches available`} height="78%">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <MMSheet title={`Merge into ${targetBranch}`} subtitle={`${playlist.branches.length - 1} source branch${playlist.branches.length - 1 !== 1 ? 'es' : ''} · ${strategy}`} height="86%" expandable>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
-          <Field label="From branch">
+          <MField label="From branch">
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {otherBranches.map((b) => {
                 const color = BRANCH_PALETTE[(playlist.branches.findIndex(pb => pb.name === b.name)) % BRANCH_PALETTE.length];
@@ -725,9 +776,9 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
                 <span style={{ fontSize: 13, color: 'var(--text-2)' }}>No other branches</span>
               )}
             </div>
-          </Field>
+          </MField>
 
-          <Field label="Strategy">
+          <MField label="Strategy">
             <div style={{ display: 'flex', gap: 6, padding: 3, background: 'var(--bg-3)', borderRadius: 12 }}>
               {(['union', 'intersection'] as const).map(s => (
                 <button key={s} onClick={() => setStrategy(s)} style={{
@@ -741,20 +792,109 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
                 </button>
               ))}
             </div>
-          </Field>
+          </MField>
 
-          <Field label="Preview">
-            <div style={{ padding: 12, borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <DiffStat n={`+${added}`} color="var(--green)" sub="added"/>
-                <DiffStat n={`−${removed}`} color={removed > 0 ? '#f87171' : 'var(--text-2)'} sub="removed"/>
+          <MField label="Preview">
+            <div style={{ borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 12px', borderBottom: (previewRows.length > 0) ? '0.5px solid var(--border-0)' : 'none' }}>
+                <DiffStat n={`+${added}`}   color={added > 0 ? 'var(--green)' : 'var(--text-2)'} sub="added"/>
+                <DiffStat n={`−${removed}`} color={removed > 0 ? '#f87171' : 'var(--text-2)'}   sub="removed"/>
+                <DiffStat n={`↕${reordered}`} color={reordered > 0 ? '#4dabf7' : 'var(--text-2)'} sub="reordered"/>
                 <div style={{ flex: 1 }}/>
                 <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>→ {total} total</span>
               </div>
+              {previewRows.map((row, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: i < previewRows.length - 1 ? '0.5px solid var(--border-0)' : 'none' }}>
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: DIFF_COLOR[row.kind], width: 12, textAlign: 'center', flexShrink: 0 }}>{DIFF_SYM[row.kind]}</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-1)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
+                  {row.detail && <span style={{ fontSize: 11, color: '#4dabf7', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{row.detail}</span>}
+                </div>
+              ))}
+              {hiddenCount > 0 && (
+                <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+                  + {hiddenCount} more…
+                </div>
+              )}
             </div>
-          </Field>
+          </MField>
 
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          {descConflict && (
+            <MField label="Description conflict" hint="Branches differ. Pick one or write your own.">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {([
+                  { key: 'target' as const, label: `From ${targetBranch}`, value: targetDesc },
+                  { key: 'source' as const, label: `From ${sourceBranch}`, value: sourceDesc },
+                ] as { key: 'target' | 'source'; label: string; value: string | null }[]).map(opt => (
+                  <button key={opt.key} onClick={() => setDescChoice(opt.key)} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 10,
+                    background: descChoice === opt.key ? 'oklch(0.25 0.08 28 / 0.6)' : 'var(--bg-3)',
+                    border: `1px solid ${descChoice === opt.key ? 'var(--accent)' : 'var(--border-1)'}`,
+                    cursor: 'pointer', textAlign: 'left',
+                  }}>
+                    <div style={{
+                      width: 16, height: 16, borderRadius: 8, flexShrink: 0, marginTop: 2,
+                      border: `2px solid ${descChoice === opt.key ? 'var(--accent)' : 'var(--border-2)'}`,
+                      background: descChoice === opt.key ? 'var(--accent)' : 'transparent',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      {descChoice === opt.key && <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--bg-0)' }}/>}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: 0.1, marginBottom: 3 }}>{opt.label}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.4 }}>{opt.value ?? <em style={{ color: 'var(--text-3)' }}>no description</em>}</div>
+                    </div>
+                  </button>
+                ))}
+                <button onClick={() => setDescChoice('custom')} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 10,
+                  background: descChoice === 'custom' ? 'oklch(0.25 0.08 28 / 0.6)' : 'var(--bg-3)',
+                  border: `1px solid ${descChoice === 'custom' ? 'var(--accent)' : 'var(--border-1)'}`,
+                  cursor: 'pointer', textAlign: 'left', width: '100%',
+                }}>
+                  <div style={{
+                    width: 16, height: 16, borderRadius: 8, flexShrink: 0, marginTop: 2,
+                    border: `2px solid ${descChoice === 'custom' ? 'var(--accent)' : 'var(--border-2)'}`,
+                    background: descChoice === 'custom' ? 'var(--accent)' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {descChoice === 'custom' && <div style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--bg-0)' }}/>}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: 0.1, marginBottom: 3 }}>Write your own</div>
+                    {descChoice === 'custom' && (
+                      <textarea
+                        value={customDesc}
+                        onChange={e => setCustomDesc(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        placeholder="Enter merged description…"
+                        rows={2}
+                        style={{
+                          width: '100%', background: 'var(--bg-4)', border: '0.5px solid var(--border-2)',
+                          borderRadius: 6, padding: '6px 8px', color: 'var(--text-0)', fontSize: 13,
+                          resize: 'none', fontFamily: 'inherit', outline: 'none',
+                        }}
+                      />
+                    )}
+                  </div>
+                </button>
+              </div>
+            </MField>
+          )}
+
+          <MField label="Commit message">
+            <input
+              value={commitMsg}
+              onChange={e => setCommitMsg(e.target.value)}
+              placeholder={`Merge ${sourceBranch} → ${targetBranch}`}
+              style={{
+                width: '100%', background: 'var(--bg-3)', border: '0.5px solid var(--border-1)',
+                borderRadius: 10, padding: '10px 12px', color: 'var(--text-0)', fontSize: 13,
+                fontFamily: 'inherit', outline: 'none',
+              }}
+            />
+          </MField>
+
+          <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={onClose} style={{ flex: 1, padding: '12px', borderRadius: 99, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', color: 'var(--text-1)', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
               Cancel
             </button>
