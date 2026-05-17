@@ -154,13 +154,14 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
 }
 
 // ── Bottom sheet
-export function MMSheet({ title, subtitle, children, height = '72%', accessory, animStyle, onClose }: {
+export function MMSheet({ title, subtitle, children, height = '72%', accessory, animStyle, onClose, expandable = false }: {
   title: string; subtitle?: string; children: React.ReactNode;
   height?: string; accessory?: React.ReactNode; animStyle?: React.CSSProperties;
-  onClose?: () => void;
+  onClose?: () => void; expandable?: boolean;
 }) {
   const startYRef  = useRef<number | null>(null);
   const [dismissing, setDismissing] = useState(false);
+  const [expanded,   setExpanded]   = useState(false);
 
   const dismiss = () => {
     if (!onClose || dismissing) return;
@@ -168,9 +169,13 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
     setTimeout(onClose, 270);
   };
 
+  const currentHeight = expandable && expanded ? '92%' : height;
+
   return (
     <div style={{
-      position: 'absolute', left: 0, right: 0, bottom: 0, height,
+      position: 'absolute', left: 0, right: 0, bottom: 0,
+      height: currentHeight,
+      transition: dismissing ? 'none' : 'height 0.35s cubic-bezier(0.22,1,0.36,1)',
       background: 'var(--bg-2)',
       borderTopLeftRadius: 28, borderTopRightRadius: 28,
       border: '0.5px solid var(--border-1)', borderBottom: 'none',
@@ -179,14 +184,21 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
       ...animStyle,
       animation: dismissing ? 'mmSheetDown 0.27s ease-in both' : animStyle?.animation,
     }}>
-      {/* drag handle — touch here to swipe-dismiss */}
+      {/* drag handle — up = expand, down = collapse/dismiss */}
       <div
-        onTouchStart={e => { startYRef.current = e.touches[0].clientY; }}
-        onTouchEnd={e => {
+        onPointerDown={e => {
+          startYRef.current = e.clientY;
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerUp={e => {
           if (startYRef.current === null) return;
-          const dy = e.changedTouches[0].clientY - startYRef.current;
+          const dy = e.clientY - startYRef.current;
           startYRef.current = null;
-          if (dy > 52) dismiss();
+          if (expandable && dy < -44) { setExpanded(true);  return; }
+          if (dy > 52) {
+            if (expandable && expanded) setExpanded(false);
+            else dismiss();
+          }
         }}
         style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 6px', touchAction: 'none' }}
       >

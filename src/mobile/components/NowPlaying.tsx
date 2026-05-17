@@ -35,7 +35,9 @@ function QueueSheetRow({ track }: { track: TrackRecord }) {
   );
 }
 
-const QUEUE_ROW_H = 52;
+const QUEUE_ROW_H    = 52;
+const QUEUE_LIST_H   = 252;
+const QUEUE_HEADER_H = 36;
 
 function QueueRow({ track, isActive, isPlaying, onClick }: {
   track: TrackRecord;
@@ -325,6 +327,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     setActiveBranch(name);
   }, []);
   const [showQueue, setShowQueue] = useState(false);
+  const [queueExpanded, setQueueExpanded] = useState(() => localStorage.getItem('mm_queue_expanded') !== 'false');
   const [listScrolled, setListScrolled] = useState(false);
   const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -341,7 +344,19 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const currentPlaylistIdRef = useRef<string | null>(null);
   const loadQueueRef       = useRef(loadQueue);
 
+  const handleToggleQueue = useCallback(() => {
+    setQueueExpanded(e => {
+      const next = !e;
+      localStorage.setItem('mm_queue_expanded', String(next));
+      if (!next) setListScrolled(false);
+      return next;
+    });
+  }, []);
+
+  const programmaticScrollRef = useRef(false);
+
   const handleListScroll = useCallback(() => {
+    if (programmaticScrollRef.current) return;
     if (!listParentRef.current) return;
     if (listParentRef.current.scrollTop <= 40) {
       if (inactivityRef.current) { clearTimeout(inactivityRef.current); inactivityRef.current = null; }
@@ -584,7 +599,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   useEffect(() => {
     if (activeListIndex >= 0) {
+      programmaticScrollRef.current = true;
       queueVirtualizer.scrollToIndex(activeListIndex, { align: 'center', behavior: 'smooth' });
+      // smooth scroll takes ~340ms; clear flag with margin so onScroll events are ignored
+      const t = setTimeout(() => { programmaticScrollRef.current = false; }, 500);
+      return () => clearTimeout(t);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeListIndex]);
@@ -691,7 +710,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         filter: 'blur(20px)', pointerEvents: 'none',
       }}/>
 
-      <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
+      <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16, overflow: 'hidden', paddingBottom: 86 + (queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0), transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
 
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 22px 8px' }}>
@@ -716,13 +735,18 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           )}
         </div>
 
-        {/* coverflow */}
-        <div style={{ flexShrink: 0, marginTop: 6, marginBottom: 8 }}>
+        {/* coverflow — flex:1 so it fills available space; maxHeight caps it when queue is collapsed */}
+        <div style={{
+          flex: 1, minHeight: 0, maxHeight: queueExpanded ? 214 : 380,
+          marginTop: 6, marginBottom: 8,
+          transition: 'max-height 0.4s cubic-bezier(0.22,1,0.36,1)',
+          overflow: 'visible', display: 'flex', alignItems: 'center',
+        }}>
           <MMCoverflow
             tracks={coverflowItems}
             activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
             onBrowse={setBrowseIndex}
-            size={180}
+            size={queueExpanded ? 180 : 260}
           />
         </div>
 
@@ -833,56 +857,71 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           );
         })()}
 
-        {/* Playlist / library song list */}
-        {queueRecords.length > 0 ? (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', borderTop: '0.5px solid var(--border-0)', marginTop: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 20px 4px', flexShrink: 0 }}>
+      </div>
+
+      {/* Queue — slides to bottom:0 when nav hides so list fills the freed space */}
+      {queueRecords.length > 0 && (() => {
+        const queueListH = QUEUE_LIST_H + (listScrolled ? 86 : 0);
+        return (
+          <div style={{
+            position: 'absolute', left: 0, right: 0,
+            bottom: listScrolled ? 0 : 86,
+            transition: 'bottom 0.35s ease',
+            zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
+          }}>
+            <button
+              onClick={handleToggleQueue}
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', height: QUEUE_HEADER_H, background: 'none', border: 'none', cursor: 'pointer', width: '100%', color: 'inherit', flexShrink: 0 }}
+            >
               <span style={{ fontSize: 10.5, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: 0.1, fontFamily: 'JetBrains Mono, monospace' }}>
                 {currentPlaylist?.name ?? 'Library'}
               </span>
-              <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
-                {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
-              </span>
-            </div>
-            <div
-              ref={listParentRef}
-              onScroll={handleListScroll}
-              style={{ flex: 1, overflowY: 'auto' }}
-              className="mm-scroll"
-            >
-              <div style={{ height: queueVirtualizer.getTotalSize(), position: 'relative' }}>
-                {queueVirtualizer.getVirtualItems().map(vItem => {
-                  const track = queueRecords[vItem.index];
-                  if (!track) return null;
-                  const isDropTarget = dropTargetIdx === vItem.index && draggingIdx !== null && draggingIdx !== vItem.index;
-                  return (
-                    <div
-                      key={track.hash}
-                      style={{
-                        position: 'absolute', top: 0, left: 0, right: 0, height: QUEUE_ROW_H,
-                        transform: `translateY(${vItem.start}px)`,
-                        borderTop: isDropTarget ? '2px solid var(--accent)' : '2px solid transparent',
-                        opacity: draggingIdx === vItem.index ? 0.3 : 1,
-                      }}
-                    >
-                      <QueueRow
-                        track={track}
-                        isActive={track.hash === loadedTrackHash}
-                        isPlaying={isPlaying}
-                        onClick={() => { if (draggingIdx === null) { jumpTo(vItem.index); playTrack(track); } }}
-                      />
-                    </div>
-                  );
-                })}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+                  {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
+                </span>
+                <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.25s ease' }}>
+                  <Icons.chevDown size={13} stroke="var(--text-3)"/>
+                </div>
               </div>
-              {/* tab bar clearance */}
-              <div style={{ height: 86 }}/>
+            </button>
+            <div style={{ overflow: 'hidden', maxHeight: queueExpanded ? queueListH : 0, transition: 'max-height 0.4s cubic-bezier(0.22,1,0.36,1)', pointerEvents: queueExpanded ? 'auto' : 'none' }}>
+              <div
+                ref={listParentRef}
+                onScroll={handleListScroll}
+                style={{ height: queueListH, overflowY: 'auto' }}
+                className="mm-scroll"
+              >
+                <div style={{ height: queueVirtualizer.getTotalSize(), position: 'relative' }}>
+                  {queueVirtualizer.getVirtualItems().map(vItem => {
+                    const track = queueRecords[vItem.index];
+                    if (!track) return null;
+                    const isDropTarget = dropTargetIdx === vItem.index && draggingIdx !== null && draggingIdx !== vItem.index;
+                    return (
+                      <div
+                        key={track.hash}
+                        style={{
+                          position: 'absolute', top: 0, left: 0, right: 0, height: QUEUE_ROW_H,
+                          transform: `translateY(${vItem.start}px)`,
+                          borderTop: isDropTarget ? '2px solid var(--accent)' : '2px solid transparent',
+                          opacity: draggingIdx === vItem.index ? 0.3 : 1,
+                        }}
+                      >
+                        <QueueRow
+                          track={track}
+                          isActive={track.hash === loadedTrackHash}
+                          isPlaying={isPlaying}
+                          onClick={() => { if (draggingIdx === null) { jumpTo(vItem.index); playTrack(track); } }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
-        ) : (
-          <div style={{ flex: 1, minHeight: 8 }}/>
-        )}
-      </div>
+        );
+      })()}
 
       <MMTabBar active="now" onTab={onTab} style={{
         transform: listScrolled ? 'translateY(86px)' : 'translateY(0)',
@@ -920,7 +959,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         return (
           <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
             <div onClick={() => setShowQueue(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowQueue(false)}>
+            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" expandable animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowQueue(false)}>
               {nowPlaying && (
                 <>
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginBottom: 2 }}>Now Playing</div>

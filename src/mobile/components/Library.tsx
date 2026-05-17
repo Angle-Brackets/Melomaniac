@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
@@ -10,6 +10,29 @@ import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
 
+function useHorizDragScroll() {
+  const ref      = useRef<HTMLDivElement>(null);
+  const startRef = useRef<{ x: number; sl: number } | null>(null);
+  const didDrag  = useRef(false);
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!ref.current) return;
+    startRef.current = { x: e.clientX, sl: ref.current.scrollLeft };
+    didDrag.current  = false;
+  }, []);
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!startRef.current || !ref.current) return;
+    const dx = startRef.current.x - e.clientX;
+    if (Math.abs(dx) > 4) didDrag.current = true;
+    ref.current.scrollLeft = startRef.current.sl + dx;
+  }, []);
+  const onPointerUp = useCallback(() => { startRef.current = null; }, []);
+  // Absorb click events that followed a drag so pills don't toggle accidentally
+  const onClickCapture = useCallback((e: React.MouseEvent) => {
+    if (didDrag.current) { e.stopPropagation(); didDrag.current = false; }
+  }, []);
+  return { ref, onPointerDown, onPointerMove, onPointerUp, onClickCapture };
+}
+
 type FilterId    = 'all' | 'favorites' | 'recent';
 type SortField   = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
 type SortDir     = 'asc' | 'desc';
@@ -19,9 +42,16 @@ type SortCriterion = { field: SortField; dir: SortDir };
 const defaultDir = (f: SortField): SortDir => (f === 'ingested_at' || f === 'duration_ms') ? 'desc' : 'asc';
 
 const SORT_KEY = 'mm-lib-sort-multi';
+const DEFAULT_CRITERIA: SortCriterion[] = [{ field: 'ingested_at', dir: 'desc' }];
 function loadCriteria(): SortCriterion[] {
-  try { const r = localStorage.getItem(SORT_KEY); if (r) return JSON.parse(r); } catch {}
-  return [{ field: 'ingested_at', dir: 'desc' }];
+  try {
+    const r = localStorage.getItem(SORT_KEY);
+    if (r) {
+      const parsed = JSON.parse(r);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_CRITERIA;
 }
 
 function fmtDuration(ms: number): string {
@@ -253,10 +283,13 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const [filter,       setFilter]       = useState<FilterId>('all');
   const [query,        setQuery]        = useState('');
   const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(loadCriteria);
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef      = useRef<HTMLDivElement>(null);
+  const filterScroll = useHorizDragScroll();
+  const sortScroll   = useHorizDragScroll();
 
   useEffect(() => {
-    localStorage.setItem(SORT_KEY, JSON.stringify(sortCriteria));
+    if (sortCriteria.length > 0) localStorage.setItem(SORT_KEY, JSON.stringify(sortCriteria));
+    else localStorage.removeItem(SORT_KEY);
   }, [sortCriteria]);
 
   // Three-state cycle per field: inactive → defaultDir → opposite → removed
@@ -351,7 +384,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         <div style={{ padding: '14px 22px 8px' }}>
           <MMSearchBar value={query} onChange={setQuery}/>
         </div>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', touchAction: 'pan-x', padding: '8px 0 6px' }} className="mm-scroll">
+        <div ref={filterScroll.ref} onPointerDown={filterScroll.onPointerDown} onPointerMove={filterScroll.onPointerMove} onPointerUp={filterScroll.onPointerUp} onClickCapture={filterScroll.onClickCapture} style={{ display: 'flex', gap: 8, overflowX: 'auto', touchAction: 'pan-x', padding: '8px 0 6px', cursor: 'grab' }} className="mm-scroll">
           <div style={{ width: 22, flexShrink: 0 }}/>
           <FilterPill label="All"            active={filter === 'all'}       count={tracks.length}         onClick={() => setFilter('all')}/>
           <FilterPill label="Favorites"      active={filter === 'favorites'} count={favCount || undefined} onClick={() => setFilter('favorites')}/>
@@ -359,7 +392,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
           <div style={{ width: 22, flexShrink: 0 }}/>
         </div>
         {/* Sort pills — multi-select, tap cycles: add → toggle → remove */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', touchAction: 'pan-x', padding: '2px 0 10px' }} className="mm-scroll">
+        <div ref={sortScroll.ref} onPointerDown={sortScroll.onPointerDown} onPointerMove={sortScroll.onPointerMove} onPointerUp={sortScroll.onPointerUp} onClickCapture={sortScroll.onClickCapture} style={{ display: 'flex', gap: 6, overflowX: 'auto', touchAction: 'pan-x', padding: '2px 0 10px', cursor: 'grab' }} className="mm-scroll">
           <div style={{ width: 22, flexShrink: 0 }}/>
           {SORT_FIELDS.map(({ field, label }) => {
             const idx    = sortCriteria.findIndex(c => c.field === field);
