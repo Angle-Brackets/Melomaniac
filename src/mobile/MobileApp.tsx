@@ -36,7 +36,8 @@ export default function MobileApp() {
       const pl = playlists.find(p => p.id === saved);
       if (!pl) return;
       setCurrentPlaylist(saved);
-      const branchName = pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
+      const savedBranch = localStorage.getItem('mm_active_branch') ?? 'main';
+      const branchName = pl.branches.find(b => b.name === savedBranch)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
       invoke<{ hash: string }[]>('playlist_get_tracks', { playlistId: saved, branchName })
         .then(ptracks => { loadQueue(ptracks.map(t => t.hash)); })
         .catch(() => {});

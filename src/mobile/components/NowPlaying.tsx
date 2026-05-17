@@ -731,35 +731,26 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
 
         {/* header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 22px 8px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-            <span style={{ fontSize: 10.5, color: 'var(--text-2)', letterSpacing: 0.12, textTransform: 'uppercase', fontFamily: 'JetBrains Mono, monospace' }}>Playing from</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button
-                onClick={() => setShowSwitcher(true)}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-              >
-                <span style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 140 }}>
-                  {currentPlaylist?.name ?? currentTrack?.album ?? (loadedTrackHash ? 'Library' : 'Nothing Playing')}
-                </span>
-                <Icons.chevDown size={12} stroke="var(--text-2)"/>
-              </button>
-              {currentPlaylist && currentPlaylist.branches.length > 0 && (
-                <button
-                  onClick={() => setShowBranchSheet(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', borderRadius: 99, padding: '2px 8px 2px 6px', cursor: 'pointer', flexShrink: 0 }}
-                >
-                  <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'JetBrains Mono, monospace', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeBranch}</span>
-                  <Icons.chevDown size={10} stroke="var(--text-2)"/>
-                </button>
-              )}
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-2)', fontSize: 11, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, paddingTop: 2 }}>
-            <Icons.sync size={13} stroke="var(--green)"/>
-            <span>{queueTracks.length > 0 ? `${Math.max(0, activeListIndex) + 1} / ${queueTracks.length}` : '—'}</span>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 22px 8px' }}>
+          <button
+            onClick={() => setShowSwitcher(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, minWidth: 0 }}
+          >
+            <span style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }}>
+              {currentPlaylist?.name ?? currentTrack?.album ?? (loadedTrackHash ? 'Library' : 'Nothing Playing')}
+            </span>
+            <Icons.chevDown size={12} stroke="var(--text-2)"/>
+          </button>
+          {currentPlaylist && currentPlaylist.branches.length > 0 && (
+            <button
+              onClick={() => setShowBranchSheet(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', borderRadius: 99, padding: '2px 8px 2px 6px', cursor: 'pointer', flexShrink: 0 }}
+            >
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
+              <span style={{ fontSize: 11, color: 'var(--text-1)', fontFamily: 'JetBrains Mono, monospace', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeBranch}</span>
+              <Icons.chevDown size={10} stroke="var(--text-2)"/>
+            </button>
+          )}
         </div>
 
         {/* coverflow */}
