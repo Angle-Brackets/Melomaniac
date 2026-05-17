@@ -4,8 +4,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import type { TrackRecord } from '../../store/types';
 import { Icons } from '../icons';
-import { MMArt, MMTabBar, MMHash, MMBranchPill, MarqueeText, iconBtn } from './common';
+import { MMArt, MMTabBar, MMHash, MMBranchPill, MMSheet, MarqueeText, iconBtn } from './common';
 import type { TabId } from './common';
+import type { PlaylistRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
@@ -87,10 +88,9 @@ function MMSearchBar({ value, onChange, placeholder = 'Search tracks' }: {
           fontFamily: 'Outfit, sans-serif',
         }}
       />
-      {value
-        ? <button onClick={() => onChange('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', display: 'flex' }}><Icons.x size={15} stroke="var(--text-2)"/></button>
-        : <Icons.filter size={16} stroke="var(--text-2)"/>
-      }
+      {value && (
+        <button onClick={() => onChange('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', display: 'flex' }}><Icons.x size={15} stroke="var(--text-2)"/></button>
+      )}
     </div>
   );
 }
@@ -119,24 +119,132 @@ function FilterPill({ label, active, count, onClick }: {
 const TRACK_H   = 62;
 const SECTION_H = 36;
 
+function MMToast({ message }: { message: string }) {
+  return (
+    <div style={{
+      position: 'absolute', bottom: 100, left: '50%', transform: 'translateX(-50%)',
+      background: 'var(--bg-3)', border: '0.5px solid var(--border-2)',
+      borderRadius: 20, padding: '8px 18px',
+      fontSize: 12, color: 'var(--accent-light, var(--accent))',
+      fontFamily: "'JetBrains Mono', monospace",
+      boxShadow: '0 4px 20px rgba(0,0,0,0.55)',
+      pointerEvents: 'none', zIndex: 200, whiteSpace: 'nowrap',
+      animation: 'mmFadeSlide 0.2s ease',
+    }}>
+      {message}
+    </div>
+  );
+}
+
+function AddToPlaylistSheet({ hashes, onClose, onSuccess }: {
+  hashes: string[]; label: string; onClose: () => void; onSuccess: (msg: string) => void;
+}) {
+  const playlists = useStore(s => s.playlists);
+  const [drill, setDrill] = useState<PlaylistRecord | null>(null);
+  const [busy,  setBusy]  = useState(false);
+  const [errMsg, setErrMsg] = useState('');
+
+  const doAdd = async (playlistId: string, branchName: string, plName: string) => {
+    setBusy(true); setErrMsg('');
+    try {
+      await invoke('branch_append_tracks', { playlistId, branchName, hashes });
+      const n = hashes.length;
+      onSuccess(`Added ${n === 1 ? '1 track' : `${n} tracks`} → ${plName}`);
+      onClose();
+    } catch (e) {
+      setBusy(false);
+      setErrMsg(String(e));
+    }
+  };
+
+  const handlePlaylist = (pl: PlaylistRecord) => {
+    if (pl.branches.length === 1) { doAdd(pl.id, pl.branches[0].name, pl.name); return; }
+    setDrill(pl);
+  };
+
+  if (drill) return (
+    <>
+      <button onClick={() => setDrill(null)} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: 13, padding: '4px 0 12px' }}>
+        <Icons.chevLeft size={14} stroke="var(--text-2)"/> All playlists
+      </button>
+      {errMsg && <div style={{ color: 'var(--red, #f87171)', fontSize: 12, marginBottom: 8 }}>{errMsg}</div>}
+      {drill.branches.map(b => (
+        <button key={b.id} onClick={() => doAdd(drill.id, b.name, drill.name)} disabled={busy}
+          style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 0', background: 'none', border: 'none', borderBottom: '0.5px solid var(--border-0)', cursor: 'pointer', color: 'inherit' }}
+        >
+          <span style={{ fontSize: 13, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
+          <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 500 }}>{b.name}</span>
+        </button>
+      ))}
+    </>
+  );
+
+  return (
+    <>
+      {errMsg && <div style={{ color: 'var(--red, #f87171)', fontSize: 12, marginBottom: 8 }}>{errMsg}</div>}
+      {playlists.length === 0
+        ? <div style={{ color: 'var(--text-3)', fontSize: 14, padding: '24px 0', textAlign: 'center' }}>No playlists yet</div>
+        : playlists.map(pl => (
+          <button key={pl.id} onClick={() => handlePlaylist(pl)} disabled={busy}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 0', background: 'none', border: 'none', borderBottom: '0.5px solid var(--border-0)', cursor: 'pointer', color: 'inherit' }}
+          >
+            <PlaylistArt playlistId={pl.id}/>
+            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{pl.name}</div>
+              {pl.branches.length > 1 && (
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>{pl.branches.length} branches</div>
+              )}
+            </div>
+            {pl.branches.length > 1 && <Icons.chevRight size={14} stroke="var(--text-3)"/>}
+          </button>
+        ))
+      }
+    </>
+  );
+}
+
 type FlatItem =
   | { kind: 'section'; label: string; trailing?: string }
   | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean };
 
-function TrackRow({ track, idx, playing = false }: {
+function TrackRow({ track, idx, playing = false, onLongPress, selected, onSelect }: {
   track: TrackRecord; idx: number; playing?: boolean;
+  onLongPress?: () => void; selected?: boolean; onSelect?: () => void;
 }) {
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
   const subtext = [track.artist ?? 'Unknown artist', track.album].filter(Boolean).join(' | ');
+  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startLp = () => {
+    lpTimer.current = setTimeout(() => { lpTimer.current = null; onLongPress?.(); }, 500);
+  };
+  const cancelLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
+  const inSelectMode = onSelect !== undefined;
   return (
-    <div style={{
-      height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
-      background: playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
-      borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
-    }}>
-      <span style={{ width: 18, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
-        {String(idx).padStart(2, '0')}
-      </span>
+    <div
+      onClick={inSelectMode ? onSelect : undefined}
+      onPointerDown={inSelectMode ? undefined : e => { (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId); startLp(); }}
+      onPointerUp={inSelectMode ? undefined : cancelLp}
+      onPointerCancel={inSelectMode ? undefined : cancelLp}
+      onPointerMove={inSelectMode ? undefined : e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
+      style={{
+        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+        cursor: inSelectMode ? 'pointer' : 'default',
+        background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
+        borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
+      }}>
+      {inSelectMode ? (
+        <div style={{ width: 18, height: 18, borderRadius: 9, flexShrink: 0,
+          background: selected ? 'var(--accent)' : 'transparent',
+          border: selected ? 'none' : '1.5px solid var(--border-2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {selected && <Icons.check size={11} stroke="var(--bg-0)"/>}
+        </div>
+      ) : (
+        <span style={{ width: 18, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
+          {String(idx).padStart(2, '0')}
+        </span>
+      )}
       <MMArt src={artworkUrl ?? undefined} size={42} radius={7}/>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
@@ -158,7 +266,6 @@ function TrackRow({ track, idx, playing = false }: {
       <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
         {fmtDuration(track.duration_ms)}
       </span>
-      <span style={{ flexShrink: 0, display: 'flex' }}><Icons.moreV size={16} stroke="var(--text-3)"/></span>
     </div>
   );
 }
@@ -172,7 +279,7 @@ function SectionHead({ label, trailing }: { label: string; trailing?: string }) 
   );
 }
 
-export function MiniPlayer({ onTab }: { onTab?: (id: TabId) => void }) {
+export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) => void; bottomOffset?: number }) {
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
   const isPlaying       = useStore(s => s.isPlaying);
   const duration_ms     = useStore(s => s.duration_ms);
@@ -182,6 +289,26 @@ export function MiniPlayer({ onTab }: { onTab?: (id: TabId) => void }) {
 
   const currentTrack = tracks.find(t => t.hash === loadedTrackHash) ?? null;
   const artUrl = useTrackArtwork(loadedTrackHash ?? '', currentTrack?.artwork_hash ?? null);
+
+  const [dismissed, setDismissedRaw] = useState(() => localStorage.getItem('mm_miniplayer_dismissed') === '1');
+  const startXRef      = useRef<number | null>(null);
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const isFirstRun     = useRef(true);
+  const dismissTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wasRestoredRef = useRef(false);
+
+  const setDismissed = (v: boolean) => {
+    setDismissedRaw(v);
+    if (v) localStorage.setItem('mm_miniplayer_dismissed', '1');
+    else   localStorage.removeItem('mm_miniplayer_dismissed');
+  };
+
+  // Only restore on an actual track change, not on initial mount (would clobber localStorage)
+  useEffect(() => {
+    if (isFirstRun.current) { isFirstRun.current = false; return; }
+    if (loadedTrackHash) setDismissed(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedTrackHash]);
 
   const progressFillRef = useRef<HTMLDivElement>(null);
   const durRef = useRef(duration_ms);
@@ -201,6 +328,32 @@ export function MiniPlayer({ onTab }: { onTab?: (id: TabId) => void }) {
     return () => cancelAnimationFrame(rafId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (!loadedTrackHash) return null;
+
+  // Dismissed: plain button — no pointer capture, no event bleed to the full player on restore.
+  if (dismissed) {
+    return (
+      <button
+        onClick={() => {
+          if (dismissTimer.current) { clearTimeout(dismissTimer.current); dismissTimer.current = null; }
+          wasRestoredRef.current = true;
+          setDismissed(false);
+        }}
+        style={{
+          position: 'absolute', left: 12, bottom: 90 + bottomOffset, zIndex: 25,
+          width: 44, height: 44, borderRadius: 22,
+          background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+          animation: 'mmFadeSlide 0.2s ease both',
+        }}
+      >
+        <Icons.chevRight size={20} stroke="var(--accent)"/>
+      </button>
+    );
+  }
 
   const handlePlayPause = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -227,41 +380,86 @@ export function MiniPlayer({ onTab }: { onTab?: (id: TabId) => void }) {
     s.setPlaying(true);
   };
 
-  const containerStyle: React.CSSProperties = {
-    position: 'absolute', left: 12, right: 12, bottom: 90, zIndex: 25,
-    height: 62, borderRadius: 16, padding: '8px 10px',
-    background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
-    boxShadow: '0 10px 26px rgba(0,0,0,0.5)',
-    display: 'flex', alignItems: 'center', gap: 12, overflow: 'hidden',
-    cursor: currentTrack ? 'pointer' : 'default',
+  // Slide fully off-screen then flip to dismissed.
+  const dismiss = () => {
+    startXRef.current = null;
+    const el = containerRef.current;
+    if (!el) { setDismissed(true); return; }
+    el.style.transition = 'transform 0.22s ease-in, opacity 0.22s ease-in';
+    el.style.transform = `translateX(${-(el.offsetWidth + 24)}px)`;
+    el.style.opacity = '0';
+    dismissTimer.current = setTimeout(() => { dismissTimer.current = null; setDismissed(true); }, 230);
+  };
+
+  const snapBack = () => {
+    startXRef.current = null;
+    const el = containerRef.current;
+    if (!el) return;
+    el.style.transition = 'transform 0.25s ease-out';
+    el.style.transform = 'translateX(0px)';
+    el.style.opacity = '1';
+  };
+
+  // Buttons excluded from drag tracking so their click events still fire normally.
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    startXRef.current = e.clientX;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (containerRef.current) containerRef.current.style.transition = 'none';
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (startXRef.current === null) return;
+    const dx = e.clientX - startXRef.current;
+    if (dx >= 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    el.style.transform = `translateX(${dx}px)`;
+    el.style.opacity = String(Math.max(0, 1 + dx / (el.offsetWidth * 0.6)));
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (startXRef.current === null) return;
+    const dx = e.clientX - startXRef.current;
+    startXRef.current = null;
+    const containerW = containerRef.current?.offsetWidth ?? 320;
+    if (dx < -(containerW * 0.25)) { dismiss(); }
+    else { snapBack(); }
   };
 
   return (
-    <div style={containerStyle} onClick={currentTrack ? () => onTab?.('now') : undefined}>
+    <div
+      ref={containerRef}
+      style={{
+        position: 'absolute', left: 12, right: 12, bottom: 90 + bottomOffset, zIndex: 25,
+        height: 62, borderRadius: 16, padding: '8px 10px',
+        background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
+        boxShadow: '0 10px 26px rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden',
+        cursor: 'pointer',
+        transition: 'bottom 0.2s ease',
+        touchAction: 'pan-y',
+        ...(wasRestoredRef.current ? { animation: 'mmMiniPlayerIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both' } : {}),
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={snapBack}
+    >
       <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 2, background: 'var(--bg-3)' }}>
         <div ref={progressFillRef} style={{ height: '100%', width: '0%', background: 'linear-gradient(90deg, var(--accent), var(--accent-light))' }}/>
       </div>
       <MMArt src={artUrl ?? undefined} size={44} radius={9}/>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {currentTrack ? (
-          <>
-            <div style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.title}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack.artist}</div>
-          </>
-        ) : (
-          <div style={{ fontSize: 13, color: 'var(--text-2)', fontStyle: 'italic' }}>Nothing playing</div>
-        )}
+      <div style={{ flex: 1, minWidth: 0 }} onClick={() => onTab?.('now')}>
+        <div style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack?.title ?? ''}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack?.artist ?? ''}</div>
       </div>
-      {currentTrack && (
-        <>
-          <button onClick={handlePlayPause} style={{ width: 36, height: 36, borderRadius: 18, background: 'var(--bg-3)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-0)', flexShrink: 0 }}>
-            {isPlaying ? <Icons.pause size={17}/> : <Icons.play size={17}/>}
-          </button>
-          <button onClick={handleNext} style={{ width: 36, height: 36, borderRadius: 18, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-1)', flexShrink: 0 }}>
-            <Icons.next size={19} stroke="var(--text-1)"/>
-          </button>
-        </>
-      )}
+      <button onClick={handlePlayPause} style={{ width: 36, height: 36, borderRadius: 18, background: 'var(--bg-3)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-0)', flexShrink: 0 }}>
+        {isPlaying ? <Icons.pause size={17}/> : <Icons.play size={17}/>}
+      </button>
+      <button onClick={handleNext} style={{ width: 34, height: 34, borderRadius: 17, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-1)', flexShrink: 0 }}>
+        <Icons.next size={18} stroke="var(--text-1)"/>
+      </button>
     </div>
   );
 }
@@ -280,12 +478,36 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const tracks          = useStore(s => s.tracks);
   const libraryStatus   = useStore(s => s.libraryStatus);
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
-  const [filter,       setFilter]       = useState<FilterId>('all');
-  const [query,        setQuery]        = useState('');
-  const [sortCriteria, setSortCriteria] = useState<SortCriterion[]>(loadCriteria);
+  const [filter,         setFilter]         = useState<FilterId>('all');
+  const [query,          setQuery]          = useState('');
+  const [sortCriteria,   setSortCriteria]   = useState<SortCriterion[]>(loadCriteria);
+  const [actionSheet,    setActionSheet]    = useState<{ hashes: string[]; label: string } | null>(null);
+  const [selectMode,     setSelectMode]     = useState(false);
+  const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
+  const [toast,          setToast]          = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef      = useRef<HTMLDivElement>(null);
   const filterScroll = useHorizDragScroll();
   const sortScroll   = useHorizDragScroll();
+
+  const showToast = useCallback((msg: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    setSelectedHashes(new Set());
+  }, []);
+
+  const toggleSelect = useCallback((hash: string) => {
+    setSelectedHashes(prev => {
+      const next = new Set(prev);
+      if (next.has(hash)) next.delete(hash); else next.add(hash);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (sortCriteria.length > 0) localStorage.setItem(SORT_KEY, JSON.stringify(sortCriteria));
@@ -373,10 +595,15 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       <div style={{ flexShrink: 0 }}>
         <div style={{ padding: '14px 22px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.5 }}>Library</h1>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button style={iconBtn(32)}><Icons.download size={18} stroke="var(--text-1)"/></button>
-            <button style={iconBtn(32)}><Icons.more size={18} stroke="var(--text-1)"/></button>
-          </div>
+          {selectMode ? (
+            <button onClick={exitSelectMode} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', fontSize: 15, fontWeight: 500, paddingBottom: 6 }}>
+              Cancel
+            </button>
+          ) : (
+            <button onClick={() => setSelectMode(true)} style={{ ...iconBtn(32), color: 'var(--text-1)', marginBottom: 2 }}>
+              <Icons.plus size={20} stroke="var(--text-1)"/>
+            </button>
+          )}
         </div>
         <div style={{ padding: '4px 22px 0', fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
           {subtitle}
@@ -426,7 +653,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       </div>
 
       {/* Virtualized track list */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 86 }} className="mm-scroll">
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: selectMode ? 142 : 86 }} className="mm-scroll">
         {libraryStatus === 'ready' && flatItems.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
             {query ? 'No tracks match your search.' : 'No tracks in library.'}
@@ -440,7 +667,12 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                 <div key={vItem.key} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${vItem.start}px)`, height: vItem.size }}>
                   {item.kind === 'section'
                     ? <SectionHead label={item.label} trailing={item.trailing}/>
-                    : <TrackRow track={item.track} idx={item.idx} playing={item.playing}/>
+                    : <TrackRow
+                        track={item.track} idx={item.idx} playing={item.playing}
+                        onLongPress={selectMode ? undefined : () => setActionSheet({ hashes: [item.track.hash], label: item.track.title })}
+                        selected={selectMode ? selectedHashes.has(item.track.hash) : undefined}
+                        onSelect={selectMode ? () => toggleSelect(item.track.hash) : undefined}
+                      />
                   }
                 </div>
               );
@@ -449,8 +681,47 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
         )}
       </div>
 
-      <MiniPlayer onTab={onTab}/>
+      {/* Floating select-mode action bar */}
+      {selectMode && (
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 86, height: 56, zIndex: 20, background: 'var(--bg-2)', borderTop: '0.5px solid var(--border-1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 22px' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
+            {selectedHashes.size > 0 ? `${selectedHashes.size} selected` : 'Tap tracks to select'}
+          </span>
+          {selectedHashes.size > 0 && (
+            <button
+              onClick={() => setActionSheet({ hashes: [...selectedHashes], label: `${selectedHashes.size} track${selectedHashes.size !== 1 ? 's' : ''}` })}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 20, padding: '7px 14px', cursor: 'pointer', color: 'var(--bg-0)', fontSize: 13, fontWeight: 600 }}
+            >
+              Add to Playlist <Icons.chevRight size={13} stroke="var(--bg-0)"/>
+            </button>
+          )}
+        </div>
+      )}
+
+      <MiniPlayer onTab={onTab} bottomOffset={selectMode ? 56 : 0}/>
       <MMTabBar active="library" onTab={onTab}/>
+
+      {toast && <MMToast message={toast}/>}
+
+      {actionSheet && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+          <div onClick={() => setActionSheet(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
+          <MMSheet
+            title="Add to Playlist"
+            subtitle={actionSheet.label}
+            height="62%"
+            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+            onClose={() => setActionSheet(null)}
+          >
+            <AddToPlaylistSheet
+              hashes={actionSheet.hashes}
+              label={actionSheet.label}
+              onClose={() => setActionSheet(null)}
+              onSuccess={msg => { setActionSheet(null); showToast(msg); exitSelectMode(); }}
+            />
+          </MMSheet>
+        </div>
+      )}
     </div>
   );
 }

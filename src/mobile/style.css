@@ -49,3 +49,7 @@
   from { transform: translateX(0); }
   to   { transform: translateX(var(--mm-dist, -200px)); }
 }
+@keyframes mmMiniPlayerIn {
+  from { transform: translateX(calc(-100% - 24px)); opacity: 0; }
+  to   { transform: translateX(0);                  opacity: 1; }
+}
