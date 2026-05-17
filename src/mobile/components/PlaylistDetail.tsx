@@ -8,7 +8,7 @@ import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
 import { Icons } from '../icons';
 import {
-  MMArt, MMTabBar, MMHash, MMSheet, iconBtn,
+  MMArt, MMTabBar, MMHash, MMSheet, MMLoader, iconBtn,
 } from './common';
 import type { TabId } from './common';
 import { MiniPlayer } from './Library';
@@ -511,7 +511,7 @@ function CommitGraphView({ playlistId, branchName, playlistName, onBack, onRefre
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }} className="mm-scroll">
-          {loading && <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading…</div>}
+          {loading && <MMLoader/>}
           {!loading && layout.length === 0 && <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>No commits yet.</div>}
 
           {layout.map((row) => {
@@ -1042,9 +1042,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           </span>
         </div>
 
-        {tracksLoading && (
-          <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading…</div>
-        )}
+        {tracksLoading && <MMLoader/>}
 
         {!tracksLoading && filteredTracks.length === 0 && (
           <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>

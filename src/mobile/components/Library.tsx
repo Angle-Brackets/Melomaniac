@@ -597,8 +597,6 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     overscan: 6,
   });
 
-  const subtitle = libraryStatus === 'loading' ? 'Loading…' : `${tracks.length} tracks`;
-
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
 
@@ -616,8 +614,10 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
             </button>
           )}
         </div>
-        <div style={{ padding: '4px 22px 0', fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
-          {subtitle}
+        <div style={{ padding: '4px 22px 0', fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {libraryStatus === 'loading'
+            ? <><span style={{ fontSize: 18, color: 'var(--accent)', display: 'inline-block', animation: 'mmNoteDance 0.9s ease-in-out infinite', transformOrigin: 'bottom center' }}>♪</span><span>Loading…</span></>
+            : `${tracks.length} tracks`}
         </div>
         <div style={{ padding: '14px 22px 8px' }}>
           <MMSearchBar value={query} onChange={setQuery}/>

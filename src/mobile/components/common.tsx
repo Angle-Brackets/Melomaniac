@@ -255,6 +255,20 @@ export function iconBtn(s = 32): React.CSSProperties {
   };
 }
 
+// ── Loading indicator — dancing eighth note
+export function MMLoader({ size = 28, color = 'var(--accent)' }: { size?: number; color?: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, padding: '32px 0' }}>
+      <span style={{
+        fontSize: size, color,
+        display: 'inline-block',
+        animation: 'mmNoteDance 0.9s ease-in-out infinite',
+        transformOrigin: 'bottom center',
+      }}>♪</span>
+    </div>
+  );
+}
+
 // ── Marquee text — scrolls horizontally when text overflows and active=true
 const MARQUEE_GAP = 48;
 export function MarqueeText({ text, active, style, textStyle }: {
