@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
-import type { PlaylistRecord, BranchRecord, PlaylistTrackRecord, CommitRecord } from '../../store/types';
+import type { PlaylistRecord, PlaylistTrackRecord } from '../../store/types';
 import { ShuffleMode } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
@@ -37,9 +37,99 @@ function fmtTimestamp(unixSec: number): string {
 const BRANCH_PALETTE = [
   'var(--accent)', 'var(--accent-light)', 'var(--blue)', 'var(--green)', 'var(--text-2)',
 ];
-function branchColor(branches: BranchRecord[], name: string): string {
-  const idx = branches.findIndex(b => b.name === name);
-  return BRANCH_PALETTE[Math.max(0, idx) % BRANCH_PALETTE.length];
+
+// ── Commit graph types & layout ──────────────────────────────────────────────
+interface GraphNode {
+  hash: string; tree_hash: string; timestamp: number;
+  device_id: string; message: string | null;
+  parents: string[]; refs: string[];
+}
+
+const GRAPH_PALETTE = ['var(--accent)', 'var(--accent-light)', '#4dabf7', '#69db7c', '#ffa94d', '#da77f2', '#f783ac', '#a9e34b'];
+const GN_H   = 50;
+const GLANE_W = 16;
+const GDOT_R  = 4.5;
+const GLINE_W = 1.5;
+
+function gLx(lane: number) { return lane * GLANE_W + GLANE_W / 2; }
+function gLaneCol(i: number) { return GRAPH_PALETTE[i % GRAPH_PALETTE.length]; }
+function gPath(x1: number, y1: number, x2: number, y2: number): string {
+  if (x1 === x2) return `M${x1},${y1} L${x1},${y2}`;
+  const cy = (y1 + y2) / 2;
+  return `M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}`;
+}
+
+interface GRowLine { x1: number; y1: number; x2: number; y2: number; col: string; }
+interface GRowLayout {
+  commit: GraphNode; lane: number; color: string;
+  svgW: number; lines: GRowLine[]; dotCx: number; dotCy: number;
+}
+
+
+function computeGLayout(commits: GraphNode[]): GRowLayout[] {
+  const lanes: Array<string | null> = [];
+  const colors: string[] = [];
+  const HALF = GN_H / 2;
+
+  const mainTip = commits.find(c => c.refs.includes('main'));
+  const mainTipHash = mainTip?.hash ?? null;
+  const mainIsDirect = mainTipHash !== null && commits.some(c => c.parents[0] === mainTipHash);
+  let mainPlaced = mainTipHash === null || mainIsDirect;
+
+  const alloc = (hash: string): number => {
+    if (hash === mainTipHash && !mainPlaced) {
+      mainPlaced = true;
+      while (lanes.length === 0) lanes.push(null);
+      lanes[0] = hash; colors[0] = gLaneCol(0); return 0;
+    }
+    const start = !mainPlaced ? 1 : 0;
+    for (let i = start; ; i++) {
+      while (i >= lanes.length) lanes.push(null);
+      if (lanes[i] === null) { lanes[i] = hash; colors[i] = gLaneCol(i); return i; }
+    }
+  };
+
+  return commits.map(commit => {
+    let myLane = lanes.indexOf(commit.hash);
+    const isNew = myLane === -1;
+    if (isNew) myLane = alloc(commit.hash);
+    const myColor = colors[myLane];
+    const before = [...lanes]; before[myLane] = commit.hash;
+    lanes[myLane] = null;
+
+    const parentLanes: { lane: number }[] = [];
+    for (let pi = 0; pi < commit.parents.length; pi++) {
+      const p = commit.parents[pi]; const ex = lanes.indexOf(p);
+      if (ex !== -1)    { parentLanes.push({ lane: ex }); }
+      else if (pi === 0) { lanes[myLane] = p; parentLanes.push({ lane: myLane }); }
+      else               { parentLanes.push({ lane: alloc(p) }); }
+    }
+
+    const after = [...lanes];
+    const lines: GRowLine[] = [];
+    const maxIdx = Math.max(before.length, after.length, myLane + 1);
+    for (let i = 0; i < maxIdx; i++) {
+      if (i === myLane) continue;
+      const hB = before[i] ?? null; const hA = after[i] ?? null;
+      const c  = colors[i] ?? gLaneCol(i);
+      if (hB && hA && hB === hA) lines.push({ x1: gLx(i), y1: 0, x2: gLx(i), y2: GN_H, col: c });
+      else if (hB && !hA)        lines.push({ x1: gLx(i), y1: 0, x2: gLx(i), y2: HALF,  col: c });
+    }
+    if (!isNew) lines.push({ x1: gLx(myLane), y1: 0, x2: gLx(myLane), y2: HALF, col: myColor });
+    for (let pi = 0; pi < parentLanes.length; pi++) {
+      const p = parentLanes[pi];
+      const lineCol = pi === 0 ? myColor : (colors[p.lane] ?? myColor);
+      lines.push({ x1: gLx(myLane), y1: HALF, x2: gLx(p.lane), y2: GN_H, col: lineCol });
+    }
+
+    const maxLane = Math.max(
+      myLane,
+      before.reduce((m, v, i) => v ? Math.max(m, i) : m, 0),
+      after.reduce( (m, v, i) => v ? Math.max(m, i) : m, 0),
+      ...parentLanes.map(p => p.lane),
+    );
+    return { commit, lane: myLane, color: myColor, svgW: (maxLane + 1) * GLANE_W + GLANE_W / 2, lines, dotCx: gLx(myLane), dotCy: HALF };
+  });
 }
 
 // ── Track row (real data)
@@ -327,104 +417,182 @@ function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }:
   );
 }
 
-// ── Commit history
-function HistoryView({ playlistId, branchName, playlistName, branches, onBack }: {
+// ── Commit graph history view
+function CommitGraphView({ playlistId, branchName, playlistName, onBack, onRefresh }: {
   playlistId: string; branchName: string; playlistName: string;
-  branches: BranchRecord[]; onBack: () => void;
+  onBack: () => void; onRefresh: () => void;
 }) {
-  const [commits, setCommits] = useState<CommitRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [reverting, setReverting] = useState<string | null>(null);
+  const [allNodes, setAllNodes] = useState<GraphNode[]>([]);
+  const [layout,   setLayout]   = useState<GRowLayout[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [selected, setSelected] = useState<GRowLayout | null>(null);
+  const [newBranch, setNewBranch] = useState('');
+  const [busy, setBusy]           = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    invoke<CommitRecord[]>('branch_get_history', { playlistId, branchName })
-      .then(c => { setCommits(c); setLoading(false); })
+    invoke<GraphNode[]>('playlist_get_graph', { playlistId })
+      .then(nodes => { setAllNodes(nodes); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [playlistId, branchName]);
+  }, [playlistId]);
 
-  const handleRevert = (commitHash: string) => {
-    setReverting(commitHash);
-    invoke('branch_revert_to', { playlistId, branchName, commitHash, message: '' })
-      .then(() => {
-        setReverting(null);
-        invoke<CommitRecord[]>('branch_get_history', { playlistId, branchName })
-          .then(setCommits).catch(() => {});
-      })
-      .catch(e => { console.error(e); setReverting(null); });
+  useEffect(() => {
+    if (!allNodes.length) { setLayout([]); return; }
+    // Show all branches in the graph, ordered newest-first
+    const sorted = [...allNodes].sort((a, b) => b.timestamp - a.timestamp);
+    setLayout(computeGLayout(sorted));
+  }, [allNodes]);
+
+  const svgMaxW = layout.length ? Math.max(GLANE_W * 2, ...layout.map(r => r.svgW)) : GLANE_W * 2;
+
+  const handleBranchFrom = (commitHash: string) => {
+    if (!newBranch.trim() || busy) return;
+    setBusy(true);
+    invoke('branch_create', { playlistId, name: newBranch.trim(), fromCommit: commitHash })
+      .then(() => { onRefresh(); setNewBranch(''); setSelected(null); })
+      .catch(console.error)
+      .finally(() => setBusy(false));
   };
 
-  const color = branchColor(branches, branchName);
+  const handleRevert = (commitHash: string) => {
+    setBusy(true);
+    invoke('branch_revert_to', { playlistId, branchName, commitHash, message: `Revert to ${commitHash.slice(0, 6)}` })
+      .then(() => { onRefresh(); setSelected(null); })
+      .catch(console.error)
+      .finally(() => setBusy(false));
+  };
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: '12px 0 0', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '12px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ position: 'absolute', inset: '16px 0 0', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center' }}>
           <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer' }}>
             <Icons.chevLeft size={18} stroke="var(--accent)"/>
             <span style={{ fontSize: 14 }}>{playlistName}</span>
           </button>
         </div>
-
         <div style={{ padding: '4px 22px 12px' }}>
           <h1 style={{ fontSize: 28, fontWeight: 700, letterSpacing: -0.4 }}>History</h1>
           <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
             <span>⎇</span><span>{branchName}</span>
-            {!loading && <span>· {commits.length} commit{commits.length !== 1 ? 's' : ''}</span>}
+            {!loading && <span>· {layout.length} commit{layout.length !== 1 ? 's' : ''}</span>}
           </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 32px' }} className="mm-scroll">
-          {loading && (
-            <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading…</div>
-          )}
-          {!loading && commits.length === 0 && (
-            <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>No commits yet.</div>
-          )}
-          {commits.map((c, i) => {
-            const isLast = i === commits.length - 1;
-            const isMerge = c.message?.startsWith('Merge') ?? false;
+        <div style={{ flex: 1, overflowY: 'auto' }} className="mm-scroll">
+          {loading && <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading…</div>}
+          {!loading && layout.length === 0 && <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>No commits yet.</div>}
+
+          {layout.map((row) => {
+            const isSel = selected?.commit.hash === row.commit.hash;
             return (
-              <div key={c.hash} style={{ display: 'flex', padding: '8px 22px', gap: 14 }}>
-                <div style={{ width: 22, position: 'relative', flexShrink: 0 }}>
-                  {!isLast && (
-                    <div style={{ position: 'absolute', left: 10, top: 22, bottom: -8, width: 1.5, background: color, opacity: 0.4 }}/>
-                  )}
-                  <div style={{
-                    position: 'absolute', left: 4, top: 6, width: 14, height: 14,
-                    borderRadius: isMerge ? 4 : 7,
-                    background: color, border: '2px solid var(--bg-1)',
-                    boxShadow: `0 0 0 1.5px ${color}, 0 0 10px ${color}55`,
-                  }}/>
-                </div>
-                <div style={{ flex: 1, minWidth: 0, paddingBottom: 6, borderBottom: isLast ? 'none' : '0.5px solid var(--border-0)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <MMHash color={color}>{c.hash.slice(0, 6)}</MMHash>
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
-                      {fmtTimestamp(c.timestamp)}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 13.5, color: 'var(--text-0)', marginTop: 4, lineHeight: 1.3 }}>
-                    {c.message ?? 'No message'}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{c.device_id}</span>
-                    {i > 0 && (
-                      <button
-                        onClick={() => handleRevert(c.hash)}
-                        disabled={reverting === c.hash}
-                        style={{ marginLeft: 'auto', padding: '3px 10px', borderRadius: 6, background: 'var(--bg-3)', border: '0.5px solid var(--border-2)', color: 'var(--text-1)', fontSize: 11, cursor: 'pointer', opacity: reverting === c.hash ? 0.5 : 1 }}
-                      >
-                        {reverting === c.hash ? '…' : 'Revert'}
-                      </button>
+              <div key={row.commit.hash} onClick={() => setSelected(isSel ? null : row)}
+                style={{ height: GN_H, display: 'flex', alignItems: 'stretch', borderBottom: '0.5px solid var(--border-0)', cursor: 'pointer', background: isSel ? 'oklch(0.28 0.06 30 / 0.6)' : undefined, transition: 'background 0.1s' }}>
+                {/* SVG lane */}
+                <div style={{ width: svgMaxW, flexShrink: 0 }}>
+                  <svg width={svgMaxW} height={GN_H} style={{ overflow: 'visible' }}>
+                    {row.lines.map((l, j) => (
+                      <path key={j} d={gPath(l.x1, l.y1, l.x2, l.y2)} stroke={l.col} strokeWidth={GLINE_W} fill="none" strokeLinecap="round"/>
+                    ))}
+                    {row.commit.parents.length > 1 ? (
+                      <rect
+                        x={row.dotCx - GDOT_R * 0.9} y={row.dotCy - GDOT_R * 0.9}
+                        width={GDOT_R * 1.8} height={GDOT_R * 1.8}
+                        transform={`rotate(45,${row.dotCx},${row.dotCy})`}
+                        fill={row.color} stroke={isSel ? '#fff' : 'var(--bg-1)'} strokeWidth={isSel ? 2 : 1.5}
+                        style={{ filter: isSel ? `drop-shadow(0 0 5px ${row.color})` : undefined }}
+                      />
+                    ) : (
+                      <circle cx={row.dotCx} cy={row.dotCy} r={isSel ? GDOT_R + 1.5 : GDOT_R}
+                        fill={row.color} stroke={isSel ? '#fff' : 'var(--bg-1)'} strokeWidth={isSel ? 2 : 1.5}
+                        style={{ filter: isSel ? `drop-shadow(0 0 5px ${row.color})` : undefined }}
+                      />
                     )}
+                  </svg>
+                </div>
+                {/* Commit info */}
+                <div style={{ flex: 1, minWidth: 0, padding: '0 12px 0 4px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                    <MMHash color={row.color}>{row.commit.hash.slice(0, 6)}</MMHash>
+                    {row.commit.parents.length > 1 && (
+                      <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'var(--bg-4)', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>⋈ merge</span>
+                    )}
+                    {row.commit.refs.map(r => (
+                      <span key={r} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: 'oklch(0.32 0.10 50 / 0.35)', color: 'var(--accent-light)', fontFamily: 'JetBrains Mono, monospace' }}>⎇ {r}</span>
+                    ))}
+                    <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{fmtTimestamp(row.commit.timestamp)}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: isSel ? 'var(--text-0)' : 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: isSel ? 600 : undefined }}>
+                    {row.commit.message ?? <em style={{ color: 'var(--text-3)' }}>no message</em>}
                   </div>
                 </div>
               </div>
             );
           })}
+          <div style={{ height: 32 }}/>
         </div>
       </div>
+
+      {/* Commit detail sheet */}
+      {selected && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+          <div onClick={() => { setSelected(null); setBusy(false); }} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }}/>
+          <MMSheet
+            title={selected.commit.hash.slice(0, 7)}
+            subtitle={new Date(selected.commit.timestamp * 1000).toLocaleString()}
+            height="58%"
+            onClose={() => setSelected(null)}
+            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {selected.commit.message && (
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.08, fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>Message</div>
+                  <div style={{ fontSize: 14, color: 'var(--text-0)', lineHeight: 1.4 }}>{selected.commit.message}</div>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 20 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.08, fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>Author</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-1)', fontFamily: 'JetBrains Mono, monospace' }}>{selected.commit.device_id}</div>
+                </div>
+                {selected.commit.refs.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.08, fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>Refs</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {selected.commit.refs.map(r => (
+                        <span key={r} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 99, background: `${selected.color}22`, color: selected.color, fontFamily: 'JetBrains Mono, monospace', border: `1px solid ${selected.color}44` }}>⎇ {r}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ height: 1, background: 'var(--border-1)' }}/>
+
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.08, fontFamily: 'JetBrains Mono, monospace', marginBottom: 6 }}>Branch from here</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={newBranch}
+                    onChange={e => setNewBranch(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleBranchFrom(selected.commit.hash); }}
+                    placeholder="branch-name"
+                    style={{ flex: 1, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', borderRadius: 10, padding: '8px 12px', fontSize: 13, outline: 'none', color: 'var(--text-0)', fontFamily: 'JetBrains Mono, monospace' }}
+                  />
+                  <button onClick={() => handleBranchFrom(selected.commit.hash)} disabled={busy || !newBranch.trim()}
+                    style={{ padding: '8px 14px', borderRadius: 10, background: 'var(--accent)', color: 'var(--bg-0)', border: 'none', fontSize: 14, fontWeight: 700, cursor: 'pointer', opacity: (busy || !newBranch.trim()) ? 0.5 : 1 }}>⎇</button>
+                </div>
+              </div>
+
+              <button onClick={() => handleRevert(selected.commit.hash)} disabled={busy}
+                style={{ padding: '11px', borderRadius: 10, border: '0.5px solid var(--border-2)', background: 'var(--bg-3)', fontSize: 13, color: 'var(--text-1)', cursor: 'pointer', opacity: busy ? 0.5 : 1 }}>
+                {busy ? '…' : `↩ Revert ${branchName} to here`}
+              </button>
+            </div>
+          </MMSheet>
+        </div>
+      )}
     </div>
   );
 }
@@ -613,12 +781,14 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const queueTracks        = useStore(s => s.queueTracks);
 
   const playlist = playlists.find(p => p.id === currentPlaylistId) ?? null;
-  const artUrl   = usePlaylistArtwork(currentPlaylistId);
+  const artUrl   = usePlaylistArtwork(currentPlaylistId, currentBranchName);
 
   const [playlistTracks, setPlaylistTracks] = useState<PlaylistTrackRecord[]>([]);
   const [tracksLoading, setTracksLoading]   = useState(true);
   const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
   const [showHistory, setShowHistory]       = useState(false);
+  // Branch-specific description from live tree (may differ from SQL cache)
+  const [liveDesc, setLiveDesc] = useState<string | null | undefined>(undefined);
   const [search, setSearch]                 = useState('');
   const [searchOpen, setSearchOpen]         = useState(false);
   const [forkToast, setForkToast]           = useState<string | null>(null);
@@ -637,6 +807,16 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
   useEffect(() => { loadTracks(); }, [currentPlaylistId, currentBranchName]);
 
+  // Fetch branch-specific description from live tree (SQL cache may be stale)
+  useEffect(() => {
+    if (!currentPlaylistId) return;
+    setLiveDesc(undefined);
+    invoke<{ name: string; description: string | null; artwork_hash: string | null }>(
+      'playlist_get_meta', { playlistId: currentPlaylistId, branchName: currentBranchName }
+    ).then(m => setLiveDesc(m.description))
+     .catch(() => setLiveDesc(null));
+  }, [currentPlaylistId, currentBranchName]);
+
   // autofocus search when opened
   useEffect(() => {
     if (searchOpen && searchInputRef.current) {
@@ -654,20 +834,6 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     return (
       <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>
         No playlist selected
-      </div>
-    );
-  }
-
-  if (showHistory) {
-    return (
-      <div className="mobile-root">
-        <HistoryView
-          playlistId={playlist.id}
-          branchName={currentBranchName}
-          playlistName={playlist.name}
-          branches={playlist.branches}
-          onBack={() => setShowHistory(false)}
-        />
       </div>
     );
   }
@@ -706,6 +872,20 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     loadPlaylists();
     loadTracks();
   };
+
+  if (showHistory) {
+    return (
+      <div className="mobile-root">
+        <CommitGraphView
+          playlistId={playlist.id}
+          branchName={currentBranchName}
+          playlistName={playlist.name}
+          onBack={() => setShowHistory(false)}
+          onRefresh={handleRefresh}
+        />
+      </div>
+    );
+  }
 
   const activeBranch = playlist.branches.find(b => b.name === currentBranchName)
     ?? playlist.branches[0];
@@ -784,10 +964,10 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           </div>
         </div>
 
-        {/* description */}
-        {playlist.description && (
+        {/* description — prefer live tree value, fall back to SQL cache */}
+        {(liveDesc ?? playlist.description) && (
           <div style={{ padding: '4px 22px 0', fontSize: 13, color: 'var(--text-1)', lineHeight: 1.45 }}>
-            {playlist.description}
+            {liveDesc ?? playlist.description}
           </div>
         )}
 
