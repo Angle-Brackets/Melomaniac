@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import type { PlaylistRecord, BranchRecord, PlaylistTrackRecord, CommitRecord } from '../../store/types';
+import { ShuffleMode } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
@@ -55,7 +56,7 @@ function TrackRow({ track, idx, playing, onPlay }: {
       cursor: onPlay ? 'pointer' : 'default',
     }}>
       <span style={{ width: 20, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
-        {playing ? <Icons.play size={12}/> : String(idx + 1).padStart(2, '0')}
+        {playing ? <Icons.play size={12}/> : String(idx + 1).padStart(2, '00')}
       </span>
       <MMArt src={artUrl ?? undefined} size={42} radius={7}/>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -69,7 +70,6 @@ function TrackRow({ track, idx, playing, onPlay }: {
         <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 1 }}>{track.artist}</div>
       </div>
       <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{fmtMs(track.duration_ms)}</span>
-      <Icons.moreV size={16} stroke="var(--text-3)"/>
     </div>
   );
 }
@@ -84,8 +84,6 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
 }) {
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
-  const [forking, setForking] = useState(false);
-  const [forkName, setForkName] = useState('');
   const [busy, setBusy] = useState(false);
 
   const handleCreate = () => {
@@ -93,15 +91,6 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
     setBusy(true);
     invoke('branch_create', { playlistId: playlist.id, name: newName.trim(), fromCommit: null })
       .then(() => { onRefresh(); onSelect(newName.trim()); onClose(); })
-      .catch(console.error)
-      .finally(() => setBusy(false));
-  };
-
-  const handleFork = () => {
-    if (!forkName.trim()) return;
-    setBusy(true);
-    invoke('playlist_fork', { sourceId: playlist.id, newName: forkName.trim() })
-      .then(() => { onRefresh(); onClose(); })
       .catch(console.error)
       .finally(() => setBusy(false));
   };
@@ -115,7 +104,7 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
         height="80%"
         accessory={
           <button
-            onClick={() => { setCreating(c => !c); setForking(false); }}
+            onClick={() => setCreating(c => !c)}
             style={{ padding: '7px 14px', borderRadius: 99, background: 'var(--accent)', color: 'var(--bg-0)', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}
           >
             <Icons.plus size={13}/> New
@@ -167,28 +156,171 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
               </div>
             );
           })}
+        </div>
+      </MMSheet>
+    </div>
+  );
+}
 
-          {forking ? (
-            <div style={{ padding: '10px 12px', borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--accent)', display: 'flex', gap: 8 }}>
+// ── Fork sheet
+function ForkSheet({ playlist, onClose, onForked }: {
+  playlist: PlaylistRecord;
+  onClose: () => void;
+  onForked: (name: string) => void;
+}) {
+  const [forkName, setForkName] = useState(`${playlist.name} (fork)`);
+  const [busy, setBusy] = useState(false);
+
+  const handleFork = () => {
+    if (!forkName.trim()) return;
+    setBusy(true);
+    invoke('playlist_fork', { sourceId: playlist.id, newName: forkName.trim() })
+      .then(() => { onForked(forkName.trim()); onClose(); })
+      .catch(console.error)
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
+      <MMSheet title="Fork Playlist" subtitle={`Fork "${playlist.name}" to a new playlist`} height="52%">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div>
+            <div style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 11, letterSpacing: 0.12, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>New playlist name</span>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', display: 'flex', gap: 8 }}>
               <input
                 autoFocus
                 value={forkName}
                 onChange={e => setForkName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleFork(); if (e.key === 'Escape') setForking(false); }}
-                placeholder="New playlist name"
+                onKeyDown={e => { if (e.key === 'Enter') handleFork(); if (e.key === 'Escape') onClose(); }}
+                placeholder="Playlist name"
                 style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-0)', fontSize: 13 }}
               />
-              <button onClick={handleFork} disabled={busy || !forkName.trim()} style={{ padding: '4px 12px', borderRadius: 8, background: 'var(--accent)', color: 'var(--bg-0)', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: (busy || !forkName.trim()) ? 0.5 : 1 }}>
-                Fork
-              </button>
             </div>
-          ) : (
-            <div onClick={() => { setForking(true); setCreating(false); }} style={{ marginTop: 6, padding: '10px 12px', borderRadius: 12, border: '0.5px dashed var(--border-2)', display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text-2)', cursor: 'pointer' }}>
-              <Icons.fork size={16}/>
-              <div style={{ fontSize: 12.5, flex: 1 }}>Fork to a new playlist</div>
-              <Icons.chevRight size={14}/>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={onClose} style={{ flex: 1, padding: '12px', borderRadius: 99, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', color: 'var(--text-1)', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleFork}
+              disabled={busy || !forkName.trim()}
+              style={{ flex: 2, padding: '12px', borderRadius: 99, background: 'var(--accent)', border: 'none', color: 'var(--bg-0)', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: (busy || !forkName.trim()) ? 0.6 : 1 }}
+            >
+              {busy ? '…' : <><Icons.fork size={16}/> Fork</>}
+            </button>
+          </div>
+        </div>
+      </MMSheet>
+    </div>
+  );
+}
+
+// ── Edit sheet
+function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }: {
+  playlist: PlaylistRecord;
+  currentBranchName: string;
+  onClose: () => void;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const [name, setName] = useState(playlist.name);
+  const [desc, setDesc] = useState(playlist.description ?? '');
+  const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleSave = async () => {
+    setBusy(true);
+    try {
+      const ops: Promise<unknown>[] = [];
+      if (name.trim() !== playlist.name) {
+        ops.push(invoke('playlist_rename', { playlistId: playlist.id, branchName: currentBranchName, newName: name.trim(), message: '' }));
+      }
+      if ((desc || null) !== playlist.description) {
+        ops.push(invoke('playlist_set_description', { playlistId: playlist.id, branchName: currentBranchName, description: desc.trim() || null }));
+      }
+      await Promise.all(ops);
+      onSaved();
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`Delete "${playlist.name}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await invoke('playlist_delete', { playlistId: playlist.id });
+      onDeleted();
+    } catch (e) {
+      console.error(e);
+      setDeleting(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 12,
+    background: 'var(--bg-3)', border: '0.5px solid var(--border-1)',
+    outline: 'none', color: 'var(--text-0)', fontSize: 14,
+  };
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
+      <MMSheet title="Edit Playlist" subtitle={playlist.name} height="62%">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          <div>
+            <div style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 11, letterSpacing: 0.12, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>Name</span>
             </div>
-          )}
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Playlist name"
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 11, letterSpacing: 0.12, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>Description</span>
+            </div>
+            <textarea
+              value={desc}
+              onChange={e => setDesc(e.target.value)}
+              placeholder="Optional description…"
+              rows={3}
+              style={{ ...inputStyle, resize: 'none', fontFamily: 'inherit', lineHeight: 1.4 }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={onClose} style={{ flex: 1, padding: '12px', borderRadius: 99, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', color: 'var(--text-1)', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={busy || !name.trim()}
+              style={{ flex: 2, padding: '12px', borderRadius: 99, background: 'var(--accent)', border: 'none', color: 'var(--bg-0)', fontSize: 14, fontWeight: 600, cursor: 'pointer', opacity: (busy || !name.trim()) ? 0.6 : 1 }}
+            >
+              {busy ? '…' : 'Save'}
+            </button>
+          </div>
+
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            style={{ width: '100%', padding: '12px', borderRadius: 99, background: 'transparent', border: '0.5px solid #f87171', color: '#f87171', fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: deleting ? 0.5 : 1 }}
+          >
+            {deleting ? '…' : 'Delete Playlist'}
+          </button>
         </div>
       </MMSheet>
     </div>
@@ -216,7 +348,6 @@ function HistoryView({ playlistId, branchName, playlistName, branches, onBack }:
     invoke('branch_revert_to', { playlistId, branchName, commitHash, message: '' })
       .then(() => {
         setReverting(null);
-        // Reload history to show the new revert commit
         invoke<CommitRecord[]>('branch_get_history', { playlistId, branchName })
           .then(setCommits).catch(() => {});
       })
@@ -464,6 +595,8 @@ function ActionTile({ Icon, label, badge, onPress }: {
   );
 }
 
+const SHUFFLE_CYCLE = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random] as const;
+
 // ── Main PlaylistDetail component
 export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (id: TabId) => void }) {
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
@@ -475,14 +608,22 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const setLoaded          = useStore(s => s.setLoaded);
   const setPlaying         = useStore(s => s.setPlaying);
   const loadQueue          = useStore(s => s.loadQueue);
+  const shuffle            = useStore(s => s.shuffle);
+  const setShuffle         = useStore(s => s.setShuffle);
+  const queueTracks        = useStore(s => s.queueTracks);
 
   const playlist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const artUrl   = usePlaylistArtwork(currentPlaylistId);
 
   const [playlistTracks, setPlaylistTracks] = useState<PlaylistTrackRecord[]>([]);
   const [tracksLoading, setTracksLoading]   = useState(true);
-  const [sheet, setSheet] = useState<'branch' | 'merge' | null>(null);
+  const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
   const [showHistory, setShowHistory]       = useState(false);
+  const [search, setSearch]                 = useState('');
+  const [searchOpen, setSearchOpen]         = useState(false);
+  const [forkToast, setForkToast]           = useState<string | null>(null);
+  const searchInputRef                      = useRef<HTMLInputElement>(null);
+  const toastTimerRef                       = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadTracks = () => {
     if (!currentPlaylistId) return;
@@ -495,6 +636,19 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   };
 
   useEffect(() => { loadTracks(); }, [currentPlaylistId, currentBranchName]);
+
+  // autofocus search when opened
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [searchOpen]);
+
+  const showToast = (msg: string) => {
+    setForkToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setForkToast(null), 2800);
+  };
 
   if (!playlist) {
     return (
@@ -529,15 +683,19 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     setPlaying(true);
   };
 
-  const handleShuffle = () => {
-    if (playlistTracks.length === 0) return;
-    const shuffled = [...playlistTracks].sort(() => Math.random() - 0.5);
-    loadQueue(shuffled.map(t => t.hash));
-    const track = shuffled[0];
-    setLoaded(track.hash, track.duration_ms);
-    positionMsRef.current = 0;
-    invoke('track_play', { hash: track.hash }).catch(console.error);
-    setPlaying(true);
+  const handleShufflePress = () => {
+    const currentIdx = SHUFFLE_CYCLE.indexOf(shuffle);
+    const nextMode = SHUFFLE_CYCLE[(currentIdx + 1) % SHUFFLE_CYCLE.length];
+    setShuffle(nextMode);
+    // if queue isn't loaded from this playlist, load it first
+    if (playlistTracks.length > 0) {
+      const hashes = playlistTracks.map(t => t.hash);
+      const queueMatchesPlaylist = queueTracks.length === hashes.length &&
+        hashes.every((h, i) => queueTracks[i] === h);
+      if (!queueMatchesPlaylist) {
+        loadQueue(hashes);
+      }
+    }
   };
 
   const handleBranchSelect = (name: string) => {
@@ -553,6 +711,16 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     ?? playlist.branches[0];
   const pendingBranches = playlist.branches.filter(b => b.head_commit !== activeBranch?.head_commit).length;
 
+  const filteredTracks = searchOpen && search.trim()
+    ? playlistTracks.filter(t => {
+        const q = search.toLowerCase();
+        return t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q);
+      })
+    : playlistTracks;
+
+  const shuffleActive = shuffle !== ShuffleMode.Off;
+  const ShuffleIcon = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
+
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
@@ -564,10 +732,41 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             <span style={{ fontSize: 14 }}>Playlists</span>
           </button>
           <div style={{ display: 'flex', gap: 4 }}>
-            <button style={iconBtn(36)}><Icons.search size={18} stroke="var(--text-1)"/></button>
-            <button style={iconBtn(36)}><Icons.more size={18} stroke="var(--text-1)"/></button>
+            <button
+              style={iconBtn(36)}
+              onClick={() => {
+                if (searchOpen) { setSearchOpen(false); setSearch(''); }
+                else setSearchOpen(true);
+              }}
+            >
+              {searchOpen
+                ? <Icons.x size={18} stroke="var(--text-1)"/>
+                : <Icons.search size={18} stroke="var(--text-1)"/>
+              }
+            </button>
           </div>
         </div>
+
+        {/* search bar */}
+        {searchOpen && (
+          <div style={{ padding: '8px 16px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)' }}>
+              <Icons.search size={15} stroke="var(--text-3)"/>
+              <input
+                ref={searchInputRef}
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search tracks…"
+                style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text-0)', fontSize: 14 }}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                  <Icons.x size={14} stroke="var(--text-3)"/>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* header */}
         <div style={{ display: 'flex', gap: 16, padding: '8px 22px 8px', alignItems: 'flex-end' }}>
@@ -597,27 +796,35 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           <button onClick={() => handlePlay(0)} style={{ flex: 1, padding: '12px 14px', borderRadius: 99, background: 'linear-gradient(135deg, var(--accent-light), var(--accent))', color: 'var(--bg-0)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontWeight: 600, fontSize: 14, boxShadow: '0 8px 22px oklch(0.62 0.15 28 / 0.4)' }}>
             <Icons.play size={16}/> Play
           </button>
-          <button onClick={handleShuffle} style={iconBtn(44)}><Icons.shuffle size={20} stroke="var(--text-0)"/></button>
-          <button style={iconBtn(44)}><Icons.download size={20} stroke="var(--text-1)"/></button>
+          <button
+            onClick={handleShufflePress}
+            style={{
+              ...iconBtn(44),
+              background: shuffleActive ? 'oklch(0.32 0.12 50 / 0.35)' : undefined,
+              border: shuffleActive ? '1px solid var(--accent)' : undefined,
+            }}
+          >
+            <ShuffleIcon size={20} stroke={shuffleActive ? 'var(--accent)' : 'var(--text-0)'}/>
+          </button>
         </div>
 
         {/* action tiles */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, padding: '8px 16px 14px' }}>
-          <ActionTile Icon={Icons.fork} label="Fork" onPress={() => setSheet('branch')}/>
+          <ActionTile Icon={Icons.fork} label="Fork" onPress={() => setSheet('fork')}/>
           <ActionTile
             Icon={Icons.merge} label="Merge"
             badge={pendingBranches > 0 ? String(pendingBranches) : undefined}
             onPress={() => setSheet('merge')}
           />
           <ActionTile Icon={Icons.history} label="History" onPress={() => setShowHistory(true)}/>
-          <ActionTile Icon={Icons.gear} label="Edit"/>
+          <ActionTile Icon={Icons.gear} label="Edit" onPress={() => setSheet('edit')}/>
         </div>
 
         {/* tracks header */}
         <div style={{ padding: '4px 22px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h3 style={{ fontSize: 11, letterSpacing: 0.15, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>Tracks</h3>
           <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
-            {tracksLoading ? '…' : `${playlistTracks.length} · ${fmtTotalDuration(playlistTracks)}`}
+            {tracksLoading ? '…' : searchOpen && search.trim() ? `${filteredTracks.length} of ${playlistTracks.length}` : `${playlistTracks.length} · ${fmtTotalDuration(playlistTracks)}`}
           </span>
         </div>
 
@@ -625,19 +832,19 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>Loading…</div>
         )}
 
-        {!tracksLoading && playlistTracks.length === 0 && (
+        {!tracksLoading && filteredTracks.length === 0 && (
           <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-            No tracks on this branch yet.
+            {searchOpen && search.trim() ? 'No tracks match your search.' : 'No tracks on this branch yet.'}
           </div>
         )}
 
-        {!tracksLoading && playlistTracks.map((track, i) => (
+        {!tracksLoading && filteredTracks.map((track, i) => (
           <TrackRow
             key={track.hash}
             track={track}
             idx={i}
             playing={track.hash === loadedTrackHash}
-            onPlay={() => handlePlay(i)}
+            onPlay={() => handlePlay(playlistTracks.indexOf(track))}
           />
         ))}
 
@@ -646,6 +853,19 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
       <MiniPlayer onTab={onTab}/>
       <MMTabBar active="playlists" onTab={onTab}/>
+
+      {/* fork toast */}
+      {forkToast && (
+        <div style={{
+          position: 'absolute', bottom: 100, left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--bg-5)', color: 'var(--text-0)', padding: '9px 18px',
+          borderRadius: 99, fontSize: 13, fontWeight: 500, zIndex: 200,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)', whiteSpace: 'nowrap',
+          border: '0.5px solid var(--border-2)',
+        }}>
+          {forkToast}
+        </div>
+      )}
 
       {sheet === 'branch' && (
         <BranchPickerSheet
@@ -663,6 +883,25 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           targetTracks={playlistTracks}
           onClose={() => setSheet(null)}
           onMerged={() => { loadTracks(); loadPlaylists(); }}
+        />
+      )}
+      {sheet === 'fork' && (
+        <ForkSheet
+          playlist={playlist}
+          onClose={() => setSheet(null)}
+          onForked={(name) => {
+            handleRefresh();
+            showToast(`Forked to "${name}"`);
+          }}
+        />
+      )}
+      {sheet === 'edit' && (
+        <EditSheet
+          playlist={playlist}
+          currentBranchName={currentBranchName}
+          onClose={() => setSheet(null)}
+          onSaved={() => handleRefresh()}
+          onDeleted={() => onBack()}
         />
       )}
     </div>
