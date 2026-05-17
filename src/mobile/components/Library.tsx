@@ -279,6 +279,11 @@ function SectionHead({ label, trailing }: { label: string; trailing?: string }) 
   );
 }
 
+// Module-level variable shared across all MiniPlayer instances (Library + PlaylistsList).
+// Initialized once from localStorage so it survives app restarts.
+// This avoids any timing gap between one instance writing localStorage and another reading it.
+let _miniPlayerDismissed = localStorage.getItem('mm_miniplayer_dismissed') === '1';
+
 export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) => void; bottomOffset?: number }) {
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
   const isPlaying       = useStore(s => s.isPlaying);
@@ -290,25 +295,29 @@ export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) =>
   const currentTrack = tracks.find(t => t.hash === loadedTrackHash) ?? null;
   const artUrl = useTrackArtwork(loadedTrackHash ?? '', currentTrack?.artwork_hash ?? null);
 
-  const [dismissed, setDismissedRaw] = useState(() => localStorage.getItem('mm_miniplayer_dismissed') === '1');
+  const [dismissed, setDismissedRaw] = useState(_miniPlayerDismissed);
   const startXRef      = useRef<number | null>(null);
   const containerRef   = useRef<HTMLDivElement>(null);
-  const isFirstRun     = useRef(true);
+  const prevHashRef    = useRef(loadedTrackHash);
   const dismissTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasRestoredRef = useRef(false);
 
   const setDismissed = (v: boolean) => {
-    setDismissedRaw(v);
+    _miniPlayerDismissed = v;
     if (v) localStorage.setItem('mm_miniplayer_dismissed', '1');
     else   localStorage.removeItem('mm_miniplayer_dismissed');
+    setDismissedRaw(v);
   };
 
-  // Only restore on an actual track change, not on initial mount (would clobber localStorage)
+  // Restore whenever a genuinely new track starts — but not on initial mount.
   useEffect(() => {
-    if (isFirstRun.current) { isFirstRun.current = false; return; }
+    if (loadedTrackHash === prevHashRef.current) return;
+    prevHashRef.current = loadedTrackHash;
     if (loadedTrackHash) setDismissed(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedTrackHash]);
+
+  useEffect(() => () => { if (dismissTimer.current) clearTimeout(dismissTimer.current); }, []);
 
   const progressFillRef = useRef<HTMLDivElement>(null);
   const durRef = useRef(duration_ms);
@@ -383,12 +392,14 @@ export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) =>
   // Slide fully off-screen then flip to dismissed.
   const dismiss = () => {
     startXRef.current = null;
+    _miniPlayerDismissed = true; // update shared state immediately
+    localStorage.setItem('mm_miniplayer_dismissed', '1');
     const el = containerRef.current;
-    if (!el) { setDismissed(true); return; }
+    if (!el) { setDismissedRaw(true); return; }
     el.style.transition = 'transform 0.22s ease-in, opacity 0.22s ease-in';
     el.style.transform = `translateX(${-(el.offsetWidth + 24)}px)`;
     el.style.opacity = '0';
-    dismissTimer.current = setTimeout(() => { dismissTimer.current = null; setDismissed(true); }, 230);
+    dismissTimer.current = setTimeout(() => { dismissTimer.current = null; setDismissedRaw(true); }, 230);
   };
 
   const snapBack = () => {
