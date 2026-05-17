@@ -10,6 +10,7 @@ import { positionMsRef, loopStateRef } from '../playerContext';
 import { Icons } from '../icons';
 import { MMArt, MMSheet, MMTabBar, MarqueeText } from './common';
 import type { TabId } from './common';
+import { useTrackAccents, withAlpha } from '../hooks/useTrackAccent';
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -29,7 +30,7 @@ function QueueSheetRow({ track }: { track: TrackRecord }) {
       <MMArt src={artUrl ?? undefined} size={36} radius={6}/>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist ?? 'Unknown Artist'}</div>
+        {track.artist && <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist}</div>}
       </div>
     </div>
   );
@@ -69,10 +70,10 @@ function QueueRow({ track, isActive, isPlaying, onClick }: {
           active={isActive}
           textStyle={{ fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--accent)' : 'var(--text-0)' }}
         />
-        <div style={{
+        {track.artist && <div style={{
           fontSize: 11, color: 'var(--text-2)', marginTop: 1,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>{track.artist ?? 'Unknown Artist'}</div>
+        }}>{track.artist}</div>}
       </div>
       {/* drag handle — touch-action:none so browser won't intercept as scroll */}
       <div style={{
@@ -87,6 +88,11 @@ function QueueRow({ track, isActive, isPlaying, onClick }: {
       </div>
     </div>
   );
+}
+
+function NextTrackArt({ track }: { track: TrackRecord }) {
+  const url = useTrackArtwork(track.hash, track.artwork_hash);
+  return <MMArt src={url ?? undefined} size={26} radius={5}/>;
 }
 
 function PlaylistSwitcherCard({ playlist, active, onSelect }: {
@@ -120,8 +126,8 @@ function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 4
   return (
     <button onClick={onClick} style={{
       width: size, height: size, borderRadius: size / 2,
-      background: active ? `${color}1c` : 'transparent',
-      border: active ? `1px solid ${color}55` : '1px solid transparent',
+      background: active ? `${color}1a` : 'transparent',
+      border: 'none',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'pointer', color: active ? color : 'var(--text-1)',
     }}>
@@ -263,6 +269,8 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
         position: 'relative', width: '100%', height: size + 32,
         perspective: '900px', display: 'flex', alignItems: 'center', justifyContent: 'center',
         touchAction: 'pan-y', userSelect: 'none', cursor: 'grab',
+        WebkitMaskImage: 'linear-gradient(90deg, transparent 0%, #000 16%, #000 84%, transparent 100%)',
+        maskImage: 'linear-gradient(90deg, transparent 0%, #000 16%, #000 84%, transparent 100%)',
       }}
     >
       {tracks.map((track, i) => {
@@ -581,7 +589,14 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   dropTargetIdxRef.current   = dropTargetIdx;
 
 
-  const accent = 'var(--accent)';
+  const [accent1, accent2] = useTrackAccents(
+    browseTrack?.hash ?? loadedTrackHash,
+    browseTrack?.artwork_hash ?? currentTrack?.artwork_hash ?? null,
+  );
+  const accent = accent1;
+  const nextTrack: TrackRecord | null = shuffle !== ShuffleMode.Off
+    ? (shuffledQueue[shuffleIndex + 1] ? tracks.find(t => t.hash === shuffledQueue[shuffleIndex + 1]) ?? null : null)
+    : (queueRecords[activeListIndex + 1] ?? null);
 
   const coverflowItems = queueRecords.length > 0
     ? queueRecords
@@ -700,11 +715,12 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
+      {/* Halo — centered behind the album art, not off at the top */}
       <div style={{
-        position: 'absolute', top: -120, left: '50%', transform: 'translateX(-50%)',
-        width: 520, height: 520, borderRadius: '50%',
-        background: `radial-gradient(circle, var(--accent)38 0%, var(--accent)10 35%, transparent 70%)`,
-        filter: 'blur(20px)', pointerEvents: 'none',
+        position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)',
+        width: 560, height: 560, borderRadius: '50%',
+        background: `radial-gradient(circle, ${withAlpha(accent1, 0.40)} 0%, ${withAlpha(accent2, 0.18)} 42%, transparent 68%)`,
+        filter: 'blur(40px)', pointerEvents: 'none',
       }}/>
 
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16, overflow: 'hidden', paddingBottom: 86 + (queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0), transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
@@ -747,18 +763,24 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           />
         </div>
 
-        {/* track info — shows browsed track while scrolling */}
-        <div style={{ padding: '4px 28px 0', textAlign: 'center' }}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-0)', letterSpacing: -0.3, lineHeight: 1.15 }}>
-            {browseTrack?.title ?? '—'}
-          </div>
-          <div style={{ fontSize: 14, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', marginTop: 4 }}>
-            {browseTrack
-              ? `${browseTrack.artist ?? 'Unknown Artist'}${browseTrack.album ? ` · ${browseTrack.album}` : ''}`
-              : 'No track loaded'}
-          </div>
+        {/* track info */}
+        <div style={{ padding: '4px 28px 0' }}>
+          <MarqueeText
+            text={browseTrack?.title ?? '—'}
+            active={true}
+            style={{ lineHeight: 1.15, textAlign: 'center' }}
+            textStyle={{ fontSize: queueExpanded ? 17 : 21, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.3, textAlign: 'center' }}
+          />
+          {browseTrack?.artist && (
+            <MarqueeText
+              text={`${browseTrack.artist}${browseTrack.album ? ` · ${browseTrack.album}` : ''}`}
+              active={true}
+              style={{ marginTop: 4, textAlign: 'center' }}
+              textStyle={{ fontSize: 13, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', textAlign: 'center' }}
+            />
+          )}
           {loopMode === 'ab' && duration_ms > 0 && (
-            <div style={{ fontSize: 10.5, color: 'var(--accent)', marginTop: 3, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.05 }}>
+            <div style={{ fontSize: 10.5, color: accent, marginTop: 3, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.05 }}>
               A·B {fmtMs(abA * duration_ms)} → {fmtMs(abB * duration_ms)}
             </div>
           )}
@@ -783,15 +805,15 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               )}
               <div ref={seekFillRef} style={{
                 position: 'absolute', left: 0, top: 0, bottom: 0, width: '0%',
-                background: `linear-gradient(90deg, ${accent}, var(--accent-light))`, borderRadius: 2,
-                boxShadow: `0 0 12px ${accent}88`,
+                background: `linear-gradient(90deg, ${accent1}, ${accent2})`, borderRadius: 2,
+                boxShadow: `0 0 12px ${withAlpha(accent1, 0.5)}`,
               }}/>
               {loopMode !== 'ab' && (
                 <div ref={thumbRef} style={{
                   position: 'absolute', left: '0%', top: '50%',
                   width: 14, height: 14, transform: 'translate(-50%,-50%)',
                   background: 'var(--text-0)', borderRadius: '50%',
-                  boxShadow: `0 0 8px ${accent}, 0 2px 6px rgba(0,0,0,0.5)`,
+                  boxShadow: `0 0 10px ${withAlpha(accent1, 0.7)}, 0 2px 4px rgba(0,0,0,0.5)`,
                 }}/>
               )}
               {loopMode === 'ab' && (
@@ -822,34 +844,59 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           </div>
         </div>
 
-        {/* controls — shuffle / heart / prev / play / next / loop / queue */}
+        {/* controls — two-row when tracklist collapsed, single-row when expanded to avoid overflow */}
         {(() => {
           const ShuffleIco = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
           const LoopIco = loopMode === 'ab' ? Icons.ab : loopMode === 'one' ? Icons.loopOne : Icons.loop;
-          const tBtn = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
-            <button onClick={onClick} style={{
-              width: 44, height: 44, background: 'transparent', border: 'none',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', borderRadius: 22, flexShrink: 0,
-            }}>{children}</button>
+          if (queueExpanded) {
+            // Compact single row matching original layout
+            const tBtn = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
+              <button onClick={onClick} style={{ width: 44, height: 44, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 22, flexShrink: 0 }}>{children}</button>
+            );
+            return (
+              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)' }}>
+                <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={34}/>
+                <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
+                {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
+                <button onClick={handlePlayPause} style={{
+                  width: 58, height: 58, borderRadius: 29, border: 'none', flexShrink: 0,
+                  background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: `0 6px 18px ${withAlpha(accent1, 0.45)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  color: '#fff', cursor: 'pointer',
+                }}>
+                  {isBrowsing ? <Icons.play size={24}/> : isPlaying ? <Icons.pause size={24}/> : <Icons.play size={24}/>}
+                </button>
+                {tBtn(handleNext, <Icons.next size={22} stroke="var(--text-0)"/>)}
+                <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={34}/>
+                <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={34}/>
+              </div>
+            );
+          }
+          const tPrimary = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
+            <button onClick={onClick} style={{ width: 52, height: 52, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 26, flexShrink: 0 }}>{children}</button>
           );
           return (
-            <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 8px' }}>
-              <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={36}/>
-              <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
-              {tBtn(handlePrev, <Icons.prev size={24} stroke="var(--text-0)"/>)}
-              <button onClick={handlePlayPause} style={{
-                width: 68, height: 68, borderRadius: 34, border: 'none', flexShrink: 0,
-                background: `linear-gradient(135deg, var(--accent-light), ${accent})`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: `0 6px 22px ${accent}66, inset 0 1px 0 rgba(255,255,255,0.25)`,
-                color: 'var(--bg-0)', cursor: 'pointer',
-              }}>
-                {isBrowsing ? <Icons.play size={28}/> : isPlaying ? <Icons.pause size={28}/> : <Icons.play size={28}/>}
-              </button>
-              {tBtn(handleNext, <Icons.next size={24} stroke="var(--text-0)"/>)}
-              <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={36}/>
-              <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
+            <div style={{ padding: '4px 16px 8px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
+                {tPrimary(handlePrev, <Icons.prev size={28} stroke="var(--text-0)"/>)}
+                <button onClick={handlePlayPause} style={{
+                  width: 72, height: 72, borderRadius: 36, border: 'none', flexShrink: 0,
+                  background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: `0 10px 28px ${withAlpha(accent1, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  color: '#fff', cursor: 'pointer',
+                }}>
+                  {isBrowsing ? <Icons.play size={30}/> : isPlaying ? <Icons.pause size={30}/> : <Icons.play size={30}/>}
+                </button>
+                {tPrimary(handleNext, <Icons.next size={28} stroke="var(--text-0)"/>)}
+              </div>
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 28px' }}>
+                <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={36}/>
+                <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
+                <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={36}/>
+                <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
+              </div>
             </div>
           );
         })()}
@@ -866,22 +913,38 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             transition: 'bottom 0.35s ease',
             zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
           }}>
-            <button
-              onClick={handleToggleQueue}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', height: QUEUE_HEADER_H, background: 'none', border: 'none', cursor: 'pointer', width: '100%', color: 'inherit', flexShrink: 0 }}
-            >
-              <span style={{ fontSize: 10.5, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: 0.1, fontFamily: 'JetBrains Mono, monospace' }}>
-                {currentPlaylist?.name ?? 'Library'}
-              </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
-                </span>
-                <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.25s ease' }}>
-                  <Icons.chevDown size={13} stroke="var(--text-3)"/>
+            <div onClick={handleToggleQueue} style={{ cursor: 'pointer', background: 'transparent' }}>
+              {/* Drag pill */}
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 0' }}>
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--border-2)' }}/>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 20px 8px', gap: 12, minHeight: 36 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                  <Icons.stack size={14} stroke="var(--text-2)"/>
+                  <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                      <span style={{ fontSize: 9.5, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.12, fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
+                        {queueExpanded ? 'Tracklist' : 'Up next'}
+                      </span>
+                      {!queueExpanded && nextTrack && (
+                        <span style={{ fontSize: 12, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {nextTrack.title}
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
+                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {!queueExpanded && nextTrack && <NextTrackArt track={nextTrack}/>}
+                  <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.25s ease' }}>
+                    <Icons.chevDown size={13} stroke="var(--text-3)"/>
+                  </div>
                 </div>
               </div>
-            </button>
+            </div>
             <div style={{ overflow: 'hidden', maxHeight: queueExpanded ? queueListH : 0, transition: 'max-height 0.4s cubic-bezier(0.22,1,0.36,1)', pointerEvents: queueExpanded ? 'auto' : 'none' }}>
               <div
                 ref={listParentRef}

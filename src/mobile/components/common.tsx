@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useLayoutEffect } from 'react';
 import { Icons } from '../icons';
 import type { Album } from '../data';
 
@@ -304,13 +304,23 @@ export function MarqueeText({ text, active, style, textStyle }: {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLSpanElement>(null);
   const [marq, setMarq] = useState<{ w: number; on: boolean }>({ w: 0, on: false });
+  // Track which text value the current marq state was measured for.
+  // When text changes while scrolling, innerRef is null (measurement span unmounted),
+  // so we reset at render time to get the static span back before the next measurement.
+  const [measuredFor, setMeasuredFor] = useState(text);
+  if (measuredFor !== text) {
+    setMeasuredFor(text);
+    if (marq.on) setMarq({ w: 0, on: false });
+  }
 
-  useEffect(() => {
+  // useLayoutEffect fires before paint — eliminates the one-frame flash where
+  // centered static text jumps to the left edge when scrolling starts.
+  useLayoutEffect(() => {
     if (!active) { setMarq(m => m.on ? { w: 0, on: false } : m); return; }
     const o = outerRef.current, i = innerRef.current;
-    if (!o || !i) return;
+    if (!o || !i) return; // null when marq.on=true (scrolling span is mounted instead)
     if (i.scrollWidth - o.clientWidth > 4) setMarq({ w: i.scrollWidth, on: true });
-  }, [active, text]);
+  }, [active, measuredFor]);
 
   return (
     <div ref={outerRef} style={{ overflow: 'hidden', whiteSpace: 'nowrap', minWidth: 0, ...style }}>
@@ -319,6 +329,7 @@ export function MarqueeText({ text, active, style, textStyle }: {
           display: 'inline-flex', gap: `${MARQUEE_GAP}px`,
           animation: `mm-marquee ${Math.max(2, (marq.w + MARQUEE_GAP) / 60).toFixed(2)}s linear 0.8s infinite`,
           ['--mm-dist' as string]: `${-(marq.w + MARQUEE_GAP)}px`,
+          willChange: 'transform',
           ...textStyle,
         }}>
           <span style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{text}</span>
