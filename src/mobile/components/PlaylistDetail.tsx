@@ -155,12 +155,14 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
 }
 
 const SWIPE_REVEAL_W = 72;
+const TRACK_ROW_H   = 58;
 
 // ── Track row (real data)
-function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed, onReveal, onClose }: {
+function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed, onReveal, onClose, dimmed, showHandle }: {
   track: PlaylistTrackRecord; idx: number; playing?: boolean;
   onPlay?: () => void; onFavorite?: () => void; onRemove?: () => void;
   revealed?: boolean; onReveal?: () => void; onClose?: () => void;
+  dimmed?: boolean; showHandle?: boolean;
 }) {
   const artUrl  = useTrackArtwork(track.hash, track.artwork_hash);
   const startXRef = useRef(0);
@@ -179,6 +181,8 @@ function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed,
     <div style={{ position: 'relative', overflow: 'hidden',
       background: playing ? `${accent}10` : 'transparent',
       borderLeft: playing ? `2px solid ${accent}` : '2px solid transparent',
+      opacity: dimmed ? 0.3 : 1,
+      pointerEvents: dimmed ? 'none' : undefined,
     }}>
       {/* Delete action — revealed by left swipe */}
       <div style={{
@@ -228,6 +232,18 @@ function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed,
           }
         </button>
         <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{fmtMs(track.duration_ms)}</span>
+        {showHandle && (
+          <div
+            onPointerDown={e => e.stopPropagation()}
+            style={{ width: 32, height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, touchAction: 'none', cursor: 'grab' }}
+          >
+            <svg width="12" height="10" viewBox="0 0 12 10" fill="currentColor" style={{ color: 'var(--text-3)', opacity: 0.6 }}>
+              <rect x="0" y="0" width="12" height="1.5" rx="0.75"/>
+              <rect x="0" y="4.25" width="12" height="1.5" rx="0.75"/>
+              <rect x="0" y="8.5" width="12" height="1.5" rx="0.75"/>
+            </svg>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1117,6 +1133,18 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const tracksLoading = useMinDuration(tracksLoadingRaw);
   const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
   const [revealedHash, setRevealedHash] = useState<string | null>(null);
+  const [draggingIdx,   setDraggingIdx]   = useState<number | null>(null);
+  const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
+  const [ghostTop,      setGhostTop]      = useState(0);
+  const isDraggingRef       = useRef(false);
+  const draggingIdxRef      = useRef<number | null>(null);
+  const dropTargetIdxRef    = useRef<number | null>(null);
+  const trackListRef        = useRef<HTMLDivElement>(null);
+  const scrollContainerRef  = useRef<HTMLDivElement>(null);
+  const ghostRef            = useRef<HTMLDivElement>(null);
+  const playlistTracksRef   = useRef<PlaylistTrackRecord[]>([]);
+  const currentBranchRef    = useRef(currentBranchName);
+  const currentPlaylistRef  = useRef<string | null>(null);
   const [historyMounted, setHistoryMounted] = useState(false);
   const [historyActive,  setHistoryActive]  = useState(false);
   const historyActiveRef = useRef(false);
@@ -1168,6 +1196,116 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     setHistoryActive(false);
     setTimeout(() => setHistoryMounted(false), 360);
   };
+
+  // Keep drag refs in sync with current React state
+  playlistTracksRef.current  = playlistTracks;
+  currentBranchRef.current   = currentBranchName;
+  currentPlaylistRef.current = currentPlaylistId ?? null;
+
+  // Imperative drag-to-reorder — non-passive so we can preventDefault before scroll commits
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const HANDLE_PX = 44;
+
+    const activate = (clientX: number, clientY: number): boolean => {
+      if (!trackListRef.current) return false;
+      const trackRect = trackListRef.current.getBoundingClientRect();
+      if (clientX < trackRect.right - HANDLE_PX) return false;
+      const posInList = clientY - trackRect.top;
+      if (posInList < 0 || posInList > trackRect.height) return false;
+      const idx = Math.floor(posInList / TRACK_ROW_H);
+      if (idx < 0 || idx >= playlistTracksRef.current.length) return false;
+      isDraggingRef.current     = true;
+      draggingIdxRef.current    = idx;
+      dropTargetIdxRef.current  = idx;
+      setDraggingIdx(idx);
+      setDropTargetIdx(idx);
+      setRevealedHash(null);
+      setGhostTop(clientY - TRACK_ROW_H / 2);
+      if (navigator.vibrate) navigator.vibrate(30);
+      return true;
+    };
+
+    const move = (clientY: number) => {
+      if (!isDraggingRef.current || !trackListRef.current) return;
+      if (ghostRef.current) ghostRef.current.style.top = `${clientY - TRACK_ROW_H / 2}px`;
+      const trackRect = trackListRef.current.getBoundingClientRect();
+      const posInList = clientY - trackRect.top;
+      const idx = Math.min(Math.max(0, Math.floor(posInList / TRACK_ROW_H)), playlistTracksRef.current.length - 1);
+      if (idx !== dropTargetIdxRef.current) {
+        dropTargetIdxRef.current = idx;
+        setDropTargetIdx(idx);
+      }
+    };
+
+    const finish = () => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      const from = draggingIdxRef.current, to = dropTargetIdxRef.current;
+      draggingIdxRef.current   = null;
+      dropTargetIdxRef.current = null;
+      setDraggingIdx(null);
+      setDropTargetIdx(null);
+      if (from !== null && to !== null && from !== to) {
+        const newTracks = [...playlistTracksRef.current];
+        const [moved] = newTracks.splice(from, 1);
+        newTracks.splice(to, 0, moved);
+        setPlaylistTracks(newTracks);
+        const plId = currentPlaylistRef.current;
+        if (plId) {
+          invoke('playlist_reorder_tracks', {
+            playlistId: plId,
+            branchName: currentBranchRef.current,
+            orderedHashes: newTracks.map(t => t.hash),
+          }).catch(() => {
+            invoke<PlaylistTrackRecord[]>('playlist_get_tracks', {
+              playlistId: plId,
+              branchName: currentBranchRef.current,
+            }).then(t => setPlaylistTracks(t)).catch(() => {});
+          });
+        }
+      }
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      if (activate(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isDraggingRef.current || e.touches.length !== 1) return;
+      e.preventDefault();
+      move(e.touches[0].clientY);
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      if (!activate(e.clientX, e.clientY)) return;
+      e.preventDefault();
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup',   onMouseUp);
+    };
+    const onMouseMove = (e: MouseEvent) => move(e.clientY);
+    const onMouseUp   = () => {
+      finish();
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup',   onMouseUp);
+    };
+
+    el.addEventListener('touchstart',  onTouchStart, { passive: false });
+    el.addEventListener('touchmove',   onTouchMove,  { passive: false });
+    el.addEventListener('touchend',    finish);
+    el.addEventListener('touchcancel', finish);
+    el.addEventListener('mousedown',   onMouseDown);
+    return () => {
+      el.removeEventListener('touchstart',  onTouchStart);
+      el.removeEventListener('touchmove',   onTouchMove);
+      el.removeEventListener('touchend',    finish);
+      el.removeEventListener('touchcancel', finish);
+      el.removeEventListener('mousedown',   onMouseDown);
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup',   onMouseUp);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlistTracks.length > 0]);
 
   if (!playlist) {
     return (
@@ -1226,11 +1364,12 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     : playlistTracks;
 
   const shuffleActive = shuffle !== ShuffleMode.Off;
-  const ShuffleIcon = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
+  const ShuffleIcon   = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
+  const ghostTrack    = draggingIdx !== null ? filteredTracks[draggingIdx] ?? null : null;
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll" onScroll={() => setRevealedHash(null)}>
+      <div ref={scrollContainerRef} style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll" onScroll={() => { setRevealedHash(null); }}>
 
         {/* nav bar — search expands inline from the search icon */}
         <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1340,42 +1479,54 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           </span>
         </div>
 
-        {tracksLoading && <MMLoader/>}
+        <div ref={trackListRef}>
+          {tracksLoading && <MMLoader/>}
 
-        {!tracksLoading && filteredTracks.length === 0 && (
-          <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-            {searchOpen && search.trim() ? 'No tracks match your search.' : 'No tracks on this branch yet.'}
-          </div>
-        )}
+          {!tracksLoading && filteredTracks.length === 0 && (
+            <div style={{ padding: '32px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>
+              {searchOpen && search.trim() ? 'No tracks match your search.' : 'No tracks on this branch yet.'}
+            </div>
+          )}
 
-        {!tracksLoading && filteredTracks.map((track, i) => (
-          <TrackRow
-            key={track.hash}
-            track={track}
-            idx={i}
-            playing={track.hash === loadedTrackHash}
-            revealed={revealedHash === track.hash}
-            onReveal={() => setRevealedHash(track.hash)}
-            onClose={() => setRevealedHash(null)}
-            onPlay={() => { setRevealedHash(null); handlePlay(playlistTracks.indexOf(track)); }}
-            onFavorite={() => {
-              setPlaylistTracks(ts => ts.map(t => t.hash === track.hash ? { ...t, favorited: !t.favorited } : t));
-              toggleFavorite(track.hash);
-            }}
-            onRemove={() => {
-              setRevealedHash(null);
-              setPlaylistTracks(ts => ts.filter(t => t.hash !== track.hash));
-              invoke('playlist_remove_track', {
-                playlistId: currentPlaylistId,
-                branchName: currentBranchName,
-                hash: track.hash,
-                message: '',
-              }).catch(() => loadTracks());
-            }}
-          />
-        ))}
+          {!tracksLoading && filteredTracks.map((track, i) => (
+            <React.Fragment key={track.hash}>
+              {dropTargetIdx === i && draggingIdx !== null && (
+                <div style={{ height: 2, background: 'var(--accent)', borderRadius: 1 }}/>
+              )}
+              <TrackRow
+                track={track}
+                idx={i}
+                playing={track.hash === loadedTrackHash}
+                revealed={revealedHash === track.hash}
+                dimmed={draggingIdx === i}
+                showHandle={!searchOpen || !search.trim()}
+                onReveal={() => setRevealedHash(track.hash)}
+                onClose={() => setRevealedHash(null)}
+                onPlay={() => { setRevealedHash(null); handlePlay(playlistTracks.indexOf(track)); }}
+                onFavorite={() => {
+                  setPlaylistTracks(ts => ts.map(t => t.hash === track.hash ? { ...t, favorited: !t.favorited } : t));
+                  toggleFavorite(track.hash);
+                }}
+                onRemove={() => {
+                  setRevealedHash(null);
+                  setPlaylistTracks(ts => ts.filter(t => t.hash !== track.hash));
+                  invoke('playlist_remove_track', {
+                    playlistId: currentPlaylistId,
+                    branchName: currentBranchName,
+                    hash: track.hash,
+                    message: '',
+                  }).catch(() => loadTracks());
+                }}
+              />
+            </React.Fragment>
+          ))}
 
-        <div style={{ height: 18 }}/>
+          {!tracksLoading && dropTargetIdx !== null && dropTargetIdx >= filteredTracks.length && draggingIdx !== null && (
+            <div style={{ height: 2, background: 'var(--accent)', borderRadius: 1 }}/>
+          )}
+
+          <div style={{ height: 18 }}/>
+        </div>
       </div>
 
       <MiniPlayer onTab={onTab}/>
@@ -1449,6 +1600,34 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             onBack={handleHistoryBack}
             onRefresh={handleRefresh}
           />
+        </div>
+      )}
+
+      {/* Drag ghost — floats at fixed viewport position while dragging */}
+      {ghostTrack && (
+        <div
+          ref={ghostRef}
+          style={{
+            position: 'fixed', left: 0, right: 0, zIndex: 200,
+            top: ghostTop, height: TRACK_ROW_H,
+            background: 'var(--bg-3)', border: '1px solid var(--border-2)',
+            opacity: 0.92, pointerEvents: 'none',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', width: 20, textAlign: 'right', flexShrink: 0 }}>
+            {String((draggingIdx ?? 0) + 1).padStart(2, '00')}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ghostTrack.title}</div>
+            {ghostTrack.artist && <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 1 }}>{ghostTrack.artist}</div>}
+          </div>
+          <svg width="12" height="10" viewBox="0 0 12 10" fill="currentColor" style={{ color: 'var(--text-3)', opacity: 0.6, flexShrink: 0 }}>
+            <rect x="0" y="0" width="12" height="1.5" rx="0.75"/>
+            <rect x="0" y="4.25" width="12" height="1.5" rx="0.75"/>
+            <rect x="0" y="8.5" width="12" height="1.5" rx="0.75"/>
+          </svg>
         </div>
       )}
     </div>

@@ -574,21 +574,43 @@ pub async fn playlist_reorder_tracks(
     let mut tree = load_tree(&storage, &playlist_id, &branch_name).await?;
 
     // No-op if the order is identical
-    let current_hashes: Vec<&str> = tree.tracks.iter().map(|t| t.hash.as_str()).collect();
-    if current_hashes == ordered_hashes.iter().map(String::as_str).collect::<Vec<_>>() {
+    let current_hashes: Vec<String> = tree.tracks.iter().map(|t| t.hash.clone()).collect();
+    if current_hashes.iter().map(String::as_str).collect::<Vec<_>>()
+        == ordered_hashes.iter().map(String::as_str).collect::<Vec<_>>()
+    {
         return head_commit(&storage, &playlist_id, &branch_name).await;
     }
+
+    // Remember old positions before consuming tree.tracks
+    let old_idx: std::collections::HashMap<&str, usize> = current_hashes.iter()
+        .enumerate().map(|(i, h)| (h.as_str(), i)).collect();
 
     // Reorder by building a lookup map from the existing entries so extra fields survive.
     let entry_map: std::collections::HashMap<String, _> = tree.tracks
         .into_iter().map(|e| (e.hash.clone(), e)).collect();
 
-    tree.tracks = ordered_hashes.into_iter()
-        .filter_map(|h| entry_map.get(&h).cloned())
+    tree.tracks = ordered_hashes.iter()
+        .filter_map(|h| entry_map.get(h).cloned())
         .collect();
 
+    // The track with the largest position delta is the one the user dragged.
+    let (moved_hash, moved_new_pos) = tree.tracks.iter().enumerate()
+        .filter_map(|(new_i, e)| {
+            let old_i = *old_idx.get(e.hash.as_str())?;
+            let delta = (new_i as i64 - old_i as i64).unsigned_abs() as usize;
+            Some((delta, new_i, e.hash.clone()))
+        })
+        .max_by_key(|(d, _, _)| *d)
+        .map(|(_, new_i, h)| (h, new_i + 1))
+        .unwrap_or_else(|| ("?".into(), 1));
+
+    let title = storage.db.get_track(&moved_hash).await.ok().flatten()
+        .map(|t| t.title)
+        .unwrap_or_else(|| moved_hash[..moved_hash.len().min(7)].to_string());
+
+    let msg = format!("Reorder: '{}' → #{}", title, moved_new_pos);
     let json = tree.to_json().map_err(|e| e.to_string())?;
-    write_commit(&storage, &playlist_id, &branch_name, &json, Some("Reorder tracks".into())).await
+    write_commit(&storage, &playlist_id, &branch_name, &json, Some(msg)).await
 }
 
 /// Rename a playlist: commits new meta to the tree blob AND updates the SQL cache.
