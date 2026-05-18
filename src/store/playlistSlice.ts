@@ -8,10 +8,9 @@ function loadBranchMap(): Record<string, string> {
   try {
     const s = localStorage.getItem(BRANCH_MAP_KEY)
     if (s) return JSON.parse(s)
+    // Migrate legacy single-value key — inside try so this is safe in non-browser envs
+    if (localStorage.getItem('mm_active_branch')) return {}
   } catch {}
-  // Migrate legacy single-value key if present
-  const legacy = localStorage.getItem('mm_active_branch')
-  if (legacy) return {}
   return {}
 }
 
