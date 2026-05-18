@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import MediaPlayer
 import UIKit
 
@@ -325,4 +326,53 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
         ]
         NSLog("[Melo] Remote commands registered (\(remoteCommandTokens.count) tokens)")
     }
+}
+
+// ── Process metrics ───────────────────────────────────────────────────────────
+//
+// sysinfo's iOS backend is a stub that returns zeros. These two exports query
+// Mach kernel APIs directly so the Settings developer panel shows real values.
+
+/// Returns the process's resident physical memory in bytes.
+@_cdecl("melo_memory_bytes")
+public func meloMemoryBytes() -> UInt64 {
+    var info = mach_task_basic_info()
+    var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+    let kr = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+        }
+    }
+    return kr == KERN_SUCCESS ? info.resident_size : 0
+}
+
+/// Returns the process's current CPU usage as a percentage (sum across threads).
+/// Uses thread_basic_info.cpu_usage which is a decayed-average snapshot per thread,
+/// scaled by TH_USAGE_SCALE (1000) → divide by 10 to get percent.
+@_cdecl("melo_cpu_usage_percent")
+public func meloCpuUsagePercent() -> Float {
+    var threadList: thread_act_array_t? = nil
+    var threadCount: mach_msg_type_number_t = 0
+    guard task_threads(mach_task_self_, &threadList, &threadCount) == KERN_SUCCESS,
+          let threads = threadList else { return 0.0 }
+    defer {
+        vm_deallocate(mach_task_self_,
+                      vm_address_t(UInt(bitPattern: threadList)),
+                      vm_size_t(threadCount) * vm_size_t(MemoryLayout<thread_t>.size))
+    }
+    var usage: Float = 0.0
+    for i in 0..<Int(threadCount) {
+        var tinfo = thread_basic_info()
+        var cnt = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size) / 4
+        let kr = withUnsafeMutablePointer(to: &tinfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(cnt)) {
+                thread_info(threads[i], thread_flavor_t(THREAD_BASIC_INFO), $0, &cnt)
+            }
+        }
+        // TH_FLAGS_IDLE = 0x2, TH_USAGE_SCALE = 1000
+        if kr == KERN_SUCCESS && (tinfo.flags & 0x2) == 0 {
+            usage += Float(tinfo.cpu_usage) / 1000.0 * 100.0
+        }
+    }
+    return usage
 }

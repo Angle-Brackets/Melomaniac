@@ -11,9 +11,31 @@ pub struct AppStats {
 
 pub struct SystemState(pub Mutex<System>);
 
+// ── iOS: query Mach kernel directly via Swift FFI ─────────────────────────────
+//
+// sysinfo's iOS backend is a compile-time stub (all methods return 0/false).
+// The real values come from melo_memory_bytes / melo_cpu_usage_percent exported
+// by MelomaniacPlayer.swift using mach_task_basic_info and thread_basic_info.
+
+#[cfg(target_os = "ios")]
+#[link(name = "MelomaniacPlayer")]
+unsafe extern "C" {
+    fn melo_memory_bytes() -> u64;
+    fn melo_cpu_usage_percent() -> f32;
+}
+
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub fn get_system_stats(_state: State<'_, SystemState>) -> AppStats {
+    AppStats {
+        memory_mb: unsafe { melo_memory_bytes() } as f64 / 1_048_576.0,
+        cpu_usage: unsafe { melo_cpu_usage_percent() },
+    }
+}
+
+// ── Desktop: use sysinfo ──────────────────────────────────────────────────────
+
 #[cfg(target_os = "linux")]
-// Linux has a special implementation due to differences in memory management architectures.
-// We use RssAnon to get the private memory usage.
 fn get_private_memory_mb(fallback_bytes: u64) -> f64 {
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
         for line in status.lines() {
@@ -30,11 +52,12 @@ fn get_private_memory_mb(fallback_bytes: u64) -> f64 {
     fallback_bytes as f64 / 1_048_576.0
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "ios", target_os = "linux")))]
 fn get_private_memory_mb(fallback_bytes: u64) -> f64 {
     fallback_bytes as f64 / 1_048_576.0
 }
 
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub fn get_system_stats(state: State<'_, SystemState>) -> AppStats {
     let mut sys = state.0.lock().unwrap();
