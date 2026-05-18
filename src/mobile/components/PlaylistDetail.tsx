@@ -1230,7 +1230,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
+      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll" onScroll={() => setRevealedHash(null)}>
 
         {/* nav bar — search expands inline from the search icon */}
         <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1357,7 +1357,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             revealed={revealedHash === track.hash}
             onReveal={() => setRevealedHash(track.hash)}
             onClose={() => setRevealedHash(null)}
-            onPlay={() => handlePlay(playlistTracks.indexOf(track))}
+            onPlay={() => { setRevealedHash(null); handlePlay(playlistTracks.indexOf(track)); }}
             onFavorite={() => {
               setPlaylistTracks(ts => ts.map(t => t.hash === track.hash ? { ...t, favorited: !t.favorited } : t));
               toggleFavorite(track.hash);
