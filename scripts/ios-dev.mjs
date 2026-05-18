@@ -25,9 +25,9 @@ conf.bundle.iOS.developmentTeam = teamId;
 writeFileSync(confPath, JSON.stringify(conf, null, 2));
 
 try {
-  const { status } = spawnSync("npx", ["tauri", "ios", "dev"], {
+  const args = process.argv.slice(2);
+  const { status } = spawnSync("npx", ["tauri", "ios", "dev", ...args], {
     stdio: "inherit",
-    shell: true,
   });
   process.exit(status ?? 0);
 } finally {
