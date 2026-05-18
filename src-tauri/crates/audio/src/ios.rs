@@ -26,6 +26,7 @@ unsafe extern "C" {
         album: *const c_char,
         position_secs: f32,
     );
+    fn melo_set_artwork_path(path: *const c_char);
     fn melo_register_remote_commands(callback: extern "C" fn(i32));
 }
 
@@ -139,6 +140,16 @@ impl AudioBridge for IosBridge {
 
         // Emit initial now-playing info (position 0).
         push_now_playing(&metadata, 0.0);
+
+        // Push artwork so the lock screen and Dynamic Island show cover art.
+        let art_ptr = metadata.artwork_path.as_ref()
+            .and_then(|p| p.to_str())
+            .and_then(|s| std::ffi::CString::new(s).ok());
+        unsafe {
+            melo_set_artwork_path(
+                art_ptr.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null()),
+            );
+        }
 
         // Store for the monitoring thread.
         if let Ok(mut guard) = self.current_meta.lock() {

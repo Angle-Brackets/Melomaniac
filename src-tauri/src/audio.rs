@@ -83,12 +83,13 @@ pub async fn track_play(
         .ok_or_else(|| format!("track not found in library: {hash}"))?;
 
     let path = storage.cas.blob_path(&hash);
+    let artwork_path = record.artwork_hash.as_deref().map(|h| storage.cas.blob_path(h));
 
     let meta = TrackMetadata {
         title:        record.title,
         artist:       record.artist,
         album:        record.album,
-        artwork_path: None, // artwork resolution is a future task
+        artwork_path,
         duration_ms:  Some(record.duration_ms as u64),
         mime_type:    record.mime_type,
     };

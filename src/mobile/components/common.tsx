@@ -249,10 +249,10 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
     if (expandable && !expanded && (totalDy < -60 || v < -400)) {
       setDragOffset(0); setExpanded(true); return;
     }
-    if (expandable && expanded && (totalDy > 80 || v > 500)) {
+    if (expandable && expanded && (totalDy > 44 || v > 280)) {
       setDragOffset(0); setExpanded(false); return;
     }
-    if (!expanded && (totalDy > 80 || v > 500)) {
+    if (!expanded && (totalDy > 44 || v > 280)) {
       setDragOffset(0); dismiss(); return;
     }
     setDragOffset(0); // spring back

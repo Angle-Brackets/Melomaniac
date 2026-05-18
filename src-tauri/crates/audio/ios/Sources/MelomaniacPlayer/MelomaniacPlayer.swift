@@ -1,5 +1,6 @@
 import AVFoundation
 import MediaPlayer
+import UIKit
 
 // ── Playback-end delegate ─────────────────────────────────────────────────────
 //
@@ -27,6 +28,8 @@ private class PlayerDelegate: NSObject, AVAudioPlayerDelegate {
 
 private var player: AVAudioPlayer?
 private let playerDelegate = PlayerDelegate()
+// Persisted across melo_update_now_playing calls so position ticks don't wipe cover art.
+private var currentArtwork: MPMediaItemArtwork? = nil
 
 // MPRemoteCommand.addTarget(handler:) returns an opaque token.
 // From Apple docs: "You need to retain the returned handle to keep the handler
@@ -180,6 +183,7 @@ public func meloStop() {
     onMain {
         player?.stop()
         player = nil
+        currentArtwork = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         NSLog("[Melo] stop()")
     }
@@ -252,8 +256,33 @@ public func meloUpdateNowPlaying(
             // lock-screen implementations to render the scrubber correctly.
             MPNowPlayingInfoPropertyDefaultPlaybackRate:        1.0,
         ]
-        if let album = album { info[MPMediaItemPropertyAlbumTitle] = album }
+        if let album  = album        { info[MPMediaItemPropertyAlbumTitle] = album }
+        if let art    = currentArtwork { info[MPMediaItemPropertyArtwork]   = art   }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+}
+
+/// Sets cover-art for the current track in MPNowPlayingInfoCenter.
+/// `pathPtr` is an absolute path to the image file, or NULL to clear.
+/// Must be called after melo_update_now_playing so the info dict already exists.
+@_cdecl("melo_set_artwork_path")
+public func meloSetArtworkPath(_ pathPtr: UnsafePointer<CChar>?) {
+    let path = pathPtr.map { String(cString: $0) }
+    onMain {
+        if let path = path, let image = UIImage(contentsOfFile: path) {
+            let size = image.size
+            currentArtwork = MPMediaItemArtwork(boundsSize: size) { _ in image }
+        } else {
+            currentArtwork = nil
+        }
+        if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
+            if let art = currentArtwork {
+                info[MPMediaItemPropertyArtwork] = art
+            } else {
+                info.removeValue(forKey: MPMediaItemPropertyArtwork)
+            }
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        }
     }
 }
 

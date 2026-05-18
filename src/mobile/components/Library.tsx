@@ -610,7 +610,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   });
 
   return (
-    <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden', display: 'flex', flexDirection: 'column', paddingTop: 16 }}>
+    <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden', display: 'flex', flexDirection: 'column', paddingTop: 'calc(16px + var(--safe-top))' }}>
 
       {/* Fixed header — title, search, filter pills */}
       <div style={{ flexShrink: 0 }}>

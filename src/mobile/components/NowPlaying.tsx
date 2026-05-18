@@ -38,7 +38,7 @@ function QueueSheetRow({ track }: { track: TrackRecord }) {
 
 const QUEUE_ROW_H    = 52;
 const QUEUE_LIST_H   = 252;
-const QUEUE_HEADER_H = 36;
+const QUEUE_HEADER_H = 62; // pill (10px) + header row (padding 5+8 + minH 36) + 1px border
 
 function QueueRow({ track, isActive, isPlaying, onClick }: {
   track: TrackRecord;

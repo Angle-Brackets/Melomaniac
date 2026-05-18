@@ -76,7 +76,11 @@ export default function MobileApp() {
       | { DurationKnown: number }
       | { Error: string };
 
+    let lastAdvancedAt = 0;
     const playNext = () => {
+      const now = Date.now();
+      if (now - lastAdvancedAt < 1500) return;
+      lastAdvancedAt = now;
       const s = useStore.getState();
       s.advance();
       const hash = useStore.getState().currentHash();
