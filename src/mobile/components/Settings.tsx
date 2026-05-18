@@ -18,6 +18,12 @@ function fmtBytes(b: number): string {
 const GITHUB_URL   = 'https://github.com/Angle-Brackets/Melomaniac';
 const BUILD_DATE   = 'May 17, 2026';
 
+// ── Persistence ────────────────────────────────────────────────────────────────
+// All settings are written to localStorage under SETTINGS_KEY as a flat JSON
+// object.  There is no remote or Tauri store — localStorage survives across
+// app restarts and is synchronous, avoiding any async read-on-mount flash.
+// `customAccentHue` is stored separately from `accentHue` so switching away
+// from the Custom theme and back restores the slider to the user's last position.
 interface StoredSettings {
   theme: ThemeName;
   accentHue: number;
@@ -110,7 +116,9 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Developer stats — poll every 2 s
+  // ── Developer stats panel ──────────────────────────────────────────────────
+  // Polls the Rust `get_system_stats` command every 2 s so the RAM / CPU rows
+  // stay live without being so frequent they cause noticeable IPC overhead.
   useEffect(() => {
     const tick = () =>
       invoke<{ memory_mb: number; cpu_usage: number }>('get_system_stats')
@@ -130,7 +138,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
     if (editingAuthor) authorInputRef.current?.focus();
   }, [editingAuthor]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Theme helpers ─────────────────────────────────────────────────────────
   function applyAndSaveTheme(name: ThemeName) {
     let hue: number;
     if (name === 'custom') {
@@ -148,6 +156,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   }
 
   function handleHueChange(hue: number) {
+    // Pass the current named theme as `base` so writeCustomHue can derive the
+    // saturation/lightness from that theme's palette rather than generic defaults.
     const base = settings.theme !== 'custom' ? settings.theme as Exclude<ThemeName, 'custom'> : undefined;
     writeCustomHue(hue, base);
     applyTheme('custom');

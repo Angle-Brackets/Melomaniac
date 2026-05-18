@@ -11,6 +11,10 @@ import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
 
+// ── useHorizDragScroll ─────────────────────────────────────────────────────────
+// Enables mouse/pointer drag to scroll horizontal pill rows that have no native
+// scrollbar.  `didDrag` distinguishes a real drag from a tap so click handlers
+// on child pills are not accidentally triggered after a drag gesture ends.
 function useHorizDragScroll() {
   const ref      = useRef<HTMLDivElement>(null);
   const startRef = useRef<{ x: number; sl: number } | null>(null);
@@ -39,9 +43,11 @@ type SortField   = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
 type SortDir     = 'asc' | 'desc';
 type SortCriterion = { field: SortField; dir: SortDir };
 
+// ── Sort state ─────────────────────────────────────────────────────────────────
 // Numeric/date fields default descending; text fields default ascending
 const defaultDir = (f: SortField): SortDir => (f === 'ingested_at' || f === 'duration_ms') ? 'desc' : 'asc';
 
+// Sort preferences are persisted so the user's chosen order survives restarts.
 const SORT_KEY = 'mm-lib-sort-multi';
 const DEFAULT_CRITERIA: SortCriterion[] = [{ field: 'ingested_at', dir: 'desc' }];
 function loadCriteria(): SortCriterion[] {
@@ -207,10 +213,17 @@ type FlatItem =
   | { kind: 'section'; label: string; trailing?: string }
   | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean };
 
+// ── TrackRow ───────────────────────────────────────────────────────────────────
+// Long-press (500 ms) opens the "Add to Playlist" action sheet.
+// In select-mode the row becomes a checkbox; long-press is disabled to avoid
+// conflicting with the selection tap target.
 function TrackRow({ track, idx, playing = false, onLongPress, onFavorite, selected, onSelect }: {
   track: TrackRecord; idx: number; playing?: boolean;
   onLongPress?: () => void; onFavorite?: () => void; selected?: boolean; onSelect?: () => void;
 }) {
+  // useTrackArtwork reads from the module-level artwork cache (artworkCache.ts)
+  // via useSyncExternalStore — no fetch is started here; the cache is pre-populated
+  // at startup in MobileApp's init effect.
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
   const subtext = [track.artist ?? 'Unknown artist', track.album].filter(Boolean).join(' | ');
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -574,7 +587,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     });
   }, [tracks, filter, query, sortCriteria]);
 
-  // Date grouping only applies when primary sort is date added
+  // Date grouping only applies when primary sort is date added; suppressed for search
+  // results and favorites filter since those have their own section headers.
   const grouped = useMemo(() => {
     if (query.trim() || filter === 'favorites' || sortCriteria[0]?.field !== 'ingested_at') return null;
     const groups: [typeof SECTION_LABELS[number], TrackRecord[]][] = [
@@ -584,7 +598,10 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     return groups.filter(([, ts]) => ts.length > 0);
   }, [displayed, query, filter, sortCriteria]);
 
-  // Flat item list for the virtualizer
+  // ── Virtualization ─────────────────────────────────────────────────────────
+  // flatItems merges section headers and track rows into a single array so
+  // @tanstack/react-virtual can handle them with a uniform index space.
+  // Without virtualization a 5000-track library would render ~5000 DOM nodes.
   const flatItems = useMemo<FlatItem[]>(() => {
     const items: FlatItem[] = [];
     let rowIdx = 0;
@@ -602,6 +619,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     return items;
   }, [displayed, grouped, query, loadedTrackHash]);
 
+  // overscan=6 keeps 6 extra rows rendered above/below the visible window to
+  // absorb fast flings without momentary blank rows.
   const virtualizer = useVirtualizer({
     count: flatItems.length,
     getScrollElement: () => listRef.current,
@@ -750,7 +769,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   );
 }
 
-// ── PlaylistsList — still mock data until Phase 2
+// ── PlaylistsList ──────────────────────────────────────────────────────────────
 function PlaylistArt({ playlistId, branch }: { playlistId: string; branch: string }) {
   const url = usePlaylistArtwork(playlistId, branch);
   return <MMArt src={url ?? undefined} size={54} radius={9}/>;
@@ -801,9 +820,14 @@ function SectionHeadPlain({ label, trailing, collapsible }: { label: string; tra
   );
 }
 
+// Tapping a playlist card sets it as the current playlist and opens the detail
+// overlay (PlaylistDetail) — the detail component reads currentPlaylistId from
+// the store rather than receiving it as a prop.
 export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) => void; onPlaylistDetail: () => void }) {
   const playlists          = useStore(s => s.playlists);
   const setCurrentPlaylist = useStore(s => s.setCurrentPlaylist);
+  // branchByPlaylist persists the user's last-viewed branch per playlist so the
+  // card shows the correct branch pill even before the detail is opened.
   const branchByPlaylist   = useStore(s => s.branchByPlaylist);
   const [query, setQuery]  = useState('');
 

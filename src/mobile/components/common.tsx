@@ -131,8 +131,12 @@ export function MMIsland({ branch, syncing = false }: { branch: string; syncing?
   );
 }
 
-// ── Bottom tab bar
-
+// ── Bottom tab bar ─────────────────────────────────────────────────────────────
+// Five tabs: Library, Playlists, Player (center FAB), Discover, Settings.
+// The center "now" tab renders as a large circular accent button (FAB-style)
+// rather than a text+icon combo to give it visual priority as the primary screen.
+// Discover is temporarily disabled (opacity + pointerEvents: none) until the
+// feature is implemented — the "soon" label communicates this to users.
 export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: TabId) => void; style?: React.CSSProperties }) {
   const tabs: { id: TabId; label: string; Icon: (p: { size?: number }) => React.ReactElement; center?: boolean }[] = [
     { id: 'library',   label: 'Library',   Icon: Icons.library },
@@ -352,7 +356,17 @@ export function MMLoader({ size = 36, color = 'var(--accent)' }: { size?: number
   );
 }
 
-// ── Marquee text — scrolls horizontally when text overflows and active=true
+// ── MarqueeText ────────────────────────────────────────────────────────────────
+// Scrolls the text horizontally (ticker-tape style) when it overflows its
+// container AND active=true (i.e. the track is currently playing).
+// Flow: render a static <span> → measure with useLayoutEffect → if overflow > 4px,
+// swap to an animating <span> that contains two copies of the text separated by
+// MARQUEE_GAP, with a CSS translate animation that moves by exactly (textWidth +
+// gap) so the second copy lands in the same position as the first — seamless loop.
+// useLayoutEffect is used instead of useEffect to avoid a one-frame jump where
+// the centered static text is briefly visible before the scrolling span mounts.
+// When `text` changes mid-scroll (track changes), `measuredFor` forces a reset
+// back to the static span so measurement can happen again before restarting.
 const MARQUEE_GAP = 48;
 export function MarqueeText({ text, active, style, textStyle }: {
   text: string; active: boolean;

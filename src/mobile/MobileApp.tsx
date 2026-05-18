@@ -13,11 +13,14 @@ import { Discover } from './components/Discover';
 import { Settings } from './components/Settings';
 import type { TabId } from './components/common';
 
+// TAB_ORDER defines the spatial layout used to derive slide direction.
 const TAB_ORDER: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
 
 export default function MobileApp() {
   const [tab, setTab] = useState<TabId>('now');
+  // tabKey is incremented on every tab switch to force a remount, which re-triggers the CSS slide-in animation.
   const [tabKey,  setTabKey]  = useState(0);
+  // tabDir drives which animation variant plays — tabs to the right of the current one slide in from the right.
   const [tabDir,  setTabDir]  = useState<'right' | 'left'>('right');
 
   // Detail overlay — kept mounted during exit animation so it can slide out
@@ -67,6 +70,7 @@ export default function MobileApp() {
     });
   }, []);
 
+  // ── Global audio event listener ───────────────────────────────────────────────
   // Lives outside NowPlaying so it stays active when the user switches tabs
   useEffect(() => {
     type AudioPayload =
@@ -76,9 +80,12 @@ export default function MobileApp() {
       | { DurationKnown: number }
       | { Error: string };
 
+    // ── playNext / playPrev ────────────────────────────────────────────────────
     let lastAdvancedAt = 0;
     const playNext = () => {
       const now = Date.now();
+      // 1500 ms debounce guards against double-fire when TrackEnded and RemoteNextTrack
+      // arrive nearly simultaneously (e.g. OS media key pressed right as a track ends).
       if (now - lastAdvancedAt < 1500) return;
       lastAdvancedAt = now;
       const s = useStore.getState();
@@ -106,6 +113,12 @@ export default function MobileApp() {
       s.setPlaying(true);
     };
 
+    // ── Tauri listener registration ────────────────────────────────────────────
+    // React 18 Strict Mode mounts effects twice in dev to detect side-effects.
+    // `listen()` returns a Promise, so its resolution can race with the cleanup
+    // function — if the component unmounts before the promise resolves, `unlisten`
+    // is never set and the listener becomes a zombie.  The `cancelled` flag lets
+    // the `.then()` callback immediately call the unsubscribe handle instead.
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     listen<AudioPayload>('audio://event', ({ payload }) => {
@@ -164,9 +177,11 @@ export default function MobileApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Tab navigation ─────────────────────────────────────────────────────────
   const handleTab = (id: TabId) => {
     const oldIdx = TAB_ORDER.indexOf(tab);
     const newIdx = TAB_ORDER.indexOf(id);
+    // Slide direction mirrors the logical left-to-right order of TAB_ORDER.
     setTabDir(newIdx >= oldIdx ? 'right' : 'left');
     setTabKey(k => k + 1);
     setTab(id);
@@ -193,6 +208,7 @@ export default function MobileApp() {
     setTimeout(() => setDetailMounted(false), 360);
   };
 
+  // ── Android / browser back button ─────────────────────────────────────────
   // Android hardware back button & browser back gesture via History API
   useEffect(() => {
     const onPop = () => {
@@ -206,6 +222,7 @@ export default function MobileApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── iOS left-edge swipe gesture ───────────────────────────────────────────
   // iOS-style left-edge swipe to go back
   useEffect(() => {
     let startX = 0, startY = 0;
@@ -213,6 +230,8 @@ export default function MobileApp() {
     const onEnd = (e: TouchEvent) => {
       const dx = e.changedTouches[0].clientX - startX;
       const dy = Math.abs(e.changedTouches[0].clientY - startY);
+      // startX < 28: touch must originate in the left-edge bezel zone (≈1 thumb-width).
+      // dy < 100: reject diagonal or vertical swipes so normal scrolling is unaffected.
       if (startX < 28 && dx > 60 && dy < 100 && detailActiveRef.current) handlePlaylistBack();
     };
     window.addEventListener('touchstart', onStart, { passive: true });
@@ -238,6 +257,8 @@ export default function MobileApp() {
       {dragStrip}
 
       {/* Tab content — key forces remount on tab change, triggering the slide animation */}
+      {/* When the detail overlay is open, the tab content scales down and slides left
+          (iOS-style push transition) — the detail panel covers the remaining right portion. */}
       <div
         key={tabKey}
         style={{

@@ -60,7 +60,9 @@ const BRANCH_PALETTE = [
   'var(--accent)', 'var(--accent-light)', 'var(--blue)', 'var(--green)', 'var(--text-2)',
 ];
 
-// ── Commit graph types & layout ──────────────────────────────────────────────
+// ── Commit graph types & layout ─────────────────────────────────────────────
+// Each GraphNode mirrors the Rust CommitNode — parents/refs make this a real DAG,
+// not just a linear list, enabling true git-like branch visualization.
 interface GraphNode {
   hash: string; tree_hash: string; timestamp: number;
   device_id: string; message: string | null;
@@ -68,13 +70,16 @@ interface GraphNode {
 }
 
 const GRAPH_PALETTE = ['var(--accent)', 'var(--accent-light)', '#4dabf7', '#69db7c', '#ffa94d', '#da77f2', '#f783ac', '#a9e34b'];
+// GN_H: fixed row height keeps lane geometry predictable without measuring the DOM.
 const GN_H   = 50;
 const GLANE_W = 16;
 const GDOT_R  = 4.5;
 const GLINE_W = 1.5;
 
+// gLx: converts a lane index to the SVG x-center of that lane column.
 function gLx(lane: number) { return lane * GLANE_W + GLANE_W / 2; }
 function gLaneCol(i: number) { return GRAPH_PALETTE[i % GRAPH_PALETTE.length]; }
+// gPath: straight line for same-column edges; cubic Bézier for cross-lane merges/branches.
 function gPath(x1: number, y1: number, x2: number, y2: number): string {
   if (x1 === x2) return `M${x1},${y1} L${x1},${y2}`;
   const cy = (y1 + y2) / 2;
@@ -88,16 +93,24 @@ interface GRowLayout {
 }
 
 
+// ── Commit graph layout algorithm ────────────────────────────────────────────
+// Assigns each commit to a horizontal lane and computes the SVG line segments
+// that connect it to its parents, producing a git-log-style graph view.
 function computeGLayout(commits: GraphNode[]): GRowLayout[] {
+  // lanes: sparse array where index = lane number and value = the commit hash
+  // currently "occupying" that lane (i.e., waiting for its parent to appear).
   const lanes: Array<string | null> = [];
   const colors: string[] = [];
   const HALF = GN_H / 2;
 
+  // Pin the 'main' branch to lane 0 so it always renders on the leftmost column.
   const mainTip = commits.find(c => c.refs.includes('main'));
   const mainTipHash = mainTip?.hash ?? null;
   const mainIsDirect = mainTipHash !== null && commits.some(c => c.parents[0] === mainTipHash);
   let mainPlaced = mainTipHash === null || mainIsDirect;
 
+  // alloc: finds or allocates a free lane for a commit hash.
+  // Skips lane 0 for non-main commits until 'main' has been placed.
   const alloc = (hash: string): number => {
     if (hash === mainTipHash && !mainPlaced) {
       mainPlaced = true;
@@ -113,15 +126,19 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
 
   return commits.map(commit => {
     let myLane = lanes.indexOf(commit.hash);
+    // isNew: commit hasn't been seen as a parent yet — allocate a fresh lane.
     const isNew = myLane === -1;
     if (isNew) myLane = alloc(commit.hash);
     const myColor = colors[myLane];
+    // Snapshot lane state before and after processing this commit so we can
+    // draw the correct "pass-through" lines for lanes that continue past this row.
     const before = [...lanes]; before[myLane] = commit.hash;
     lanes[myLane] = null;
 
     const parentLanes: { lane: number }[] = [];
     for (let pi = 0; pi < commit.parents.length; pi++) {
       const p = commit.parents[pi]; const ex = lanes.indexOf(p);
+      // First parent continues in the same lane; additional parents (merges) get new lanes.
       if (ex !== -1)    { parentLanes.push({ lane: ex }); }
       else if (pi === 0) { lanes[myLane] = p; parentLanes.push({ lane: myLane }); }
       else               { parentLanes.push({ lane: alloc(p) }); }
@@ -130,6 +147,7 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
     const after = [...lanes];
     const lines: GRowLine[] = [];
     const maxIdx = Math.max(before.length, after.length, myLane + 1);
+    // Draw pass-through lines for every other active lane in this row.
     for (let i = 0; i < maxIdx; i++) {
       if (i === myLane) continue;
       const hB = before[i] ?? null; const hA = after[i] ?? null;
@@ -137,7 +155,9 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
       if (hB && hA && hB === hA) lines.push({ x1: gLx(i), y1: 0, x2: gLx(i), y2: GN_H, col: c });
       else if (hB && !hA)        lines.push({ x1: gLx(i), y1: 0, x2: gLx(i), y2: HALF,  col: c });
     }
+    // Incoming line from row above (only if this commit appeared as a known parent already).
     if (!isNew) lines.push({ x1: gLx(myLane), y1: 0, x2: gLx(myLane), y2: HALF, col: myColor });
+    // Outgoing lines from dot to each parent's lane (straight down or diagonal Bézier).
     for (let pi = 0; pi < parentLanes.length; pi++) {
       const p = parentLanes[pi];
       const lineCol = pi === 0 ? myColor : (colors[p.lane] ?? myColor);
@@ -154,10 +174,13 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
   });
 }
 
+// SWIPE_REVEAL_W: how far left the row slides to expose the delete button.
 const SWIPE_REVEAL_W = 72;
+// TRACK_ROW_H must be a fixed constant — the drag reorder math uses it to
+// compute which slot the finger is over without querying the DOM.
 const TRACK_ROW_H   = 58;
 
-// ── Track row (real data)
+// ── Track row ────────────────────────────────────────────────────────────────
 function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed, onReveal, onClose, dimmed, showHandle }: {
   track: PlaylistTrackRecord; idx: number; playing?: boolean;
   onPlay?: () => void; onFavorite?: () => void; onRemove?: () => void;
@@ -168,6 +191,8 @@ function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed,
   const startXRef = useRef(0);
   const accent  = 'var(--accent)';
 
+  // Swipe-to-delete: a left swipe of ≥48 px reveals the red delete button behind the row.
+  // A right swipe of ≥24 px closes it. A tap while revealed also closes (no accidental deletes).
   const handlePointerDown = (e: React.PointerEvent) => { startXRef.current = e.clientX; };
   const handlePointerUp   = (e: React.PointerEvent) => {
     const dx = e.clientX - startXRef.current;
@@ -184,7 +209,7 @@ function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed,
       opacity: dimmed ? 0.3 : 1,
       pointerEvents: dimmed ? 'none' : undefined,
     }}>
-      {/* Delete action — revealed by left swipe */}
+      {/* Delete action — sits at absolute right edge, exposed when row slides left */}
       <div style={{
         position: 'absolute', right: 0, top: 0, bottom: 0, width: SWIPE_REVEAL_W,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -249,7 +274,7 @@ function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed,
   );
 }
 
-// ── Branch picker sheet
+// ── Branch picker sheet ──────────────────────────────────────────────────────
 function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRefresh }: {
   playlist: PlaylistRecord;
   activeBranchName: string;
@@ -267,6 +292,7 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
   const handleCreate = () => {
     if (!newName.trim()) return;
     setBusy(true);
+    // Branching from HEAD means the new branch starts with the same track list as the current one.
     // Branch from the active branch's HEAD so the new branch starts with its current state
     invoke('branch_create', { playlistId: playlist.id, name: newName.trim(), fromCommit: activeBranchHead })
       .then(() => { onRefresh(); onSelect(newName.trim()); onClose(); })
@@ -368,7 +394,9 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
   );
 }
 
-// ── Fork sheet
+// ── Fork sheet ───────────────────────────────────────────────────────────────
+// Forking creates an entirely new playlist that shares commit history with the source,
+// as opposed to branching which creates a new branch within the same playlist.
 function ForkSheet({ playlist, onClose, onForked }: {
   playlist: PlaylistRecord;
   onClose: () => void;
@@ -425,7 +453,7 @@ function ForkSheet({ playlist, onClose, onForked }: {
   );
 }
 
-// ── Edit sheet
+// ── Edit sheet ───────────────────────────────────────────────────────────────
 function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }: {
   playlist: PlaylistRecord;
   currentBranchName: string;
@@ -441,6 +469,7 @@ function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }:
   const handleSave = async () => {
     setBusy(true);
     try {
+      // Fire both mutations in parallel; only issue commands that actually changed.
       const ops: Promise<unknown>[] = [];
       if (name.trim() !== playlist.name) {
         ops.push(invoke('playlist_rename', { playlistId: playlist.id, branchName: currentBranchName, newName: name.trim(), message: '' }));
@@ -551,7 +580,10 @@ function BranchPill({ label, active, color, onClick }: {
   );
 }
 
-// ── Commit graph history view
+// ── Commit graph history view ────────────────────────────────────────────────
+// Shows the full multi-branch commit graph for a playlist — analogous to `git log --graph`.
+// Each commit row is a fixed-height SVG lane + text line so layout is purely computed,
+// with no DOM measurement required.
 function CommitGraphView({ playlistId, branchName, playlistName, branchNames, onBack, onRefresh }: {
   playlistId: string; branchName: string; playlistName: string;
   branchNames: string[];
@@ -576,13 +608,14 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
 
   useEffect(() => {
     if (!allNodes.length) { setLayout([]); return; }
-    // Show all branches in the graph, ordered newest-first
+    // Newest-first order matches user expectation (most recent change at top).
     const sorted = [...allNodes].sort((a, b) => b.timestamp - a.timestamp);
     setLayout(computeGLayout(sorted));
   }, [allNodes]);
 
   // When a branch pill is selected, walk from its HEAD commit backwards to collect
   // all ancestor hashes — used to filter the layout to only that branch's history.
+  // BFS rather than the full node list because branches share ancestry.
   const ancestorSet = useMemo(() => {
     if (!filterBranch) return null;
     const byHash = new Map(allNodes.map(n => [n.hash, n]));
@@ -600,7 +633,8 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
   }, [filterBranch, allNodes]);
 
   // Re-run layout on only the filtered commits so lane assignments and connecting
-  // lines are clean — filtering the full layout leaves orphaned cross-lane lines.
+  // lines are clean — slicing the pre-computed layout would leave dangling lines
+  // from commits whose parents are outside the visible set.
   const filteredLayout = useMemo(() => {
     if (!ancestorSet) return layout;
     const nodes = allNodes.filter(n => ancestorSet.has(n.hash));
@@ -688,12 +722,13 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
             return (
               <div key={row.commit.hash} onClick={() => setSelected(isSel ? null : row)}
                 style={{ height: GN_H, display: 'flex', alignItems: 'stretch', borderBottom: '0.5px solid var(--border-0)', cursor: 'pointer', background: isSel ? 'oklch(0.28 0.06 30 / 0.6)' : undefined, transition: 'background 0.1s' }}>
-                {/* SVG lane */}
+                {/* SVG lane — width expands with active lane count so dots never clip */}
                 <div style={{ width: svgMaxW, flexShrink: 0 }}>
                   <svg width={svgMaxW} height={GN_H} style={{ overflow: 'visible' }}>
                     {row.lines.map((l, j) => (
                       <path key={j} d={gPath(l.x1, l.y1, l.x2, l.y2)} stroke={l.col} strokeWidth={GLINE_W} fill="none" strokeLinecap="round"/>
                     ))}
+                    {/* Merge commits get a rotated square (diamond); regular commits get a circle */}
                     {row.commit.parents.length > 1 ? (
                       <rect
                         x={row.dotCx - GDOT_R * 0.9} y={row.dotCy - GDOT_R * 0.9}
@@ -710,7 +745,7 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
                     )}
                   </svg>
                 </div>
-                {/* Commit info */}
+                {/* Commit info — hash badge, branch ref labels, timestamp, and message */}
                 <div style={{ flex: 1, minWidth: 0, padding: '0 12px 0 4px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
                     {/* badges — allowed to shrink/clip so timestamp is never pushed off */}
@@ -736,7 +771,7 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
         </div>
       </div>
 
-      {/* Commit detail sheet */}
+      {/* Commit detail sheet — tapping a row exposes branch-from and revert actions */}
       {selected && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
           <div onClick={() => { setSelected(null); setBusy(false); }} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }}/>
@@ -800,7 +835,11 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
   );
 }
 
-// ── Merge sheet
+// ── Merge sheet ──────────────────────────────────────────────────────────────
+// Merging combines two branches' track lists using one of two strategies:
+//   union        — all tracks from both branches (new tracks from source are appended).
+//   intersection — only tracks that exist in both branches (removes source-only tracks).
+// A live diff preview is computed client-side before the user confirms.
 function MField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div>
@@ -835,13 +874,12 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
   const [sourceTracks, setSourceTracks] = useState<PlaylistTrackRecord[]>([]);
   const [busy, setBusy] = useState(false);
 
-  // Descriptions
+  // When descriptions differ between branches the user must pick one or write a new one.
   const [targetDesc, setTargetDesc] = useState<string | null>(null);
   const [sourceDesc, setSourceDesc] = useState<string | null>(null);
   const [descChoice, setDescChoice] = useState<'target' | 'source' | 'custom'>('target');
   const [customDesc, setCustomDesc] = useState('');
 
-  // Commit message
   const [commitMsg, setCommitMsg] = useState('');
 
   useEffect(() => {
@@ -875,7 +913,8 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
     ? targetTracks.length + added
     : targetTracks.filter(t => sourceHashes.has(t.hash)).length;
 
-  // Build preview rows: added (green), removed (red), reordered (blue) — cap at 8
+  // Build preview rows: added (green), removed (red), reordered (blue) — capped at 8
+  // so the sheet doesn't become a full track list before the user commits.
   type DiffRow = { kind: 'added' | 'removed' | 'reordered'; title: string; detail?: string };
   const previewRows: DiffRow[] = [
     ...addedTracks.slice(0, 5).map(t => ({ kind: 'added' as const, title: t.title })),
@@ -888,6 +927,7 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
   ].slice(0, 8);
   const hiddenCount = (added + removed + reordered) - previewRows.length;
 
+  // Only show description conflict UI when the two branches actually disagree.
   const descConflict = sourceDesc !== null && targetDesc !== sourceDesc;
 
   const handleMerge = () => {
@@ -1108,9 +1148,14 @@ function ActionTile({ Icon, label, badge, onPress }: {
 
 const SHUFFLE_CYCLE = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random] as const;
 
-// ── Main PlaylistDetail component
+// ── Main PlaylistDetail component ────────────────────────────────────────────
+// `onBack`  — navigates up to the playlist library list.
+// `onTab`   — switches to a different tab (e.g. NowPlaying) without unmounting this screen.
+//             Called after starting playback so the user lands on the player immediately.
 export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (id: TabId) => void }) {
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
+  // currentBranchName: the branch the user is *viewing* — may differ from the playing branch.
+  // setPlayingBranch is only called when playback actually starts (see handlePlay).
   const currentBranchName  = useStore(s => s.currentBranchName);
   const setCurrentBranch   = useStore(s => s.setCurrentBranch);
   const setPlayingBranch   = useStore(s => s.setPlayingBranch);
@@ -1128,30 +1173,41 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const playlist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const artUrl   = usePlaylistArtwork(currentPlaylistId, currentBranchName);
 
+  // ── State inventory ─────────────────────────────────────────────────────────
+  // Track data
   const [playlistTracks, setPlaylistTracks] = useState<PlaylistTrackRecord[]>([]);
   const [tracksLoadingRaw, setTracksLoading] = useState(true);
   const tracksLoading = useMinDuration(tracksLoadingRaw);
+  // Active bottom sheet ('branch' | 'merge' | 'fork' | 'edit' | null)
   const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
+  // Swipe-to-delete reveal state — at most one row is revealed at a time.
   const [revealedHash, setRevealedHash] = useState<string | null>(null);
+  // Drag-to-reorder state — React state drives the placeholder indicator; refs drive the ghost.
   const [draggingIdx,   setDraggingIdx]   = useState<number | null>(null);
   const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
   const [ghostTop,      setGhostTop]      = useState(0);
+  // Refs mirror the above for use inside non-reactive event listeners (touch/mouse handlers).
   const isDraggingRef       = useRef(false);
   const draggingIdxRef      = useRef<number | null>(null);
   const dropTargetIdxRef    = useRef<number | null>(null);
   const trackListRef        = useRef<HTMLDivElement>(null);
   const scrollContainerRef  = useRef<HTMLDivElement>(null);
   const ghostRef            = useRef<HTMLDivElement>(null);
+  // Snapshot refs keep the imperative drag handlers in sync with the latest React state
+  // without re-registering the event listeners on every render.
   const playlistTracksRef   = useRef<PlaylistTrackRecord[]>([]);
   const currentBranchRef    = useRef(currentBranchName);
   const currentPlaylistRef  = useRef<string | null>(null);
+  // History view is kept mounted during its slide-out animation, then torn down.
   const [historyMounted, setHistoryMounted] = useState(false);
   const [historyActive,  setHistoryActive]  = useState(false);
   const historyActiveRef = useRef(false);
   // Branch-specific description from live tree (may differ from SQL cache)
   const [liveDesc, setLiveDesc] = useState<string | null | undefined>(undefined);
+  // Search state
   const [search, setSearch]                 = useState('');
   const [searchOpen, setSearchOpen]         = useState(false);
+  // Toast state
   const [forkToast, setForkToast]           = useState<string | null>(null);
   const searchInputRef                      = useRef<HTMLInputElement>(null);
   const toastTimerRef                       = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1197,15 +1253,20 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     setTimeout(() => setHistoryMounted(false), 360);
   };
 
-  // Keep drag refs in sync with current React state
+  // Keep snapshot refs in sync so imperative handlers always see current React state.
   playlistTracksRef.current  = playlistTracks;
   currentBranchRef.current   = currentBranchName;
   currentPlaylistRef.current = currentPlaylistId ?? null;
 
-  // Imperative drag-to-reorder — non-passive so we can preventDefault before scroll commits
+  // ── Drag-to-reorder (imperative) ────────────────────────────────────────────
+  // Touch/mouse events are registered imperatively (not as React props) so we can
+  // call preventDefault() before the browser commits to scroll — React synthetic
+  // events fire after passive listeners and cannot cancel native scroll.
+  // The HTML5 drag-and-drop API is not used because it has no touch support on mobile.
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
+    // HANDLE_PX: only touches in the rightmost 44 px (the drag handle area) activate a drag.
     const HANDLE_PX = 44;
 
     const activate = (clientX: number, clientY: number): boolean => {
@@ -1214,6 +1275,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
       if (clientX < trackRect.right - HANDLE_PX) return false;
       const posInList = clientY - trackRect.top;
       if (posInList < 0 || posInList > trackRect.height) return false;
+      // Convert Y position to track index using the fixed row height constant.
       const idx = Math.floor(posInList / TRACK_ROW_H);
       if (idx < 0 || idx >= playlistTracksRef.current.length) return false;
       isDraggingRef.current     = true;
@@ -1222,6 +1284,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
       setDraggingIdx(idx);
       setDropTargetIdx(idx);
       setRevealedHash(null);
+      // Ghost is centered on the finger so the user can see it clearly above their thumb.
       setGhostTop(clientY - TRACK_ROW_H / 2);
       if (navigator.vibrate) navigator.vibrate(30);
       return true;
@@ -1229,9 +1292,11 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
     const move = (clientY: number) => {
       if (!isDraggingRef.current || !trackListRef.current) return;
+      // Move ghost via direct DOM mutation (avoids React re-render on every pointer event).
       if (ghostRef.current) ghostRef.current.style.top = `${clientY - TRACK_ROW_H / 2}px`;
       const trackRect = trackListRef.current.getBoundingClientRect();
       const posInList = clientY - trackRect.top;
+      // Clamp so dragging past the list boundaries snaps to first or last slot.
       const idx = Math.min(Math.max(0, Math.floor(posInList / TRACK_ROW_H)), playlistTracksRef.current.length - 1);
       if (idx !== dropTargetIdxRef.current) {
         dropTargetIdxRef.current = idx;
@@ -1248,6 +1313,9 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
       setDraggingIdx(null);
       setDropTargetIdx(null);
       if (from !== null && to !== null && from !== to) {
+        // Optimistic reorder: update local state immediately so the UI feels instant,
+        // then fire the Tauri command asynchronously.  On failure, re-fetch from Rust
+        // to restore the authoritative order.
         const newTracks = [...playlistTracksRef.current];
         const [moved] = newTracks.splice(from, 1);
         newTracks.splice(to, 0, moved);
@@ -1315,8 +1383,10 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     );
   }
 
+  // ── Playback ─────────────────────────────────────────────────────────────────
   const handlePlay = (startIdx = 0) => {
     if (playlistTracks.length === 0) return;
+    // Replace the entire queue with this branch's track order before starting.
     const hashes = playlistTracks.map(t => t.hash);
     loadQueue(hashes);
     const track = playlistTracks[startIdx];
@@ -1324,7 +1394,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     positionMsRef.current = 0;
     invoke('track_play', { hash: track.hash }).catch(console.error);
     setPlaying(true);
-    // Only now sync the playing branch to what's actually loaded
+    // Sync playingBranch only after confirming playback — browsingBranch (currentBranchName)
+    // can be different while the user explores other branches without stopping playback.
     setPlayingBranch(currentBranchName);
   };
 
@@ -1332,7 +1403,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     const currentIdx = SHUFFLE_CYCLE.indexOf(shuffle);
     const nextMode = SHUFFLE_CYCLE[(currentIdx + 1) % SHUFFLE_CYCLE.length];
     setShuffle(nextMode);
-    // if queue isn't loaded from this playlist, load it first
+    // Ensure the queue is loaded from this playlist before shuffle takes effect,
+    // otherwise shuffle would apply to whatever was queued previously.
     if (playlistTracks.length > 0) {
       const hashes = playlistTracks.map(t => t.hash);
       const queueMatchesPlaylist = queueTracks.length === hashes.length &&
@@ -1354,6 +1426,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
   const activeBranch = playlist.branches.find(b => b.name === currentBranchName)
     ?? playlist.branches[0];
+  // pendingBranches: branches whose HEAD differs from the current branch — shown as a merge badge.
   const pendingBranches = playlist.branches.filter(b => b.head_commit !== activeBranch?.head_commit).length;
 
   const filteredTracks = searchOpen && search.trim()
@@ -1429,7 +1502,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
           </div>
         </div>
 
-        {/* description — prefer live tree value, fall back to SQL cache */}
+        {/* description — prefer live tree value over SQL cache which may lag a commit behind */}
         {(liveDesc ?? playlist.description) && (
           <div style={{ padding: '4px 22px 0', fontSize: 13, color: 'var(--text-1)', lineHeight: 1.45 }}>
             {liveDesc ?? playlist.description}
@@ -1462,6 +1535,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             onPress={() => setSheet('merge')}
           />
           <ActionTile Icon={Icons.history} label="History" onPress={() => {
+            // Mount first, then activate on the next two frames so the initial
+            // translateX(100%) is painted before the transition begins.
             setHistoryMounted(true);
             requestAnimationFrame(() => requestAnimationFrame(() => {
               historyActiveRef.current = true;
@@ -1490,6 +1565,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
           {!tracksLoading && filteredTracks.map((track, i) => (
             <React.Fragment key={track.hash}>
+              {/* Drop placeholder line — appears above the target slot during drag */}
               {dropTargetIdx === i && draggingIdx !== null && (
                 <div style={{ height: 2, background: 'var(--accent)', borderRadius: 1 }}/>
               )}
@@ -1504,11 +1580,13 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
                 onClose={() => setRevealedHash(null)}
                 onPlay={() => { setRevealedHash(null); handlePlay(playlistTracks.indexOf(track)); }}
                 onFavorite={() => {
+                  // Optimistic toggle: flip the local flag immediately, let Rust persist it.
                   setPlaylistTracks(ts => ts.map(t => t.hash === track.hash ? { ...t, favorited: !t.favorited } : t));
                   toggleFavorite(track.hash);
                 }}
                 onRemove={() => {
                   setRevealedHash(null);
+                  // Optimistic remove: drop the track from local state before Rust confirms.
                   setPlaylistTracks(ts => ts.filter(t => t.hash !== track.hash));
                   invoke('playlist_remove_track', {
                     playlistId: currentPlaylistId,
@@ -1583,7 +1661,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
         />
       )}
 
-      {/* History — slides in from the right, kept mounted during exit animation */}
+      {/* History — slides in from the right over the detail view; kept mounted during
+          the slide-out transition so the animation completes before the component unmounts */}
       {historyMounted && (
         <div style={{
           position: 'absolute', inset: 0,
@@ -1603,7 +1682,8 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
         </div>
       )}
 
-      {/* Drag ghost — floats at fixed viewport position while dragging */}
+      {/* Drag ghost — fixed viewport overlay that follows the finger; pointerEvents:none
+          so it doesn't intercept the touch events still being tracked on scrollContainerRef */}
       {ghostTrack && (
         <div
           ref={ghostRef}

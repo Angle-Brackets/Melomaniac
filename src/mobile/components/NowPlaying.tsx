@@ -301,6 +301,9 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
 }
 
 export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
+  // ── Store subscriptions ────────────────────────────────────────────────────
+  // meloUpdateNowPlaying fires every ~250ms from Rust; this component only
+  // reads the resulting store values — it never drives the position poll itself.
   const loadedTrackHash    = useStore(s => s.loadedTrackHash);
   const isPlaying          = useStore(s => s.isPlaying);
   const duration_ms        = useStore(s => s.duration_ms);
@@ -326,21 +329,31 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const setPlayingBranch   = useStore(s => s.setPlayingBranch);
 
   const currentPlaylist = playlists.find(p => p.id === currentPlaylistId) ?? null;
+
+  // ── Sheet / modal visibility state ────────────────────────────────────────
+  // showSwitcher opens the playlist quick-switcher sheet (header playlist button).
+  // showBranchSheet opens the branch switcher sheet (header branch pill button).
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showBranchSheet, setShowBranchSheet] = useState(false);
   // activeBranchRef kept for use in non-reactive callbacks (drag reorder, AB loop)
   const activeBranchRef = useRef(playingBranchName);
   useEffect(() => { activeBranchRef.current = playingBranchName; }, [playingBranchName]);
+
+  // ── Queue panel state ──────────────────────────────────────────────────────
   const [showQueue, setShowQueue] = useState(false);
+  // queueExpanded persists across sessions; when true the coverflow shrinks to
+  // make room — a layout trade-off so both are visible on a small screen.
   const [queueExpanded, setQueueExpanded] = useState(() => localStorage.getItem('mm_queue_expanded') !== 'false');
+  // Refs to compute swipe velocity on the queue header drag handle.
   const queueDragStartY = useRef<number | null>(null);
   const queueDragLastY  = useRef(0);
   const queueDragTime   = useRef(0);
   const queueVelocity   = useRef(0);
+  // listScrolled temporarily hides the tab bar so the queue list gets extra height.
   const [listScrolled, setListScrolled] = useState(false);
   const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Drag-to-reorder state
+  // ── Drag-to-reorder state ──────────────────────────────────────────────────
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [dropTargetIdx, setDropTargetIdx] = useState<number | null>(null);
   const [ghostTop, setGhostTop] = useState(0);
@@ -348,6 +361,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const draggingIdxRef     = useRef<number | null>(null);
   const dropTargetIdxRef   = useRef<number | null>(null);
   const dragGhostRef       = useRef<HTMLDivElement>(null);
+  // Refs mirror latest state so the imperative event listeners (registered once)
+  // always see the current queue without being re-attached on every render.
   const queueRecordsRef    = useRef<TrackRecord[]>([]);
   const queueTracksRef     = useRef<string[]>([]);
   const currentPlaylistIdRef = useRef<string | null>(null);
@@ -377,19 +392,31 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     inactivityRef.current = setTimeout(() => setListScrolled(false), 2500);
   }, []);
 
+  // ── AB loop state ─────────────────────────────────────────────────────────
   type LoopMode = 'off' | 'one' | 'ab';
   const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  // abA and abB are fractional positions (0.0–1.0) of total duration, not ms.
+  // This makes them resolution-independent and trivial to render on the seek bar.
   const [abA, setAbA] = useState(0);
   const [abB, setAbB] = useState(1);
+  // AB points are persisted per-track so they survive navigation between tracks.
   const [trackAbPoints, setTrackAbPoints] = useState<Record<string, { a: number; b: number }>>(() => {
     try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
   });
   const abPointsRef      = useRef(trackAbPoints);
   abPointsRef.current    = trackAbPoints;
+  // Debounce DB writes — user may drag A/B many times per second.
   const abCommitRef      = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which AB handle is currently being dragged on the seek bar (null = normal seek).
   const abDragging       = useRef<'A' | 'B' | null>(null);
+
+  // ── Seek bar refs ──────────────────────────────────────────────────────────
   const isSeekDragging   = useRef(false);
   const seekBarRef       = useRef<HTMLDivElement>(null);
+
+  // browseTrackRef / isBrowsingRef are ref mirrors of the derived browseTrack /
+  // isBrowsing values — needed inside the rAF loop which cannot close over
+  // frequently-changing React state (see "Coverflow browse vs. playing" below).
   const browseTrackRef   = useRef<TrackRecord | null>(null);
   const isBrowsingRef    = useRef(false);
 
@@ -400,8 +427,13 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const listParentRef = useRef<HTMLDivElement>(null);
   const activeListIndex = queueRecords.findIndex(t => t.hash === loadedTrackHash);
 
-  // browseIndex tracks which coverflow card is centered; resets when the playing track changes
+  // ── Coverflow browse vs. playing ───────────────────────────────────────────
+  // browseIndex is the carousel-centered card index; it is INDEPENDENT of
+  // currentIndex (the playing cursor). Swiping the coverflow only sets
+  // browseIndex — it never advances the queue or triggers playback.
+  // isBrowsing is true whenever the user has swiped away from the playing card.
   const [browseIndex, setBrowseIndex] = useState(Math.max(0, activeListIndex));
+  // Snap browseIndex back to the playing card whenever the track changes.
   useEffect(() => { if (activeListIndex >= 0) setBrowseIndex(activeListIndex); }, [activeListIndex]);
 
   const currentTrack = tracks.find(t => t.hash === loadedTrackHash) ?? null;
@@ -410,14 +442,19 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // Prefetch current track artwork into the shared cache; CoverflowCard will pick it up instantly
   useTrackArtwork(loadedTrackHash ?? '', currentTrack?.artwork_hash ?? null);
 
-  // Seek bar DOM refs — updated by rAF, never by React state
+  // ── Seek bar DOM refs ──────────────────────────────────────────────────────
+  // These refs are written directly by the rAF animation loop instead of via
+  // React state — avoids a full re-render (and layout) on every animation frame.
   const seekFillRef = useRef<HTMLDivElement>(null);
   const posTextRef  = useRef<HTMLSpanElement>(null);
   const durTextRef  = useRef<HTMLSpanElement>(null);
   const thumbRef    = useRef<HTMLDivElement>(null);
+  // durRef shadows duration_ms so the rAF callback always sees the latest value
+  // without being restarted whenever duration changes.
   const durRef      = useRef(duration_ms);
   useEffect(() => { durRef.current = duration_ms; loopStateRef.durMs = duration_ms; }, [duration_ms]);
 
+  // Restore per-track AB points when the loaded track changes.
   useEffect(() => {
     if (!loadedTrackHash) return;
     const pts = abPointsRef.current[loadedTrackHash];
@@ -427,6 +464,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedTrackHash]);
 
+  // ── Seek bar rAF animation loop ────────────────────────────────────────────
+  // Reads positionMsRef (updated by Rust events) and writes directly to DOM
+  // refs every frame. Using React state here would cause ~60 re-renders/sec.
   useEffect(() => {
     let rafId: number;
     const tick = () => {
@@ -455,6 +495,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── playTrack ──────────────────────────────────────────────────────────────
+  // Single entry-point for starting a track: updates store, resets the shared
+  // position ref, fires the Tauri command, and implicitly ends any browse state
+  // (browseIndex will be snapped back by the activeListIndex effect above).
   const playTrack = (track: TrackRecord) => {
     setLoaded(track.hash, track.duration_ms);
     positionMsRef.current = 0;
@@ -485,6 +529,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     if (track) playTrack(track);
   };
 
+  // Rewind to start if >3 s in; only retreat to the previous track if near the beginning.
   const handlePrev = () => {
     if (positionMsRef.current > 3000) {
       positionMsRef.current = 0;
@@ -498,6 +543,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     }
   };
 
+  // ── Secondary controls ─────────────────────────────────────────────────────
   // Coverflow browsing is purely visual — never touches the queue cursor.
   // currentIndex only changes via advance/retreat/explicit play so auto-advance stays correct.
 
@@ -506,6 +552,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     setShuffle(cycle[(cycle.indexOf(shuffle) + 1) % cycle.length]);
   };
 
+  // ── AB loop helpers ────────────────────────────────────────────────────────
+  // Converts fractional A/B to absolute ms before sending to Rust.
+  // Full range (a≈0, b≈1) is sent as null to clear the loop in the DB.
   const scheduleAbCommit = (a: number, b: number) => {
     if (!loadedTrackHash) return;
     const hash = loadedTrackHash;
@@ -538,6 +587,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     });
   };
 
+  // ── Seek bar pointer handlers ──────────────────────────────────────────────
   const getSeekPct = (clientX: number) => {
     if (!seekBarRef.current) return 0;
     const r = seekBarRef.current.getBoundingClientRect();
@@ -545,6 +595,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   };
 
   const handleSeekPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // setPointerCapture routes all subsequent pointer events to this element
+    // even when the finger/cursor moves outside — essential for reliable drag
+    // on mobile where the touch easily leaves the narrow seek bar.
     e.currentTarget.setPointerCapture(e.pointerId);
     const pct = getSeekPct(e.clientX);
     if (loopMode === 'ab') {
@@ -580,6 +633,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   const handleSeekPointerUp = () => { abDragging.current = null; isSeekDragging.current = false; };
 
+  // ── Sync mutable refs from render ─────────────────────────────────────────
+  // These are written every render so event listeners and rAF callbacks always
+  // read the latest values without needing to be re-registered.
   loopStateRef.loopMode = loopMode;
   loopStateRef.abA = abA;
   loopStateRef.abB = abB;
@@ -592,7 +648,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   draggingIdxRef.current     = draggingIdx;
   dropTargetIdxRef.current   = dropTargetIdx;
 
-
+  // ── Accent color ───────────────────────────────────────────────────────────
+  // Derived from the browsed (or playing) track's artwork via color extraction.
+  // accent1/accent2 drive: halo gradient, seek bar fill, play button glow.
+  // The browsed track's artwork is used so the colors preview before playback.
   const [accent1, accent2] = useTrackAccents(
     browseTrack?.hash ?? loadedTrackHash,
     browseTrack?.artwork_hash ?? currentTrack?.artwork_hash ?? null,
@@ -729,7 +788,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 'calc(16px + var(--safe-top))', overflow: 'hidden', paddingBottom: `calc(var(--tab-h) + ${queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0}px)`, transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
 
-        {/* header */}
+        {/* header — tapping the source name opens the playlist switcher sheet;
+             tapping the branch pill (when visible) opens the branch switcher sheet. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 22px 8px', flexShrink: 0 }}>
           <button
             onClick={() => setShowSwitcher(true)}
@@ -740,6 +800,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             </span>
             <Icons.chevDown size={12} stroke="var(--text-2)"/>
           </button>
+          {/* Branch pill — only shown when a playlist with branches is active. */}
           {currentPlaylist && currentPlaylist.branches.length > 0 && (
             <button
               onClick={() => setShowBranchSheet(true)}
@@ -752,7 +813,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           )}
         </div>
 
-        {/* coverflow — flex:1 so it fills available space; maxHeight caps it when queue is collapsed */}
+        {/* coverflow — flex:1 so it fills available space; maxHeight caps it when queue is expanded.
+           Card size also shrinks when expanded so art + controls remain visible simultaneously. */}
         <div style={{
           flex: 1, minHeight: 0, maxHeight: queueExpanded ? 160 : 380,
           marginTop: 6, marginBottom: 8,
@@ -784,6 +846,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             />
           )}
           {loopMode === 'ab' && duration_ms > 0 && (
+            // Multiply fraction by duration_ms here — the only place display needs absolute ms.
             <div style={{ fontSize: 10.5, color: accent, marginTop: 3, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.05 }}>
               A·B {fmtMs(abA * duration_ms)} → {fmtMs(abB * duration_ms)}
             </div>
@@ -917,12 +980,14 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             transition: 'bottom 0.35s ease',
             zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
           }}>
+            {/* Queue header — drag up/down to expand/collapse; tap to toggle. */}
             <div
               onPointerDown={e => {
                 queueDragStartY.current = e.clientY;
                 queueDragLastY.current  = e.clientY;
                 queueDragTime.current   = Date.now();
                 queueVelocity.current   = 0;
+                // Capture keeps move/up events routed here even if the finger leaves the header.
                 (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
               }}
               onPointerMove={e => {

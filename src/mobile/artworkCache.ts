@@ -1,13 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
 
-// Shared module-level caches — survive component remounts and re-renders.
+// ── Module-level cache ─────────────────────────────────────────────────────────
+// Maps are module-level (not React state) so they survive component unmounts
+// and re-renders without triggering additional fetches or subscriptions.
+// A module is loaded once per JS context, so the cache lives for the entire
+// app session — equivalent to a singleton without needing a global store.
 const trackUrlCache    = new Map<string, string>();
 const playlistUrlCache = new Map<string, string>();
 
-// In-flight promise dedup — prevents N concurrent fetches for the same key.
+// ── In-flight deduplication ────────────────────────────────────────────────────
+// If the same artwork is requested by multiple callers before the first fetch
+// resolves (e.g. MiniPlayer + TrackRow both mount at once), they all receive
+// the same Promise object so only one IPC call is made to Rust.
 const inFlight = new Map<string, Promise<string | null>>();
 
-// Concurrency limiter — at most MAX_CONCURRENT IPC calls in flight at once.
+// ── Concurrency limiter ────────────────────────────────────────────────────────
+// Caps the number of simultaneous Tauri `invoke` calls to avoid saturating the
+// IPC bridge on startup when hundreds of tracks are pre-fetched at once.
 const MAX_CONCURRENT = 12;
 let active = 0;
 const queue: (() => void)[] = [];
@@ -35,7 +44,11 @@ async function fetchWithThrottle<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// ── Subscriber registry — notifies useSyncExternalStore subscribers
+// ── Subscriber registry ────────────────────────────────────────────────────────
+// Hooks (useTrackArtwork / usePlaylistArtwork) use useSyncExternalStore, which
+// requires an external subscribe/getSnapshot pair.  When a fetch completes,
+// notify() triggers re-renders only in the components subscribed to that key —
+// not the whole tree.
 type Listener = () => void;
 const trackListeners    = new Map<string, Set<Listener>>();
 const playlistListeners = new Map<string, Set<Listener>>();
@@ -65,7 +78,10 @@ export function getCachedPlaylistArtwork(playlistId: string, branchName: string 
   return playlistUrlCache.get(`${playlistId}::${branchName}`) || null;
 }
 
-// ── Async fetch (idempotent — safe to call during render or effect)
+// ── Async fetch ────────────────────────────────────────────────────────────────
+// getTrackArtwork / getPlaylistArtwork are idempotent: calling them a second time
+// returns the cached value immediately (or the same in-flight Promise if still
+// pending).  They are safe to call from render paths, effects, or prefetch loops.
 export function getTrackArtwork(trackHash: string, _artworkHash: string): Promise<string | null> {
   const cached = trackUrlCache.get(trackHash);
   if (cached !== undefined) return Promise.resolve(cached || null);
