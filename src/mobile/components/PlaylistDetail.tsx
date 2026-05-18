@@ -154,42 +154,81 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
   });
 }
 
+const SWIPE_REVEAL_W = 72;
+
 // ── Track row (real data)
-function TrackRow({ track, idx, playing, onPlay, onFavorite }: {
-  track: PlaylistTrackRecord; idx: number; playing?: boolean; onPlay?: () => void; onFavorite?: () => void;
+function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed, onReveal, onClose }: {
+  track: PlaylistTrackRecord; idx: number; playing?: boolean;
+  onPlay?: () => void; onFavorite?: () => void; onRemove?: () => void;
+  revealed?: boolean; onReveal?: () => void; onClose?: () => void;
 }) {
-  const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
-  const accent = 'var(--accent)';
+  const artUrl  = useTrackArtwork(track.hash, track.artwork_hash);
+  const startXRef = useRef(0);
+  const accent  = 'var(--accent)';
+
+  const handlePointerDown = (e: React.PointerEvent) => { startXRef.current = e.clientX; };
+  const handlePointerUp   = (e: React.PointerEvent) => {
+    const dx = e.clientX - startXRef.current;
+    if (dx < -48)       { onReveal?.(); return; }
+    if (dx > 24)        { onClose?.();  return; }
+    if (!revealed)      { onPlay?.(); }
+    else                { onClose?.(); }
+  };
+
   return (
-    <div onClick={onPlay} style={{
-      display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+    <div style={{ position: 'relative', overflow: 'hidden',
       background: playing ? `${accent}10` : 'transparent',
       borderLeft: playing ? `2px solid ${accent}` : '2px solid transparent',
-      cursor: onPlay ? 'pointer' : 'default',
     }}>
-      <span style={{ width: 20, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
-        {playing ? <Icons.play size={12}/> : String(idx + 1).padStart(2, '00')}
-      </span>
-      <MMArt src={artUrl ?? undefined} size={42} radius={7}/>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</span>
-          {(track.ab_start_ms != null) && (
-            <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace', padding: '1px 5px', borderRadius: 4, background: 'oklch(0.32 0.10 50 / 0.4)' }}>A·B</span>
-          )}
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 1 }}>{track.artist}</div>
+      {/* Delete action — revealed by left swipe */}
+      <div style={{
+        position: 'absolute', right: 0, top: 0, bottom: 0, width: SWIPE_REVEAL_W,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#dc2626',
+      }}>
+        <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: '#fff' }}>
+          <Icons.trash size={18} stroke="#fff"/>
+          <span style={{ fontSize: 10, fontWeight: 600 }}>Remove</span>
+        </button>
       </div>
-      <button
-        onClick={e => { e.stopPropagation(); onFavorite?.(); }}
-        style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0, opacity: track.favorited ? 1 : 0.25 }}
+
+      {/* Sliding row content */}
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+          transform: `translateX(${revealed ? -SWIPE_REVEAL_W : 0}px)`,
+          transition: 'transform 0.26s cubic-bezier(0.22,1,0.36,1)',
+          background: 'var(--bg-1)', cursor: 'pointer',
+          willChange: 'transform',
+        }}
       >
-        {track.favorited
-          ? <Icons.heartFill size={13} stroke="var(--accent)"/>
-          : <Icons.heart size={13} stroke="var(--text-2)"/>
-        }
-      </button>
-      <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{fmtMs(track.duration_ms)}</span>
+        <span style={{ width: 20, textAlign: 'right', fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
+          {playing ? <Icons.play size={12}/> : String(idx + 1).padStart(2, '00')}
+        </span>
+        <MMArt src={artUrl ?? undefined} size={42} radius={7}/>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</span>
+            {(track.ab_start_ms != null) && (
+              <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace', padding: '1px 5px', borderRadius: 4, background: 'oklch(0.32 0.10 50 / 0.4)' }}>A·B</span>
+            )}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 1 }}>{track.artist}</div>
+        </div>
+        <button
+          onClick={e => { e.stopPropagation(); onFavorite?.(); }}
+          onPointerDown={e => e.stopPropagation()}
+          style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0, opacity: track.favorited ? 1 : 0.25 }}
+        >
+          {track.favorited
+            ? <Icons.heartFill size={13} stroke="var(--accent)"/>
+            : <Icons.heart size={13} stroke="var(--text-2)"/>
+          }
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{fmtMs(track.duration_ms)}</span>
+      </div>
     </div>
   );
 }
@@ -1077,6 +1116,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const [tracksLoadingRaw, setTracksLoading] = useState(true);
   const tracksLoading = useMinDuration(tracksLoadingRaw);
   const [sheet, setSheet] = useState<'branch' | 'merge' | 'fork' | 'edit' | null>(null);
+  const [revealedHash, setRevealedHash] = useState<string | null>(null);
   const [historyMounted, setHistoryMounted] = useState(false);
   const [historyActive,  setHistoryActive]  = useState(false);
   const historyActiveRef = useRef(false);
@@ -1314,10 +1354,23 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             track={track}
             idx={i}
             playing={track.hash === loadedTrackHash}
+            revealed={revealedHash === track.hash}
+            onReveal={() => setRevealedHash(track.hash)}
+            onClose={() => setRevealedHash(null)}
             onPlay={() => handlePlay(playlistTracks.indexOf(track))}
             onFavorite={() => {
               setPlaylistTracks(ts => ts.map(t => t.hash === track.hash ? { ...t, favorited: !t.favorited } : t));
               toggleFavorite(track.hash);
+            }}
+            onRemove={() => {
+              setRevealedHash(null);
+              setPlaylistTracks(ts => ts.filter(t => t.hash !== track.hash));
+              invoke('playlist_remove_track', {
+                playlistId: currentPlaylistId,
+                branchName: currentBranchName,
+                hash: track.hash,
+                message: '',
+              }).catch(() => loadTracks());
             }}
           />
         ))}
