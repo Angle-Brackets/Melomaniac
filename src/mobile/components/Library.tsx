@@ -122,7 +122,7 @@ const SECTION_H = 36;
 function MMToast({ message }: { message: string }) {
   return (
     <div style={{
-      position: 'absolute', bottom: 100, left: '50%', transform: 'translateX(-50%)',
+      position: 'absolute', bottom: 'calc(var(--tab-h) + 14px)', left: '50%', transform: 'translateX(-50%)',
       background: 'var(--bg-3)', border: '0.5px solid var(--border-2)',
       borderRadius: 20, padding: '8px 18px',
       fontSize: 12, color: 'var(--accent-light, var(--accent))',
@@ -361,7 +361,7 @@ export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) =>
           setDismissed(false);
         }}
         style={{
-          position: 'absolute', left: 12, bottom: 90 + bottomOffset, zIndex: 25,
+          position: 'absolute', left: 12, bottom: `calc(var(--tab-h) + ${4 + bottomOffset}px)`, zIndex: 25,
           width: 44, height: 44, borderRadius: 22,
           background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
           boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
@@ -453,7 +453,7 @@ export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) =>
     <div
       ref={containerRef}
       style={{
-        position: 'absolute', left: 12, right: 12, bottom: 90 + bottomOffset, zIndex: 25,
+        position: 'absolute', left: 12, right: 12, bottom: `calc(var(--tab-h) + ${4 + bottomOffset}px)`, zIndex: 25,
         height: 62, borderRadius: 16, padding: '8px 10px',
         background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
         boxShadow: '0 10px 26px rgba(0,0,0,0.5)',
@@ -676,7 +676,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       </div>
 
       {/* Virtualized track list */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: selectMode ? 142 : 86 }} className="mm-scroll">
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
         {libraryStatus === 'ready' && flatItems.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
             {query ? 'No tracks match your search.' : 'No tracks in library.'}
@@ -707,7 +707,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
 
       {/* Floating select-mode action bar */}
       {selectMode && (
-        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 86, height: 56, zIndex: 20, background: 'var(--bg-2)', borderTop: '0.5px solid var(--border-1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 22px' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'var(--tab-h)', height: 56, zIndex: 20, background: 'var(--bg-2)', borderTop: '0.5px solid var(--border-1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 22px' }}>
           <span style={{ fontSize: 13, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
             {selectedHashes.size > 0 ? `${selectedHashes.size} selected` : 'Tap tracks to select'}
           </span>
@@ -815,7 +815,7 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
+      <div style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
         <div style={{ padding: '14px 22px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.5 }}>Playlists</h1>
           <button style={iconBtn(36)}><Icons.plus size={20} stroke="var(--accent)"/></button>

@@ -29,7 +29,7 @@ export function Discover({ onTab }: { onTab: (id: TabId) => void }) {
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: -80, left: '50%', transform: 'translateX(-50%)', width: 440, height: 380, borderRadius: '50%', background: 'radial-gradient(circle, oklch(0.62 0.15 28 / 0.22) 0%, transparent 70%)', filter: 'blur(20px)', pointerEvents: 'none' }}/>
 
-      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
+      <div style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
         <div style={{ padding: '12px 22px 6px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Icons.sparkles size={22} stroke="var(--accent)"/>

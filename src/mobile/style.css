@@ -1,5 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
+/* ── Safe area custom properties ────────────────────────────────────────────── */
+:root {
+  --safe-top:    env(safe-area-inset-top,    0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Total tab bar height: 60px icon area + home indicator */
+  --tab-h: calc(60px + var(--safe-bottom));
+}
+
 /* ── Mobile root ────────────────────────────────────────────────────────────── */
 .mobile-root, .mobile-root *, .mobile-root *::before, .mobile-root *::after {
   box-sizing: border-box;
@@ -7,7 +15,7 @@
 
 .mobile-root {
   width: 100vw;
-  height: 100vh;
+  height: 100dvh;
   font-family: 'Outfit', sans-serif;
   color: var(--text-0);
   overflow: hidden;

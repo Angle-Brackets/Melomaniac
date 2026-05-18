@@ -333,6 +333,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   useEffect(() => { activeBranchRef.current = playingBranchName; }, [playingBranchName]);
   const [showQueue, setShowQueue] = useState(false);
   const [queueExpanded, setQueueExpanded] = useState(() => localStorage.getItem('mm_queue_expanded') !== 'false');
+  const queueDragStartY = useRef<number | null>(null);
+  const queueDragLastY  = useRef(0);
+  const queueDragTime   = useRef(0);
+  const queueVelocity   = useRef(0);
   const [listScrolled, setListScrolled] = useState(false);
   const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -723,7 +727,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         filter: 'blur(40px)', pointerEvents: 'none',
       }}/>
 
-      <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 16, overflow: 'hidden', paddingBottom: 86 + (queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0), transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
+      <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 'calc(16px + var(--safe-top))', overflow: 'hidden', paddingBottom: `calc(var(--tab-h) + ${queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0}px)`, transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
 
         {/* header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 22px 8px' }}>
@@ -905,15 +909,42 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
       {/* Queue — slides to bottom:0 when nav hides so list fills the freed space */}
       {queueRecords.length > 0 && (() => {
-        const queueListH = QUEUE_LIST_H + (listScrolled ? 86 : 0);
+        const queueListH = listScrolled ? `calc(${QUEUE_LIST_H}px + var(--tab-h))` : QUEUE_LIST_H;
         return (
           <div style={{
             position: 'absolute', left: 0, right: 0,
-            bottom: listScrolled ? 0 : 86,
+            bottom: listScrolled ? 0 : 'var(--tab-h)',
             transition: 'bottom 0.35s ease',
             zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
           }}>
-            <div onClick={handleToggleQueue} style={{ cursor: 'pointer', background: 'transparent' }}>
+            <div
+              onPointerDown={e => {
+                queueDragStartY.current = e.clientY;
+                queueDragLastY.current  = e.clientY;
+                queueDragTime.current   = Date.now();
+                queueVelocity.current   = 0;
+                (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={e => {
+                if (queueDragStartY.current === null) return;
+                const now = Date.now();
+                const dt  = now - queueDragTime.current;
+                if (dt > 0) queueVelocity.current = (e.clientY - queueDragLastY.current) / dt * 1000;
+                queueDragLastY.current = e.clientY;
+                queueDragTime.current  = now;
+              }}
+              onPointerUp={e => {
+                if (queueDragStartY.current === null) return;
+                const dy = e.clientY - queueDragStartY.current;
+                const v  = queueVelocity.current;
+                queueDragStartY.current = null;
+                if (Math.abs(dy) < 10) { handleToggleQueue(); return; }
+                if ((dy < -40 || v < -300) && !queueExpanded) { setQueueExpanded(true); localStorage.setItem('mm_queue_expanded', 'true'); return; }
+                if ((dy > 40 || v > 300) && queueExpanded)    { handleToggleQueue(); return; }
+              }}
+              onPointerCancel={() => { queueDragStartY.current = null; }}
+              style={{ cursor: 'pointer', background: 'transparent', touchAction: 'none' }}
+            >
               {/* Drag pill */}
               <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 0' }}>
                 <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--border-2)' }}/>
@@ -984,7 +1015,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       })()}
 
       <MMTabBar active="now" onTab={onTab} style={{
-        transform: listScrolled ? 'translateY(86px)' : 'translateY(0)',
+        transform: listScrolled ? 'translateY(var(--tab-h))' : 'translateY(0)',
         transition: 'transform 0.35s ease',
       }}/>
 

@@ -153,7 +153,7 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
   return (
     <div style={{
       position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30,
-      height: 86, paddingBottom: 26,
+      height: 'var(--tab-h)', paddingBottom: 'var(--safe-bottom)',
       display: 'flex', alignItems: 'flex-start', justifyContent: 'space-around',
       background: 'var(--bg-0)',
       borderTop: '0.5px solid var(--border-0)',
@@ -203,7 +203,11 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
   height?: string; accessory?: React.ReactNode; animStyle?: React.CSSProperties;
   onClose?: () => void; expandable?: boolean;
 }) {
-  const startYRef  = useRef<number | null>(null);
+  const startYRef   = useRef<number | null>(null);
+  const lastYRef    = useRef(0);
+  const lastTimeRef = useRef(0);
+  const velocityRef = useRef(0);
+  const [dragOffset, setDragOffset] = useState(0);
   const [dismissing, setDismissing] = useState(false);
   const [expanded,   setExpanded]   = useState(false);
 
@@ -214,12 +218,56 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
   };
 
   const currentHeight = expandable && expanded ? '92%' : height;
+  const isDragging    = dragOffset !== 0;
+
+  const onDragStart = (e: React.PointerEvent) => {
+    startYRef.current = e.clientY;
+    lastYRef.current  = e.clientY;
+    lastTimeRef.current = Date.now();
+    velocityRef.current = 0;
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  };
+
+  const onDragMove = (e: React.PointerEvent) => {
+    if (startYRef.current === null) return;
+    const now = Date.now();
+    const dt  = now - lastTimeRef.current;
+    if (dt > 0) velocityRef.current = (e.clientY - lastYRef.current) / dt * 1000;
+    lastYRef.current  = e.clientY;
+    lastTimeRef.current = now;
+    const totalDy = e.clientY - startYRef.current;
+    // Only drag downward visually; upward drag is a snap-only gesture
+    setDragOffset(Math.max(0, totalDy));
+  };
+
+  const onDragEnd = (e: React.PointerEvent) => {
+    if (startYRef.current === null) return;
+    const totalDy = e.clientY - startYRef.current;
+    const v = velocityRef.current;
+    startYRef.current = null;
+
+    if (expandable && !expanded && (totalDy < -60 || v < -400)) {
+      setDragOffset(0); setExpanded(true); return;
+    }
+    if (expandable && expanded && (totalDy > 80 || v > 500)) {
+      setDragOffset(0); setExpanded(false); return;
+    }
+    if (!expanded && (totalDy > 80 || v > 500)) {
+      setDragOffset(0); dismiss(); return;
+    }
+    setDragOffset(0); // spring back
+  };
 
   return (
     <div style={{
       position: 'absolute', left: 0, right: 0, bottom: 0,
       height: currentHeight,
-      transition: dismissing ? 'none' : 'height 0.35s cubic-bezier(0.22,1,0.36,1)',
+      transform: `translateY(${dragOffset}px)`,
+      transition: dismissing
+        ? 'none'
+        : isDragging
+          ? 'height 0.35s cubic-bezier(0.22,1,0.36,1)'
+          : 'transform 0.3s cubic-bezier(0.22,1,0.36,1), height 0.35s cubic-bezier(0.22,1,0.36,1)',
       background: 'var(--bg-2)',
       borderTopLeftRadius: 28, borderTopRightRadius: 28,
       border: '0.5px solid var(--border-1)', borderBottom: 'none',
@@ -228,22 +276,12 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
       ...animStyle,
       animation: dismissing ? 'mmSheetDown 0.27s ease-in both' : animStyle?.animation,
     }}>
-      {/* drag handle — up = expand, down = collapse/dismiss */}
+      {/* drag handle — swipe up to expand, swipe down to collapse/dismiss */}
       <div
-        onPointerDown={e => {
-          startYRef.current = e.clientY;
-          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-        }}
-        onPointerUp={e => {
-          if (startYRef.current === null) return;
-          const dy = e.clientY - startYRef.current;
-          startYRef.current = null;
-          if (expandable && dy < -44) { setExpanded(true);  return; }
-          if (dy > 52) {
-            if (expandable && expanded) setExpanded(false);
-            else dismiss();
-          }
-        }}
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
         style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 6px', touchAction: 'none' }}
       >
         <div style={{ width: 38, height: 4, borderRadius: 2, background: 'var(--border-2)' }}/>

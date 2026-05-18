@@ -629,7 +629,7 @@ function CommitGraphView({ playlistId, branchName, playlistName, branchNames, on
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: '16px 0 0', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 0', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center' }}>
           <button onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer' }}>
             <Icons.chevLeft size={18} stroke="var(--accent)"/>
@@ -1369,7 +1369,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div ref={scrollContainerRef} style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll" onScroll={() => { setRevealedHash(null); }}>
+      <div ref={scrollContainerRef} style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll" onScroll={() => { setRevealedHash(null); }}>
 
         {/* nav bar — search expands inline from the search icon */}
         <div style={{ padding: '8px 14px 0', display: 'flex', alignItems: 'center', gap: 8 }}>

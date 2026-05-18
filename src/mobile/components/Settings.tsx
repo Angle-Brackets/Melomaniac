@@ -180,7 +180,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden', fontFamily: 'Outfit, system-ui, sans-serif' }}>
-      <div style={{ position: 'absolute', inset: '16px 0 86px', overflowY: 'auto' }} className="mm-scroll">
+      <div style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
 
         {/* Header */}
         <div style={{ padding: '12px 22px 6px' }}>
