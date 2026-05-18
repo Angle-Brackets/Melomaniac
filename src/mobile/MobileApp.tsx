@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import './style.css';
-import { applyTheme } from '../shared/themes';
+import { applyTheme, writeCustomHue } from '../shared/themes';
 import { useStore } from '../store';
 import { positionMsRef, loopStateRef } from './playerContext';
 import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
@@ -29,7 +29,10 @@ export default function MobileApp() {
   const loadPlaylists = useStore(s => s.loadPlaylists);
 
   useEffect(() => {
-    applyTheme('warm');
+    const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
+    const theme = saved.theme ?? 'warm';
+    if (theme === 'custom') { writeCustomHue(saved.customAccentHue ?? saved.accentHue ?? 28); applyTheme('custom'); }
+    else { applyTheme(theme); }
     // Load library then eagerly prefetch all track artwork into the cache.
     // By the time the user sees Library or NowPlaying the images are ready.
     loadLibrary().then(() => {

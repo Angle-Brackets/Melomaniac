@@ -155,8 +155,8 @@ function computeGLayout(commits: GraphNode[]): GRowLayout[] {
 }
 
 // ── Track row (real data)
-function TrackRow({ track, idx, playing, onPlay }: {
-  track: PlaylistTrackRecord; idx: number; playing?: boolean; onPlay?: () => void;
+function TrackRow({ track, idx, playing, onPlay, onFavorite }: {
+  track: PlaylistTrackRecord; idx: number; playing?: boolean; onPlay?: () => void; onFavorite?: () => void;
 }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
   const accent = 'var(--accent)';
@@ -174,13 +174,21 @@ function TrackRow({ track, idx, playing, onPlay }: {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</span>
-          {track.favorited && <Icons.heartFill size={11} stroke="var(--accent)"/>}
           {(track.ab_start_ms != null) && (
             <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace', padding: '1px 5px', borderRadius: 4, background: 'oklch(0.32 0.10 50 / 0.4)' }}>A·B</span>
           )}
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 1 }}>{track.artist}</div>
       </div>
+      <button
+        onClick={e => { e.stopPropagation(); onFavorite?.(); }}
+        style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0, opacity: track.favorited ? 1 : 0.25 }}
+      >
+        {track.favorited
+          ? <Icons.heartFill size={13} stroke="var(--accent)"/>
+          : <Icons.heart size={13} stroke="var(--text-2)"/>
+        }
+      </button>
       <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>{fmtMs(track.duration_ms)}</span>
     </div>
   );
@@ -1058,6 +1066,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const setPlaying         = useStore(s => s.setPlaying);
   const loadQueue          = useStore(s => s.loadQueue);
   const shuffle            = useStore(s => s.shuffle);
+  const toggleFavorite     = useStore(s => s.toggleFavorite);
   const setShuffle         = useStore(s => s.setShuffle);
   const queueTracks        = useStore(s => s.queueTracks);
 
@@ -1306,6 +1315,10 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             idx={i}
             playing={track.hash === loadedTrackHash}
             onPlay={() => handlePlay(playlistTracks.indexOf(track))}
+            onFavorite={() => {
+              setPlaylistTracks(ts => ts.map(t => t.hash === track.hash ? { ...t, favorited: !t.favorited } : t));
+              toggleFavorite(track.hash);
+            }}
           />
         ))}
 

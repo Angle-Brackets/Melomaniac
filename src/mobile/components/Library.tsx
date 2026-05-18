@@ -207,9 +207,9 @@ type FlatItem =
   | { kind: 'section'; label: string; trailing?: string }
   | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean };
 
-function TrackRow({ track, idx, playing = false, onLongPress, selected, onSelect }: {
+function TrackRow({ track, idx, playing = false, onLongPress, onFavorite, selected, onSelect }: {
   track: TrackRecord; idx: number; playing?: boolean;
-  onLongPress?: () => void; selected?: boolean; onSelect?: () => void;
+  onLongPress?: () => void; onFavorite?: () => void; selected?: boolean; onSelect?: () => void;
 }) {
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
   const subtext = [track.artist ?? 'Unknown artist', track.album].filter(Boolean).join(' | ');
@@ -254,7 +254,18 @@ function TrackRow({ track, idx, playing = false, onLongPress, selected, onSelect
             style={{ flex: 1, minWidth: 0 }}
             textStyle={{ fontSize: 14, color: playing ? 'var(--accent)' : 'var(--text-0)', fontWeight: 500 }}
           />
-          {track.favorited && <span style={{ flexShrink: 0, display: 'flex' }}><Icons.heartFill size={11} stroke="var(--accent)"/></span>}
+          {!inSelectMode && (
+            <button
+              onClick={e => { e.stopPropagation(); onFavorite?.(); }}
+              onPointerDown={e => e.stopPropagation()}
+              style={{ background: 'none', border: 'none', padding: '2px 0 2px 2px', cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0, opacity: track.favorited ? 1 : 0.25 }}
+            >
+              {track.favorited
+                ? <Icons.heartFill size={12} stroke="var(--accent)"/>
+                : <Icons.heart size={12} stroke="var(--text-2)"/>
+              }
+            </button>
+          )}
         </div>
         <MarqueeText
           text={subtext}
@@ -489,6 +500,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const tracks          = useStore(s => s.tracks);
   const libraryStatus   = useStore(s => s.libraryStatus);
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
+  const toggleFavorite  = useStore(s => s.toggleFavorite);
   const [filter,         setFilter]         = useState<FilterId>('all');
   const [query,          setQuery]          = useState('');
   const [sortCriteria,   setSortCriteria]   = useState<SortCriterion[]>(loadCriteria);
@@ -681,6 +693,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                     : <TrackRow
                         track={item.track} idx={item.idx} playing={item.playing}
                         onLongPress={selectMode ? undefined : () => setActionSheet({ hashes: [item.track.hash], label: item.track.title })}
+                        onFavorite={() => toggleFavorite(item.track.hash)}
                         selected={selectMode ? selectedHashes.has(item.track.hash) : undefined}
                         onSelect={selectMode ? () => toggleSelect(item.track.hash) : undefined}
                       />
