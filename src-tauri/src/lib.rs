@@ -81,8 +81,18 @@ pub fn run() {
             #[cfg(debug_assertions)]
             {
                 let audio_exts = ["mp3", "flac", "ogg", "wav", "m4a", "aac"];
-                let test_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+
+                // Desktop dev: full test library. Installed debug builds (e.g. iOS
+                // sideload): fall back to the small bundled dev-seeds/ folder.
+                let dev_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("../tests/audio");
+                let test_dir = if dev_path.exists() {
+                    dev_path
+                } else {
+                    app.path().resource_dir()
+                        .expect("resource dir")
+                        .join("dev-seeds")
+                };
 
                 // Ingest every audio file in tests/audio/ into the dev library so
                 // the library view is never empty during UI development.
