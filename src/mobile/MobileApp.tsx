@@ -106,6 +106,7 @@ export default function MobileApp() {
       s.setPlaying(true);
     };
 
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     listen<AudioPayload>('audio://event', ({ payload }) => {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
@@ -158,8 +159,8 @@ export default function MobileApp() {
       }
       if (payload === 'RemoteNextTrack')     { playNext(); return; }
       if (payload === 'RemotePreviousTrack') { playPrev(); return; }
-    }).then(fn => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then(fn => { if (cancelled) fn(); else unlisten = fn; });
+    return () => { cancelled = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -730,7 +730,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 'calc(16px + var(--safe-top))', overflow: 'hidden', paddingBottom: `calc(var(--tab-h) + ${queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0}px)`, transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
 
         {/* header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 22px 8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 22px 8px', flexShrink: 0 }}>
           <button
             onClick={() => setShowSwitcher(true)}
             style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, minWidth: 0 }}
@@ -754,7 +754,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
         {/* coverflow — flex:1 so it fills available space; maxHeight caps it when queue is collapsed */}
         <div style={{
-          flex: 1, minHeight: 0, maxHeight: queueExpanded ? 214 : 380,
+          flex: 1, minHeight: 0, maxHeight: queueExpanded ? 160 : 380,
           marginTop: 6, marginBottom: 8,
           transition: 'max-height 0.4s cubic-bezier(0.22,1,0.36,1)',
           overflow: 'visible', display: 'flex', alignItems: 'center',
@@ -763,12 +763,12 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             tracks={coverflowItems}
             activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
             onBrowse={setBrowseIndex}
-            size={queueExpanded ? 180 : 260}
+            size={queueExpanded ? 130 : 260}
           />
         </div>
 
         {/* track info */}
-        <div style={{ padding: '4px 28px 0' }}>
+        <div style={{ padding: '4px 28px 0', flexShrink: 0 }}>
           <MarqueeText
             text={browseTrack?.title ?? '—'}
             active={true}
@@ -791,7 +791,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         </div>
 
         {/* seek bar */}
-        <div style={{ padding: '12px 28px 8px' }}>
+        <div style={{ padding: '12px 28px 8px', flexShrink: 0 }}>
           <div
             ref={seekBarRef}
             onPointerDown={handleSeekPointerDown}
@@ -858,7 +858,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               <button onClick={onClick} style={{ width: 44, height: 44, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 22, flexShrink: 0 }}>{children}</button>
             );
             return (
-              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)', flexShrink: 0 }}>
                 <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={34}/>
                 <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
                 {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
@@ -881,7 +881,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             <button onClick={onClick} style={{ width: 52, height: 52, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 26, flexShrink: 0 }}>{children}</button>
           );
           return (
-            <div style={{ padding: '4px 16px 8px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)' }}>
+            <div style={{ padding: '4px 16px 8px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
                 {tPrimary(handlePrev, <Icons.prev size={28} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
