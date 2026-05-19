@@ -5,6 +5,7 @@ mod editor;
 mod network;
 mod stats;
 mod storage;
+mod sync;
 
 use std::sync::Arc;
 
@@ -128,6 +129,52 @@ pub fn run() {
             }
 
             app.manage(storage_state);
+
+            {
+                use melomaniac_sync::NodeIdentity;
+                use melomaniac_sync::SyncBridge;
+
+                let sync_data_dir = app
+                    .path()
+                    .app_data_dir()
+                    .expect("failed to resolve app data dir");
+
+                let identity = NodeIdentity::load_or_create(&sync_data_dir)
+                    .expect("failed to load or create node identity");
+
+                let sync_bridge: Arc<dyn SyncBridge> = {
+                    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+                    {
+                        use melomaniac_sync::desktop::DesktopSyncBridge;
+                        let b = DesktopSyncBridge::new(identity, sync_data_dir)
+                            .expect("failed to create desktop sync bridge");
+                        b.start_discovery().ok();
+                        Arc::new(b) as Arc<dyn SyncBridge>
+                    }
+
+                    #[cfg(target_os = "ios")]
+                    {
+                        use melomaniac_sync::ios::IosSyncBridge;
+                        let b = IosSyncBridge::new(identity, sync_data_dir)
+                            .expect("failed to create iOS sync bridge");
+                        b.start_discovery().ok();
+                        Arc::new(b) as Arc<dyn SyncBridge>
+                    }
+
+                    #[cfg(not(any(
+                        target_os = "macos",
+                        target_os = "windows",
+                        target_os = "linux",
+                        target_os = "ios"
+                    )))]
+                    {
+                        panic!("Sync bridge not implemented for this platform");
+                    }
+                };
+
+                app.manage(sync::SyncState { bridge: sync_bridge });
+            }
+
             app.manage(Arc::new(DownloadManager::new()));
             app.manage(discord::DiscordState::new());
             app.manage(stats::SystemState(std::sync::Mutex::new(
@@ -201,6 +248,17 @@ pub fn run() {
             storage::library_get_storage_bytes,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,
+            sync::sync_get_peers,
+            sync::sync_open_discovery_window,
+            sync::sync_close_discovery_window,
+            sync::sync_is_discovery_open,
+            sync::sync_generate_qr_payload,
+            sync::sync_accept_qr_pairing,
+            sync::sync_known_devices,
+            sync::sync_remove_device,
+            sync::sync_playlist,
+            sync::sync_with_peer,
+            sync::sync_get_fingerprint,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
