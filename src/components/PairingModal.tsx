@@ -65,6 +65,15 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
   const refreshLivePeers   = useStore(s => s.refreshLivePeers)
   const syncWithPeer       = useStore(s => s.syncWithPeer)
   const [syncing, setSyncing] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const copyJson = () => {
+    if (!qrPayload) return
+    navigator.clipboard.writeText(JSON.stringify(qrPayload)).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   // Poll for live peers while the modal is open
   useEffect(() => {
@@ -95,6 +104,15 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
       <div className={`text-xs font-mono ${secondsLeft <= 10 ? 'text-warning' : 'opacity-50'}`}>
         {secondsLeft > 0 ? `Expires in ${secondsLeft}s` : 'Refreshing…'}
       </div>
+
+      {platform === 'desktop' && qrPayload && (
+        <button
+          className="btn btn-xs btn-outline w-full"
+          onClick={copyJson}
+        >
+          {copied ? '✓ Copied' : 'Copy pairing code'}
+        </button>
+      )}
 
       {platform === 'mobile' && (
         <button
@@ -164,33 +182,43 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
 function ScanMode() {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const submitScannedQr = useStore(s => s.submitScannedQr)
 
   const handleConfirm = async () => {
     setError(null)
+
+    let parsed: unknown
     try {
-      const parsed: unknown = JSON.parse(text)
-      if (
-        typeof parsed !== 'object' || parsed === null ||
-        !('public_key_b64' in parsed) || !('token' in parsed) ||
-        !('exp' in parsed) || !('display_name' in parsed)
-      ) {
-        setError('Invalid QR payload — missing required fields')
-        return
-      }
-      await submitScannedQr(parsed as QrPayload)
+      parsed = JSON.parse(text)
     } catch {
       setError('Could not parse JSON — paste the full QR code text')
+      return
+    }
+
+    if (
+      typeof parsed !== 'object' || parsed === null ||
+      !('public_key_b64' in parsed) || !('token' in parsed) ||
+      !('exp' in parsed) || !('display_name' in parsed)
+    ) {
+      setError('Invalid QR payload — missing required fields')
+      return
+    }
+
+    setSubmitting(true)
+    try {
+      await submitScannedQr(parsed as QrPayload)
+    } catch (e) {
+      setError(`Pairing failed: ${e instanceof Error ? e.message : String(e)}`)
+      setSubmitting(false)
     }
   }
 
   return (
     <div className="flex flex-col gap-4 w-full">
       <div className="rounded-lg bg-base-200 p-4 text-sm text-center opacity-70">
-        Point your camera at the desktop's QR code
+        Point your camera at the desktop's QR code, then paste the text below
       </div>
-
-      <div className="divider text-xs opacity-40">or paste manually</div>
 
       <textarea
         className="textarea textarea-bordered w-full font-mono text-xs"
@@ -198,18 +226,21 @@ function ScanMode() {
         placeholder='{"public_key_b64":"…","display_name":"…","addr":null,"token":"…","exp":0}'
         value={text}
         onChange={e => setText(e.target.value)}
+        disabled={submitting}
       />
 
       {error && (
-        <div className="text-xs text-error">{error}</div>
+        <div className="text-xs text-error break-all">{error}</div>
       )}
 
       <button
         className="btn btn-primary btn-sm w-full"
-        disabled={text.trim() === ''}
+        disabled={text.trim() === '' || submitting}
         onClick={handleConfirm}
       >
-        Confirm
+        {submitting
+          ? <span className="loading loading-spinner loading-xs" />
+          : 'Confirm'}
       </button>
     </div>
   )
