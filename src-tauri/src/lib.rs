@@ -153,7 +153,9 @@ pub fn run() {
                             .expect("failed to create desktop sync bridge");
                         let ss = app.state::<crate::storage::StorageState>();
                         b.set_storage(Arc::clone(&ss.db), Arc::clone(&ss.cas));
-                        b.start_discovery().ok();
+                        if let Err(e) = b.start_discovery() {
+                            eprintln!("[sync] start_discovery failed: {e}");
+                        }
                         Arc::new(b) as Arc<dyn SyncBridge>
                     }
 

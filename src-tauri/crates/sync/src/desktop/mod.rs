@@ -639,19 +639,23 @@ where
 
 impl SyncBridge for DesktopSyncBridge {
     fn start_discovery(&self) -> Result<(), SyncError> {
+        eprintln!("[sync] start_discovery: called");
         let mut guard = self
             .mdns
             .lock()
             .map_err(|_| SyncError::IdentityError("mdns mutex poisoned".into()))?;
 
         if guard.is_some() {
+            eprintln!("[sync] start_discovery: already running, skipping");
             return Ok(());
         }
 
         let port = sync_port();
+        eprintln!("[sync] start_discovery: creating mDNS daemon (port={port})");
         let daemon = ServiceDaemon::new()
-            .map_err(|e| SyncError::IdentityError(format!("mDNS daemon: {e}")))?;
+            .map_err(|e| { eprintln!("[sync] mDNS daemon creation failed: {e}"); SyncError::IdentityError(format!("mDNS daemon: {e}")) })?;
 
+        eprintln!("[sync] start_discovery: registering mDNS service");
         Self::register_mdns_service(&daemon, &self.identity, "closed", port)?;
 
         Self::spawn_browse_task(
