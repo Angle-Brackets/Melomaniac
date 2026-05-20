@@ -233,9 +233,17 @@ impl DesktopSyncBridge {
 // ── Network helpers ───────────────────────────────────────────────────────────
 
 fn local_hostname() -> String {
-    std::env::var("HOSTNAME")
+    let raw = std::env::var("HOSTNAME")
         .or_else(|_| std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string()))
-        .unwrap_or_else(|_| "melomaniac.local".to_string())
+        .unwrap_or_else(|_| "melomaniac".to_string());
+    // mdns-sd requires the hostname to end with ".local." (trailing dot mandatory)
+    if raw.ends_with(".local.") {
+        raw
+    } else if raw.ends_with(".local") {
+        format!("{raw}.")
+    } else {
+        format!("{raw}.local.")
+    }
 }
 
 /// Probe the OS routing table to find the preferred local non-loopback address.
