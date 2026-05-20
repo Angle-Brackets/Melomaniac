@@ -263,6 +263,10 @@ pub trait SyncBridge: Send + Sync {
     /// where both sides have changes to exchange.
     fn sync_with_peer(&self, public_key_b64: &str) -> Result<SyncReport, SyncError>;
 
+    /// Fetch the playlist manifest from a specific peer without performing a sync.
+    /// Returns the list of playlists the peer is serving.
+    fn get_peer_manifest(&self, public_key_b64: &str) -> Result<Vec<PlaylistManifest>, SyncError>;
+
     /// Returns this node's display fingerprint (e.g. `"AB12·CD34·EF56"`).
     fn fingerprint(&self) -> String;
 

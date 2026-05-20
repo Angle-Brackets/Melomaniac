@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use melomaniac_storage::{CommitRecord, TreeBlob};
-use melomaniac_sync::{ConflictKind, KnownDevice, PeerInfo, QrPayload, SyncBridge, SyncReport};
+use melomaniac_sync::{ConflictKind, KnownDevice, PeerInfo, PlaylistManifest, QrPayload, SyncBridge, SyncReport};
 use tauri::State;
 
 use crate::storage::StorageState;
@@ -73,10 +73,25 @@ pub async fn sync_playlist(
     playlist_id: String,
     state: State<'_, SyncState>,
 ) -> Result<SyncReport, String> {
-    state
-        .bridge
-        .sync_playlist(&playlist_id)
-        .map_err(|e| e.to_string())
+    let bridge = Arc::clone(&state.bridge);
+    tokio::task::spawn_blocking(move || {
+        bridge.sync_playlist(&playlist_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn sync_fetch_peer_manifest(
+    public_key_b64: String,
+    state: State<'_, SyncState>,
+) -> Result<Vec<PlaylistManifest>, String> {
+    let bridge = Arc::clone(&state.bridge);
+    tokio::task::spawn_blocking(move || {
+        bridge.get_peer_manifest(&public_key_b64).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

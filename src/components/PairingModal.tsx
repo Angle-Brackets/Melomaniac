@@ -63,8 +63,7 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
   const openPairingDisplay = useStore(s => s.openPairingDisplay)
   const openPairingScanner = useStore(s => s.openPairingScanner)
   const refreshLivePeers   = useStore(s => s.refreshLivePeers)
-  const syncWithPeer       = useStore(s => s.syncWithPeer)
-  const [syncing, setSyncing] = useState<string | null>(null)
+  const openPeerManifest   = useStore(s => s.openPeerManifest)
   const [copied, setCopied] = useState(false)
 
   const copyJson = () => {
@@ -81,12 +80,6 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
     const id = setInterval(refreshLivePeers, 4000)
     return () => clearInterval(id)
   }, [refreshLivePeers])
-
-  const handleSync = async (pk: string) => {
-    setSyncing(pk)
-    await syncWithPeer(pk)
-    setSyncing(null)
-  }
 
   const secondsLeft = useCountdown(
     qrPayload?.exp ?? null,
@@ -148,12 +141,9 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
                 </div>
                 <button
                   className="btn btn-xs btn-primary"
-                  disabled={syncing === peer.public_key_b64}
-                  onClick={() => handleSync(peer.public_key_b64)}
+                  onClick={() => openPeerManifest(peer)}
                 >
-                  {syncing === peer.public_key_b64
-                    ? <span className="loading loading-spinner loading-xs" />
-                    : 'Sync'}
+                  Sync
                 </button>
               </div>
             ))}

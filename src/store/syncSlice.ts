@@ -1,6 +1,7 @@
 import { StateCreator } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import type { ConflictChunk, ConflictResolution, KnownDevice, PeerInfo, QrPayload, SyncReport } from './types'
+import type { ConflictChunk, ConflictResolution, KnownDevice, PeerInfo, PlaylistManifest, QrPayload, SyncReport } from './types'
+import type { StoreState } from './index'
 
 export type SyncSlice = {
   mergeConflicts:  ConflictChunk[]
@@ -29,6 +30,13 @@ export type SyncSlice = {
   // Sync toast message
   syncToast: string | null
 
+  // Peer playlist browser state
+  peerManifestOpen:     boolean
+  peerManifestPeer:     PeerInfo | null
+  peerManifest:         PlaylistManifest[] | null
+  peerManifestLoading:  boolean
+  downloadingPlaylists: string[]
+
   // Pairing actions
   openPairingDisplay:  () => Promise<void>
   openPairingScanner:  () => void
@@ -38,9 +46,14 @@ export type SyncSlice = {
   refreshLivePeers:    () => Promise<void>
   syncWithPeer:        (publicKeyB64: string) => Promise<void>
   dismissSyncToast:    () => void
+
+  // Peer manifest actions
+  openPeerManifest:  (peer: PeerInfo) => Promise<void>
+  closePeerManifest: () => void
+  downloadPlaylist:  (playlistId: string) => Promise<void>
 }
 
-export const createSyncSlice: StateCreator<SyncSlice> = (set, get) => ({
+export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set, get) => ({
   mergeConflicts:  [],
   mergePlaylistId: null,
   currentChunkIdx: 0,
@@ -85,6 +98,13 @@ export const createSyncSlice: StateCreator<SyncSlice> = (set, get) => ({
   fingerprint:  '',
   livePeers:    [],
   syncToast:    null,
+
+  // Peer manifest initial state
+  peerManifestOpen:     false,
+  peerManifestPeer:     null,
+  peerManifest:         null,
+  peerManifestLoading:  false,
+  downloadingPlaylists: [],
 
   openPairingDisplay: async () => {
     const [payload, fp, peers] = await Promise.all([
@@ -138,4 +158,49 @@ export const createSyncSlice: StateCreator<SyncSlice> = (set, get) => ({
   },
 
   dismissSyncToast: () => set({ syncToast: null }),
+
+  openPeerManifest: async (peer) => {
+    set({
+      peerManifestOpen: true,
+      peerManifestPeer: peer,
+      peerManifestLoading: true,
+      peerManifest: null,
+    })
+    try {
+      const result = await invoke<PlaylistManifest[]>('sync_fetch_peer_manifest', {
+        publicKeyB64: peer.public_key_b64,
+      })
+      set({ peerManifest: result, peerManifestLoading: false })
+    } catch {
+      set({ peerManifestLoading: false, syncToast: `Could not reach ${peer.display_name}` })
+      setTimeout(() => set({ syncToast: null }), 3000)
+    }
+  },
+
+  closePeerManifest: () => set({
+    peerManifestOpen: false,
+    peerManifestPeer: null,
+    peerManifest: null,
+    peerManifestLoading: false,
+  }),
+
+  downloadPlaylist: async (playlistId) => {
+    set(state => ({ downloadingPlaylists: [...state.downloadingPlaylists, playlistId] }))
+    try {
+      const report = await invoke<SyncReport>('sync_playlist', { playlistId })
+      set(state => ({ downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId) }))
+      await get().loadPlaylists()
+      const items = report.blobs_fetched
+      set({ syncToast: items > 0
+        ? `Downloaded playlist — ${items} item${items !== 1 ? 's' : ''} synced`
+        : 'Playlist already up to date'
+      })
+    } catch {
+      set(state => ({
+        downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId),
+        syncToast: 'Download failed',
+      }))
+    }
+    setTimeout(() => set({ syncToast: null }), 3000)
+  },
 })

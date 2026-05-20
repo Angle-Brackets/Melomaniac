@@ -117,3 +117,13 @@ export type QrPayload = {
   token:          string
   exp:            number  // Unix timestamp seconds
 }
+
+export type PlaylistManifest = {
+  id:           string
+  name:         string
+  branch_count: number
+  track_count:  number
+  size_bytes:   number
+  artwork_hash: string | null
+  head_commit:  string
+}

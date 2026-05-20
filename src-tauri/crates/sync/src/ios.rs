@@ -567,6 +567,28 @@ impl SyncBridge for IosSyncBridge {
         })
     }
 
+    fn get_peer_manifest(&self, public_key_b64: &str) -> Result<Vec<PlaylistManifest>, SyncError> {
+        let peers = Arc::clone(&self.peers);
+        let identity = Arc::clone(&self.identity);
+        let pk = public_key_b64.to_string();
+
+        tokio::runtime::Handle::current().block_on(async move {
+            let peer = {
+                let list = peers.read().map_err(|_| {
+                    SyncError::IdentityError("peers lock poisoned".into())
+                })?;
+                list.iter().find(|p| p.public_key_b64 == pk).cloned()
+            };
+            let peer = peer.ok_or_else(|| SyncError::PeerUnreachable(pk.clone()))?;
+            let client = SyncClient {
+                identity: Arc::clone(&identity),
+                http: reqwest::Client::new(),
+                base_url: format!("http://{}", peer.addr),
+            };
+            client.get_manifest().await
+        })
+    }
+
     fn fingerprint(&self) -> String {
         self.identity.fingerprint()
     }

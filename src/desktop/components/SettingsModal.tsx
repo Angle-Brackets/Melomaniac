@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppSettings } from '../types';
 import { NAMED_THEMES } from '../../shared/themes';
@@ -20,12 +20,11 @@ interface SettingsModalProps {
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
 
 export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing }: SettingsModalProps) {
-  const knownDevices      = useStore(s => s.knownDevices);
-  const livePeers         = useStore(s => s.livePeers);
+  const knownDevices        = useStore(s => s.knownDevices);
+  const livePeers           = useStore(s => s.livePeers);
   const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
-  const refreshLivePeers  = useStore(s => s.refreshLivePeers);
-  const syncWithPeer      = useStore(s => s.syncWithPeer);
-  const [syncing, setSyncing] = useState<string | null>(null);
+  const refreshLivePeers    = useStore(s => s.refreshLivePeers);
+  const openPeerManifest    = useStore(s => s.openPeerManifest);
 
   useEffect(() => {
     refreshKnownDevices();
@@ -33,12 +32,6 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
     const id = setInterval(refreshLivePeers, 4000);
     return () => clearInterval(id);
   }, [refreshKnownDevices, refreshLivePeers]);
-
-  const handleSync = async (pk: string) => {
-    setSyncing(pk);
-    await syncWithPeer(pk);
-    setSyncing(null);
-  };
   return (
     // DaisyUI modal — backdrop click closes
     <dialog className={`modal modal-open ${closing ? 'mm-backdrop-exit' : 'mm-backdrop'}`} style={{ zIndex: 60 }}>
@@ -217,12 +210,9 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                       </div>
                       <button
                         className="btn btn-xs btn-primary"
-                        disabled={syncing === peer.public_key_b64}
-                        onClick={() => handleSync(peer.public_key_b64)}
+                        onClick={() => openPeerManifest(peer)}
                       >
-                        {syncing === peer.public_key_b64
-                          ? <span className="loading loading-spinner loading-xs" />
-                          : 'Sync'}
+                        Sync
                       </button>
                     </div>
                   ))}

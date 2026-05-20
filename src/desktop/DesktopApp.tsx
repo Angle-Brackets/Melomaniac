@@ -36,6 +36,7 @@ import { FiPlay, FiPause } from 'react-icons/fi';
 import { useAnimatedMount } from './hooks/useAnimatedMount';
 import { DiffViewer } from '../components/DiffViewer';
 import { PairingModal } from '../components/PairingModal';
+import { PeerPlaylistsModal } from '../components/PeerPlaylistsModal';
 import { useStore } from '../store';
 
 export type { AppSettings };
@@ -1448,6 +1449,7 @@ export default function DesktopApp() {
 
         <DiffViewer platform="desktop" />
         <PairingModal platform="desktop" />
+        <PeerPlaylistsModal platform="desktop" />
 
         {/* Git operation toast */}
         {syncToast && (

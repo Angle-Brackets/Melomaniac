@@ -1004,6 +1004,22 @@ impl SyncBridge for DesktopSyncBridge {
         })
     }
 
+    fn get_peer_manifest(&self, public_key_b64: &str) -> Result<Vec<PlaylistManifest>, SyncError> {
+        let peers = Arc::clone(&self.peers);
+        let identity = Arc::clone(&self.identity);
+        let pk = public_key_b64.to_string();
+
+        block(async move {
+            let peer = {
+                let map = peers.read().await;
+                map.get(&pk).cloned()
+            };
+            let peer = peer.ok_or(SyncError::PeerUnreachable(pk.clone()))?;
+            let client = SyncClient::new(identity, peer.addr);
+            client.get_manifest().await
+        })
+    }
+
     fn fingerprint(&self) -> String {
         self.identity.fingerprint()
     }
