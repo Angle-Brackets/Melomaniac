@@ -1,6 +1,6 @@
 import { StateCreator } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
-import type { ConflictChunk, ConflictResolution } from './types'
+import type { ConflictChunk, ConflictResolution, KnownDevice, QrPayload } from './types'
 
 export type SyncSlice = {
   mergeConflicts:  ConflictChunk[]
@@ -15,6 +15,20 @@ export type SyncSlice = {
   closeDiffViewer:  () => void
   submitResolution: (resolution: ConflictResolution) => void
   finalizeMerge:    () => Promise<void>
+
+  // Pairing UI state
+  pairingOpen:   boolean
+  pairingMode:   'display' | 'scan' | null
+  qrPayload:     QrPayload | null
+  knownDevices:  KnownDevice[]
+  fingerprint:   string
+
+  // Pairing actions
+  openPairingDisplay:  () => Promise<void>
+  openPairingScanner:  () => void
+  closePairing:        () => void
+  submitScannedQr:     (payload: QrPayload) => Promise<void>
+  refreshKnownDevices: () => Promise<void>
 }
 
 export const createSyncSlice: StateCreator<SyncSlice> = (set, get) => ({
@@ -52,5 +66,35 @@ export const createSyncSlice: StateCreator<SyncSlice> = (set, get) => ({
       resolutions:     [],
       diffViewerOpen:  false,
     })
+  },
+
+  // Pairing initial state
+  pairingOpen:  false,
+  pairingMode:  null,
+  qrPayload:    null,
+  knownDevices: [],
+  fingerprint:  '',
+
+  openPairingDisplay: async () => {
+    const [payload, fp] = await Promise.all([
+      invoke<QrPayload>('sync_generate_qr_payload'),
+      invoke<string>('sync_get_fingerprint'),
+    ])
+    set({ qrPayload: payload, fingerprint: fp, pairingOpen: true, pairingMode: 'display' })
+  },
+
+  openPairingScanner: () => set({ pairingOpen: true, pairingMode: 'scan' }),
+
+  closePairing: () => set({ pairingOpen: false, pairingMode: null, qrPayload: null }),
+
+  submitScannedQr: async (payload) => {
+    await invoke('sync_accept_qr_pairing', { payload })
+    await get().refreshKnownDevices()
+    get().closePairing()
+  },
+
+  refreshKnownDevices: async () => {
+    const devices = await invoke<KnownDevice[]>('sync_known_devices')
+    set({ knownDevices: devices })
   },
 })

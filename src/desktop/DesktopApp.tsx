@@ -35,6 +35,8 @@ import QueuePanel from './components/QueuePanel';
 import { FiPlay, FiPause } from 'react-icons/fi';
 import { useAnimatedMount } from './hooks/useAnimatedMount';
 import { DiffViewer } from '../components/DiffViewer';
+import { PairingModal } from '../components/PairingModal';
+import { useStore } from '../store';
 
 export type { AppSettings };
 
@@ -115,6 +117,7 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 
 // ── Root App ──────────────────────────────────────────────────────────────────
 export default function DesktopApp() {
+  const openPairingDisplay = useStore(s => s.openPairingDisplay);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -1272,13 +1275,20 @@ export default function DesktopApp() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '0 12px', flexShrink: 0,
         }}>
-          <span className="font-mono text-[9px] text-mm-t2">
+          <span className="font-mono text-[9px] text-mm-t2 flex items-center gap-2">
             Melomaniac by Soupa | v0.1 Alpha | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--text-3)' }}>N/A</span>
             {showStats && appStats && (
               <span className="ml-4 text-mm-accent-lit">
                 RAM: {appStats.memory_mb.toFixed(1)} MB | CPU: {appStats.cpu_usage.toFixed(1)}%
               </span>
             )}
+            <button
+              onClick={() => openPairingDisplay().catch(console.error)}
+              className="ml-2 px-1.5 py-0.5 rounded text-mm-t2 hover:text-mm-accent hover:bg-mm-3 transition-colors"
+              title="Pair a device"
+            >
+              Pair device
+            </button>
           </span>
           <span className="font-mono text-[9px] text-mm-t2">
             {(() => {
@@ -1442,6 +1452,7 @@ export default function DesktopApp() {
         )}
 
         <DiffViewer platform="desktop" />
+        <PairingModal platform="desktop" />
 
         {/* Git operation toast */}
         {gitToast && (

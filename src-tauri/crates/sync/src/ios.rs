@@ -1,11 +1,17 @@
 use crate::identity::{TrustList, unix_now};
-use crate::{KnownDevice, NodeIdentity, PeerInfo, PendingMerge, QrPayload, SyncBridge, SyncError, SyncReport};
+use crate::merge::diff_trees;
+use crate::{
+    KnownDevice, NodeIdentity, PeerInfo, PendingMerge, PlaylistManifest, QrPayload, SyncBridge,
+    SyncError, SyncReport,
+};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use melomaniac_storage::{CasStore, CommitRecord, Database, TreeBlob};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::RwLock as AsyncRwLock;
 
 // ── Swift FFI ─────────────────────────────────────────────────────────────────
 
@@ -26,6 +32,91 @@ extern "C" fn on_peer_discovered(
 
 extern "C" fn on_peer_lost(_public_key: *const std::ffi::c_char) {}
 
+// ── HTTP client ───────────────────────────────────────────────────────────────
+
+struct SyncClient {
+    identity: Arc<NodeIdentity>,
+    http: reqwest::Client,
+    base_url: String,
+}
+
+impl SyncClient {
+    fn auth_header(&self) -> String {
+        let ts = unix_now();
+        let sig = self.identity.sign(ts.to_string().as_bytes());
+        let pk = self.identity.public_key_b64();
+        let sig_b64 = B64.encode(&sig);
+        format!("Melomaniac {pk} {sig_b64}")
+    }
+
+    async fn get_manifest(&self) -> Result<Vec<PlaylistManifest>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/manifest", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<PlaylistManifest>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_hashes(&self) -> Result<Vec<String>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/hashes", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<String>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_blob(&self, hash: &str) -> Result<Vec<u8>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/blob/{hash}", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(SyncError::BlobTransferFailed(format!(
+                "blob not found: {hash}"
+            )));
+        }
+
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_commits(
+        &self,
+        playlist_id: &str,
+        branch: &str,
+    ) -> Result<Vec<CommitRecord>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/commits/{playlist_id}/{branch}", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<CommitRecord>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+}
+
 // ── IosSyncBridge ─────────────────────────────────────────────────────────────
 
 pub struct IosSyncBridge {
@@ -34,6 +125,8 @@ pub struct IosSyncBridge {
     discovery_open: Arc<AtomicBool>,
     data_dir: PathBuf,
     trust_list: Arc<RwLock<TrustList>>,
+    db: Arc<AsyncRwLock<Option<Arc<Database>>>>,
+    cas: Arc<AsyncRwLock<Option<Arc<CasStore>>>>,
 }
 
 impl IosSyncBridge {
@@ -46,7 +139,16 @@ impl IosSyncBridge {
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             trust_list: Arc::new(RwLock::new(trust_list)),
+            db: Arc::new(AsyncRwLock::new(None)),
+            cas: Arc::new(AsyncRwLock::new(None)),
         })
+    }
+
+    pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {
+        tokio::runtime::Handle::current().block_on(async {
+            *self.db.write().await = Some(db);
+            *self.cas.write().await = Some(cas);
+        });
     }
 }
 
@@ -136,11 +238,190 @@ impl SyncBridge for IosSyncBridge {
         Ok(())
     }
 
-    fn sync_playlist(&self, _playlist_id: &str) -> Result<SyncReport, SyncError> {
-        Ok(SyncReport {
-            blobs_fetched: 0,
-            bytes_fetched: 0,
-            conflicts: vec![],
+    fn sync_playlist(&self, playlist_id: &str) -> Result<SyncReport, SyncError> {
+        let identity = Arc::clone(&self.identity);
+        let peers = Arc::clone(&self.peers);
+        let db_lock = Arc::clone(&self.db);
+        let cas_lock = Arc::clone(&self.cas);
+        let playlist_id = playlist_id.to_string();
+
+        tokio::runtime::Handle::current().block_on(async move {
+            // 1. Pick best peer.
+            let peer = {
+                let list = peers.read().map_err(|_| {
+                    SyncError::IdentityError("peers lock poisoned".into())
+                })?;
+                list.first().cloned()
+            };
+            let peer = peer.ok_or(SyncError::NotPaired)?;
+
+            // 2. Build client.
+            let client = SyncClient {
+                identity: Arc::clone(&identity),
+                http: reqwest::Client::new(),
+                base_url: format!("http://{}", peer.addr),
+            };
+
+            // 3. GET manifest from peer.
+            let manifest = client.get_manifest().await?;
+            let peer_entry = match manifest.into_iter().find(|m| m.id == playlist_id) {
+                Some(m) => m,
+                None => {
+                    return Ok(SyncReport {
+                        blobs_fetched: 0,
+                        bytes_fetched: 0,
+                        conflicts: vec![],
+                    });
+                }
+            };
+
+            let db_guard = db_lock.read().await;
+            let cas_guard = cas_lock.read().await;
+            let db = db_guard.as_ref().ok_or_else(|| {
+                SyncError::Io(std::io::Error::other("storage not initialised"))
+            })?;
+            let cas = cas_guard.as_ref().ok_or_else(|| {
+                SyncError::Io(std::io::Error::other("storage not initialised"))
+            })?;
+
+            // 4. Read local branch list and pick main branch.
+            let local_branches = db.get_branches(&playlist_id).await?;
+            let local_branch = local_branches
+                .iter()
+                .find(|b| b.name == "main")
+                .or_else(|| local_branches.first());
+            let local_branch_name = local_branch.map(|b| b.name.as_str()).unwrap_or("main");
+            let local_head = local_branch.and_then(|b| b.head_commit.clone());
+
+            // 5. Compare heads.
+            if local_head.as_deref() == Some(&peer_entry.head_commit) {
+                return Ok(SyncReport {
+                    blobs_fetched: 0,
+                    bytes_fetched: 0,
+                    conflicts: vec![],
+                });
+            }
+
+            // 6 & 7. Fetch hash sets.
+            let peer_hashes = client.get_hashes().await?;
+            let local_hashes: std::collections::HashSet<String> =
+                cas.list_all_hashes().into_iter().collect();
+            let peer_hash_set: std::collections::HashSet<String> =
+                peer_hashes.into_iter().collect();
+
+            // 8. Missing hashes = peer has them, we don't.
+            let missing: Vec<String> = peer_hash_set
+                .difference(&local_hashes)
+                .cloned()
+                .collect();
+
+            // 9. Pull all missing blobs.
+            let mut blobs_fetched: usize = 0;
+            let mut bytes_fetched: u64 = 0;
+            for hash in &missing {
+                let bytes = client.get_blob(hash).await?;
+                bytes_fetched += bytes.len() as u64;
+                cas.write_blob(&bytes).await?;
+                blobs_fetched += 1;
+            }
+
+            // 10. Import commit chain.
+            let peer_commits = client.get_commits(&playlist_id, "main").await?;
+            db.import_commit_chain(&peer_commits).await?;
+
+            // 11. DAG merge.
+            let peer_head = &peer_entry.head_commit;
+
+            let ancestor = match &local_head {
+                None => {
+                    // We have no local commits — fast-forward to peer head.
+                    db.update_branch_head(&playlist_id, local_branch_name, peer_head)
+                        .await?;
+                    return Ok(SyncReport {
+                        blobs_fetched,
+                        bytes_fetched,
+                        conflicts: vec![],
+                    });
+                }
+                Some(lh) => db.find_common_ancestor(lh, peer_head).await?,
+            };
+
+            let local_head_str = local_head.as_deref().expect("checked above");
+
+            // We're ahead — nothing to do.
+            if ancestor.as_deref() == Some(peer_head) {
+                return Ok(SyncReport {
+                    blobs_fetched,
+                    bytes_fetched,
+                    conflicts: vec![],
+                });
+            }
+
+            // Fast-forward: our head is the ancestor.
+            if ancestor.as_deref() == Some(local_head_str) {
+                db.update_branch_head(&playlist_id, local_branch_name, peer_head)
+                    .await?;
+                return Ok(SyncReport {
+                    blobs_fetched,
+                    bytes_fetched,
+                    conflicts: vec![],
+                });
+            }
+
+            // True merge.
+            let our_tree = db.read_tree_for_commit(cas, local_head_str).await?;
+            let their_tree = db.read_tree_for_commit(cas, peer_head).await?;
+
+            let base_tree = match &ancestor {
+                Some(ancestor_hash) => db.read_tree_for_commit(cas, ancestor_hash).await?,
+                None => TreeBlob::new(""),
+            };
+
+            let (conflicts, merged_tree) = diff_trees(&base_tree, &our_tree, &their_tree);
+
+            if !conflicts.is_empty() {
+                let pending = PendingMerge {
+                    local_head: local_head_str.to_string(),
+                    peer_head: peer_head.to_string(),
+                    ancestor_hash: ancestor.clone(),
+                    branch_name: local_branch_name.to_string(),
+                    conflicts: conflicts.clone(),
+                };
+                // On iOS, conflicts are resolved on desktop instead; call set_pending_merge
+                // for symmetry with the desktop implementation (it is a no-op here).
+                self.set_pending_merge(&playlist_id, pending);
+                return Ok(SyncReport {
+                    blobs_fetched,
+                    bytes_fetched,
+                    conflicts,
+                });
+            }
+
+            // Auto-merge: write merged tree and create merge commit.
+            if let Some(tree) = merged_tree {
+                let json = tree.to_json().map_err(|e| {
+                    SyncError::Io(std::io::Error::other(e.to_string()))
+                })?;
+                let tree_hash = cas.write_blob(json.as_bytes()).await?;
+
+                let merge_commit = CommitRecord {
+                    hash: uuid::Uuid::new_v4().to_string(),
+                    tree_hash,
+                    timestamp: unix_now() as i64,
+                    device_id: identity.public_key_b64(),
+                    message: Some("auto-merge".into()),
+                };
+                db.insert_commit(&merge_commit, &[local_head_str, peer_head])
+                    .await?;
+                db.update_branch_head(&playlist_id, local_branch_name, &merge_commit.hash)
+                    .await?;
+            }
+
+            Ok(SyncReport {
+                blobs_fetched,
+                bytes_fetched,
+                conflicts: vec![],
+            })
         })
     }
 
@@ -157,6 +438,8 @@ impl SyncBridge for IosSyncBridge {
     }
 
     fn set_pending_merge(&self, _playlist_id: &str, _merge: PendingMerge) {}
-    fn pending_merge(&self, _playlist_id: &str) -> Option<PendingMerge> { None }
+    fn pending_merge(&self, _playlist_id: &str) -> Option<PendingMerge> {
+        None
+    }
     fn clear_pending_merge(&self, _playlist_id: &str) {}
 }

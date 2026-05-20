@@ -109,3 +109,11 @@ export type ConflictResolution = {
   // For BranchNameCollision with rename:
   rename_to?: string
 }
+
+export type QrPayload = {
+  public_key_b64: string
+  display_name:   string
+  addr:           string | null
+  token:          string
+  exp:            number  // Unix timestamp seconds
+}

@@ -6,6 +6,7 @@ import { MMTabBar } from './common';
 import type { TabId } from './common';
 import { applyTheme, writeCustomHue, NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
+import { useStore } from '../../store';
 
 const SETTINGS_KEY = 'melomaniac.settings';
 
@@ -98,6 +99,7 @@ const THEME_PILLS: { id: ThemeName; label: string }[] = [
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
+  const openPairingDisplay = useStore(s => s.openPairingDisplay);
   const [settings, setSettings] = useState<StoredSettings>(() => loadSettings());
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft]     = useState(settings.commitAuthor);
@@ -294,6 +296,13 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         <SettingsGroup label="Developer">
           <Row title="RAM usage" detail={stats ? `${stats.memory_mb.toFixed(1)} MB` : '…'} chev={false}/>
           <Row title="CPU usage" detail={stats ? `${stats.cpu_usage.toFixed(1)}%` : '…'} chev={false} isLast/>
+        </SettingsGroup>
+
+        {/* Sync */}
+        <SettingsGroup label="Sync">
+          <Row title="Pair a device" chev isLast onClick={() => { openPairingDisplay().catch(console.error); }}>
+            <span style={{ fontSize: 13, color: 'var(--text-2)' }}>QR</span>
+          </Row>
         </SettingsGroup>
 
         {/* About */}

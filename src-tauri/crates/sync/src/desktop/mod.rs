@@ -1,7 +1,8 @@
 use crate::{
-    ConflictChunk, ConflictKind, KnownDevice, NodeIdentity, PeerInfo, PendingMerge,
+    KnownDevice, NodeIdentity, PeerInfo, PendingMerge,
     PlaylistManifest, QrPayload, SyncBridge, SyncError, SyncReport,
     identity::{TrustList, unix_now},
+    merge::diff_trees,
 };
 use axum::{
     Router,
@@ -511,186 +512,6 @@ impl SyncClient {
     }
 }
 
-// ── Tree diff ─────────────────────────────────────────────────────────────────
-
-/// Compare three tree versions and return conflicts plus an auto-merged tree if there are none.
-fn diff_trees(
-    base: &TreeBlob,
-    ours: &TreeBlob,
-    theirs: &TreeBlob,
-) -> (Vec<ConflictChunk>, Option<TreeBlob>) {
-    let mut conflicts = Vec::new();
-
-    // ── Metadata conflict ─────────────────────────────────────────────────────
-    if ours.meta.name != theirs.meta.name
-        && ours.meta.name != base.meta.name
-        && theirs.meta.name != base.meta.name
-    {
-        conflicts.push(ConflictChunk {
-            id: uuid::Uuid::new_v4().to_string(),
-            kind: ConflictKind::MetadataEdit,
-            ours: serde_json::json!(ours.meta.name),
-            theirs: serde_json::json!(theirs.meta.name),
-            context: serde_json::json!(base.meta.name),
-        });
-    }
-
-    // ── Track order conflict ──────────────────────────────────────────────────
-    let base_hashes: Vec<&str> = base.tracks.iter().map(|t| t.hash.as_str()).collect();
-    let our_hashes: Vec<&str> = ours.tracks.iter().map(|t| t.hash.as_str()).collect();
-    let their_hashes: Vec<&str> = theirs.tracks.iter().map(|t| t.hash.as_str()).collect();
-
-    let our_set: std::collections::HashSet<&str> = our_hashes.iter().copied().collect();
-    let their_set: std::collections::HashSet<&str> = their_hashes.iter().copied().collect();
-
-    if our_set == their_set && our_hashes != their_hashes && our_hashes != base_hashes && their_hashes != base_hashes {
-        conflicts.push(ConflictChunk {
-            id: uuid::Uuid::new_v4().to_string(),
-            kind: ConflictKind::TrackOrder,
-            ours: serde_json::json!(our_hashes),
-            theirs: serde_json::json!(their_hashes),
-            context: serde_json::json!(base_hashes),
-        });
-    }
-
-    // ── Track deletion vs modification ────────────────────────────────────────
-    for base_track in &base.tracks {
-        let in_ours = ours.tracks.iter().any(|t| t.hash == base_track.hash);
-        let in_theirs = theirs.tracks.iter().any(|t| t.hash == base_track.hash);
-
-        if !in_ours && in_theirs {
-            // We deleted it; they kept/modified it.
-            let their_version = theirs.tracks.iter().find(|t| t.hash == base_track.hash);
-            conflicts.push(ConflictChunk {
-                id: uuid::Uuid::new_v4().to_string(),
-                kind: ConflictKind::TrackDeletedVsModified,
-                ours: serde_json::Value::Null,
-                theirs: serde_json::to_value(their_version).unwrap_or(serde_json::Value::Null),
-                context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
-            });
-        } else if in_ours && !in_theirs {
-            // They deleted it; we kept/modified it.
-            let our_version = ours.tracks.iter().find(|t| t.hash == base_track.hash);
-            conflicts.push(ConflictChunk {
-                id: uuid::Uuid::new_v4().to_string(),
-                kind: ConflictKind::TrackDeletedVsModified,
-                ours: serde_json::to_value(our_version).unwrap_or(serde_json::Value::Null),
-                theirs: serde_json::Value::Null,
-                context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
-            });
-        }
-    }
-
-    // ── A/B loop point conflicts ──────────────────────────────────────────────
-    for our_track in &ours.tracks {
-        let Some(their_track) = theirs.tracks.iter().find(|t| t.hash == our_track.hash) else {
-            continue;
-        };
-        let base_track = base.tracks.iter().find(|t| t.hash == our_track.hash);
-
-        let ab_differs = our_track.ab_start_ms != their_track.ab_start_ms
-            || our_track.ab_end_ms != their_track.ab_end_ms;
-
-        let both_changed = if let Some(bt) = base_track {
-            (our_track.ab_start_ms != bt.ab_start_ms || our_track.ab_end_ms != bt.ab_end_ms)
-                && (their_track.ab_start_ms != bt.ab_start_ms
-                    || their_track.ab_end_ms != bt.ab_end_ms)
-        } else {
-            // Track is new (added on both sides with different ab points — treat as conflict)
-            ab_differs
-        };
-
-        if ab_differs && both_changed {
-            conflicts.push(ConflictChunk {
-                id: uuid::Uuid::new_v4().to_string(),
-                kind: ConflictKind::AbLoopPoints,
-                ours: serde_json::json!({
-                    "hash": our_track.hash,
-                    "ab_start_ms": our_track.ab_start_ms,
-                    "ab_end_ms": our_track.ab_end_ms,
-                }),
-                theirs: serde_json::json!({
-                    "hash": their_track.hash,
-                    "ab_start_ms": their_track.ab_start_ms,
-                    "ab_end_ms": their_track.ab_end_ms,
-                }),
-                context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
-            });
-        }
-    }
-
-    if !conflicts.is_empty() {
-        return (conflicts, None);
-    }
-
-    // ── Auto-merge ────────────────────────────────────────────────────────────
-    let base_set: std::collections::HashSet<&str> = base_hashes.iter().copied().collect();
-
-    // Keep all tracks from ours that are in base (respecting our ordering + deletions)
-    // then add new tracks from theirs (not in base) at the end.
-    let mut merged_tracks: Vec<melomaniac_storage::TrackEntry> = ours
-        .tracks
-        .iter()
-        .filter(|t| base_set.contains(t.hash.as_str()) || their_set.contains(t.hash.as_str()))
-        .cloned()
-        .collect();
-
-    // Apply theirs' deletions: remove tracks that theirs deleted (present in base, absent in theirs).
-    merged_tracks.retain(|t| {
-        !base_set.contains(t.hash.as_str()) || their_set.contains(t.hash.as_str())
-    });
-
-    // Append tracks added only by theirs (not in base, not already in merged).
-    let their_additions: Vec<melomaniac_storage::TrackEntry> = {
-        let merged_hashes: std::collections::HashSet<&str> =
-            merged_tracks.iter().map(|t| t.hash.as_str()).collect();
-        theirs
-            .tracks
-            .iter()
-            .filter(|t| {
-                !base_set.contains(t.hash.as_str())
-                    && !merged_hashes.contains(t.hash.as_str())
-            })
-            .cloned()
-            .collect()
-    };
-    merged_tracks.extend(their_additions);
-
-    // Merge metadata: if only one side changed a field, take that side's value.
-    let merged_name = if ours.meta.name != base.meta.name {
-        ours.meta.name.clone()
-    } else {
-        theirs.meta.name.clone()
-    };
-
-    let merged_desc = if ours.meta.description != base.meta.description {
-        ours.meta.description.clone()
-    } else {
-        theirs.meta.description.clone()
-    };
-
-    let merged_artwork = if ours.meta.artwork_hash != base.meta.artwork_hash {
-        ours.meta.artwork_hash.clone()
-    } else {
-        theirs.meta.artwork_hash.clone()
-    };
-
-    let merged_tree = TreeBlob {
-        v: 2,
-        meta: melomaniac_storage::PlaylistMeta {
-            name: merged_name,
-            description: merged_desc,
-            artwork_hash: merged_artwork,
-            extra: Default::default(),
-        },
-        tracks: merged_tracks,
-        includes: ours.includes.clone(),
-        extra: Default::default(),
-    };
-
-    (vec![], Some(merged_tree))
-}
-
 // ── Sync context bridge (sync → async) ───────────────────────────────────────
 
 /// Block on `fut` using the current Tokio runtime handle.
@@ -741,6 +562,13 @@ impl SyncBridge for DesktopSyncBridge {
         let bind_addr: SocketAddr =
             format!("0.0.0.0:{port}").parse().expect("valid bind address");
 
+        // Binds on all interfaces so both Wi-Fi and Ethernet peers can reach us.
+        // If a peer can discover us via mDNS but HTTP requests time out, the most
+        // likely culprit is wireless client isolation (sometimes called "AP isolation")
+        // on the router — a setting that prevents Wi-Fi devices from talking directly
+        // to each other or to wired devices on the same LAN. It is off by default on
+        // home routers but common on guest networks. No OS-level firewall change is
+        // needed; this is purely a router configuration issue.
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(bind_addr).await {
                 Ok(listener) => {

@@ -13,6 +13,7 @@ impl From<melomaniac_storage::StorageError> for SyncError {
 pub mod ios;
 
 pub mod identity;
+pub(crate) mod merge;
 
 // ── NodeIdentity ──────────────────────────────────────────────────────────────
 
