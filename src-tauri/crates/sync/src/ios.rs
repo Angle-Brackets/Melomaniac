@@ -9,9 +9,8 @@ use melomaniac_storage::{CasStore, CommitRecord, Database, TreeBlob};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock as AsyncRwLock;
 
 // ── Swift FFI ─────────────────────────────────────────────────────────────────
 
@@ -125,8 +124,8 @@ pub struct IosSyncBridge {
     discovery_open: Arc<AtomicBool>,
     data_dir: PathBuf,
     trust_list: Arc<RwLock<TrustList>>,
-    db: Arc<AsyncRwLock<Option<Arc<Database>>>>,
-    cas: Arc<AsyncRwLock<Option<Arc<CasStore>>>>,
+    db: Arc<OnceLock<Arc<Database>>>,
+    cas: Arc<OnceLock<Arc<CasStore>>>,
 }
 
 impl IosSyncBridge {
@@ -139,16 +138,14 @@ impl IosSyncBridge {
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             trust_list: Arc::new(RwLock::new(trust_list)),
-            db: Arc::new(AsyncRwLock::new(None)),
-            cas: Arc::new(AsyncRwLock::new(None)),
+            db: Arc::new(OnceLock::new()),
+            cas: Arc::new(OnceLock::new()),
         })
     }
 
     pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {
-        tokio::runtime::Handle::current().block_on(async {
-            *self.db.write().await = Some(db);
-            *self.cas.write().await = Some(cas);
-        });
+        self.db.set(db).ok();
+        self.cas.set(cas).ok();
     }
 }
 
@@ -241,8 +238,8 @@ impl SyncBridge for IosSyncBridge {
     fn sync_playlist(&self, playlist_id: &str) -> Result<SyncReport, SyncError> {
         let identity = Arc::clone(&self.identity);
         let peers = Arc::clone(&self.peers);
-        let db_lock = Arc::clone(&self.db);
-        let cas_lock = Arc::clone(&self.cas);
+        let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
+        let cas = self.cas.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
         let playlist_id = playlist_id.to_string();
 
         tokio::runtime::Handle::current().block_on(async move {
@@ -275,14 +272,6 @@ impl SyncBridge for IosSyncBridge {
                 }
             };
 
-            let db_guard = db_lock.read().await;
-            let cas_guard = cas_lock.read().await;
-            let db = db_guard.as_ref().ok_or_else(|| {
-                SyncError::Io(std::io::Error::other("storage not initialised"))
-            })?;
-            let cas = cas_guard.as_ref().ok_or_else(|| {
-                SyncError::Io(std::io::Error::other("storage not initialised"))
-            })?;
 
             // 4. Read local branch list and pick main branch.
             let local_branches = db.get_branches(&playlist_id).await?;

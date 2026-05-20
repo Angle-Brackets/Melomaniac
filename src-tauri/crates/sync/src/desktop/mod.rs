@@ -21,7 +21,7 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -45,8 +45,8 @@ fn sync_port() -> u16 {
 struct ServerState {
     identity: Arc<NodeIdentity>,
     trust_list: Arc<RwLock<TrustList>>,
-    db: Arc<RwLock<Option<Arc<Database>>>>,
-    cas: Arc<RwLock<Option<Arc<CasStore>>>>,
+    db: Arc<OnceLock<Arc<Database>>>,
+    cas: Arc<OnceLock<Arc<CasStore>>>,
 }
 
 // ── DesktopSyncBridge ─────────────────────────────────────────────────────────
@@ -60,8 +60,8 @@ pub struct DesktopSyncBridge {
     #[allow(dead_code)]
     data_dir: PathBuf,
     mdns: Arc<std::sync::Mutex<Option<ServiceDaemon>>>,
-    db: Arc<RwLock<Option<Arc<Database>>>>,
-    cas: Arc<RwLock<Option<Arc<CasStore>>>>,
+    db: Arc<OnceLock<Arc<Database>>>,
+    cas: Arc<OnceLock<Arc<CasStore>>>,
     pending_merges: Arc<tokio::sync::Mutex<HashMap<String, PendingMerge>>>,
 }
 
@@ -77,17 +77,15 @@ impl DesktopSyncBridge {
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             mdns: Arc::new(std::sync::Mutex::new(None)),
-            db: Arc::new(RwLock::new(None)),
-            cas: Arc::new(RwLock::new(None)),
+            db: Arc::new(OnceLock::new()),
+            cas: Arc::new(OnceLock::new()),
             pending_merges: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         })
     }
 
     pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {
-        block(async {
-            *self.db.write().await = Some(db);
-            *self.cas.write().await = Some(cas);
-        });
+        self.db.set(db).ok();
+        self.cas.set(cas).ok();
     }
 
     /// Register (or re-register) the mDNS service with the given `mode` TXT field.
@@ -299,9 +297,7 @@ async fn handle_manifest(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let db_guard = state.db.read().await;
-    let cas_guard = state.cas.read().await;
-    let (Some(db), Some(cas)) = (db_guard.as_ref(), cas_guard.as_ref()) else {
+    let (Some(db), Some(cas)) = (state.db.get(), state.cas.get()) else {
         return axum::Json(Vec::<PlaylistManifest>::new()).into_response();
     };
 
@@ -357,8 +353,7 @@ async fn handle_hashes(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let cas_guard = state.cas.read().await;
-    let hashes = match cas_guard.as_ref() {
+    let hashes = match state.cas.get() {
         Some(cas) => cas.list_all_hashes(),
         None => vec![],
     };
@@ -375,8 +370,7 @@ async fn handle_blob(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let cas_guard = state.cas.read().await;
-    let Some(cas) = cas_guard.as_ref() else {
+    let Some(cas) = state.cas.get() else {
         return (StatusCode::NOT_FOUND, axum::Json(serde_json::Value::Null)).into_response();
     };
 
@@ -400,8 +394,7 @@ async fn handle_commits(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let db_guard = state.db.read().await;
-    let Some(db) = db_guard.as_ref() else {
+    let Some(db) = state.db.get() else {
         return axum::Json(Vec::<CommitRecord>::new()).into_response();
     };
 
@@ -699,8 +692,8 @@ impl SyncBridge for DesktopSyncBridge {
     fn sync_playlist(&self, playlist_id: &str) -> Result<SyncReport, SyncError> {
         let identity = Arc::clone(&self.identity);
         let peers = Arc::clone(&self.peers);
-        let db_lock = Arc::clone(&self.db);
-        let cas_lock = Arc::clone(&self.cas);
+        let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
+        let cas = self.cas.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
         let playlist_id = playlist_id.to_string();
 
         block(async move {
@@ -727,14 +720,6 @@ impl SyncBridge for DesktopSyncBridge {
                 }
             };
 
-            let db_guard = db_lock.read().await;
-            let cas_guard = cas_lock.read().await;
-            let db = db_guard.as_ref().ok_or_else(|| {
-                SyncError::Io(std::io::Error::other("storage not initialised"))
-            })?;
-            let cas = cas_guard.as_ref().ok_or_else(|| {
-                SyncError::Io(std::io::Error::other("storage not initialised"))
-            })?;
 
             // 4. Read local branch list and pick main branch.
             let local_branches = db.get_branches(&playlist_id).await?;
@@ -819,11 +804,11 @@ impl SyncBridge for DesktopSyncBridge {
             }
 
             // d. True merge.
-            let our_tree = db.read_tree_for_commit(cas, local_head).await?;
-            let their_tree = db.read_tree_for_commit(cas, peer_head).await?;
+            let our_tree = db.read_tree_for_commit(&*cas, local_head).await?;
+            let their_tree = db.read_tree_for_commit(&*cas, peer_head).await?;
 
             let base_tree = match &ancestor {
-                Some(ancestor_hash) => db.read_tree_for_commit(cas, ancestor_hash).await?,
+                Some(ancestor_hash) => db.read_tree_for_commit(&*cas, ancestor_hash).await?,
                 None => TreeBlob::new(""),
             };
 
