@@ -40,13 +40,9 @@ private func withCString(_ s: String, _ body: (UnsafePointer<CChar>) -> Void) {
 }
 
 /// Extract the `pk` key from an `NWTXTRecord`, returning nil when absent.
-/// Uses getEntry(for:) rather than apply(_:) because apply was unavailable
-/// in the iOS SDK version targeted by this build.
 private func extractPK(from txt: NWTXTRecord) -> String? {
-    guard let entry = txt.getEntry(for: "pk"),
-          let data = entry.value,
-          !data.isEmpty else { return nil }
-    return String(bytes: data, encoding: .utf8)
+    guard let value = txt.dictionary["pk"], !value.isEmpty else { return nil }
+    return value
 }
 
 /// Parse the remote endpoint of a ready connection into an "ip:port" string.
