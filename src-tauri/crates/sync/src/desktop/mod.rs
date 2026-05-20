@@ -7,6 +7,7 @@ use crate::{
 use axum::{
     Router,
     extract::{Path, State},
+    extract::Json,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::get,
@@ -47,6 +48,9 @@ struct ServerState {
     trust_list: Arc<RwLock<TrustList>>,
     db: Arc<OnceLock<Arc<Database>>>,
     cas: Arc<OnceLock<Arc<CasStore>>>,
+    /// Token stored when we generate a QR code; the scanning device POSTs it
+    /// back to /pair so we can add it to our trust list.
+    pending_qr_token: Arc<std::sync::Mutex<Option<(String, u64)>>>,
 }
 
 // ── DesktopSyncBridge ─────────────────────────────────────────────────────────
@@ -63,6 +67,8 @@ pub struct DesktopSyncBridge {
     db: Arc<OnceLock<Arc<Database>>>,
     cas: Arc<OnceLock<Arc<CasStore>>>,
     pending_merges: Arc<tokio::sync::Mutex<HashMap<String, PendingMerge>>>,
+    /// Shared with the Axum ServerState so /pair can verify and consume it.
+    pending_qr_token: Arc<std::sync::Mutex<Option<(String, u64)>>>,
 }
 
 impl DesktopSyncBridge {
@@ -80,6 +86,7 @@ impl DesktopSyncBridge {
             db: Arc::new(OnceLock::new()),
             cas: Arc::new(OnceLock::new()),
             pending_merges: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            pending_qr_token: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -416,13 +423,53 @@ async fn handle_commits(
     }
 }
 
+// ── /pair — called by the scanning device after accepting our QR ──────────────
+
+#[derive(serde::Deserialize)]
+struct PairRequest {
+    public_key_b64: String,
+    display_name: String,
+    token: String,
+}
+
+async fn handle_pair(
+    State(state): State<ServerState>,
+    Json(req): Json<PairRequest>,
+) -> StatusCode {
+    let valid = {
+        let guard = state.pending_qr_token.lock().unwrap();
+        guard.as_ref().map_or(false, |(tok, exp)| {
+            tok == &req.token && *exp > unix_now()
+        })
+    };
+    if !valid {
+        eprintln!("[sync] /pair: rejected — invalid or expired token");
+        return StatusCode::UNAUTHORIZED;
+    }
+    // One-time use: clear so it can't be replayed.
+    *state.pending_qr_token.lock().unwrap() = None;
+
+    let device = KnownDevice {
+        public_key_b64: req.public_key_b64,
+        display_name: req.display_name.clone(),
+        added_at: unix_now(),
+    };
+    eprintln!("[sync] /pair: adding '{}' to trust list", req.display_name);
+    let mut tl = state.trust_list.write().await;
+    tl.add(device);
+    tl.save(&state.identity).unwrap_or_else(|e| eprintln!("[sync] /pair: save error: {e}"));
+    StatusCode::OK
+}
+
 fn build_router(state: ServerState) -> Router {
+    use axum::routing::post;
     Router::new()
         .route("/ping", get(handle_ping))
         .route("/manifest", get(handle_manifest))
         .route("/hashes", get(handle_hashes))
         .route("/blob/:hash", get(handle_blob))
         .route("/commits/:playlist_id/:branch_name", get(handle_commits))
+        .route("/pair", post(handle_pair))
         .with_state(state)
 }
 
@@ -566,6 +613,7 @@ impl SyncBridge for DesktopSyncBridge {
             trust_list: Arc::clone(&self.trust_list),
             db: Arc::clone(&self.db),
             cas: Arc::clone(&self.cas),
+            pending_qr_token: Arc::clone(&self.pending_qr_token),
         };
         let router = build_router(server_state);
         let bind_addr: SocketAddr =
@@ -656,13 +704,19 @@ impl SyncBridge for DesktopSyncBridge {
 
         let port = sync_port();
         let addr = local_ip().map(|ip| format!("{ip}:{port}"));
+        let token = B64.encode(token_bytes);
+        let exp = unix_now() + 600;
+
+        // Store so /pair can verify the scanning device is presenting our token.
+        *self.pending_qr_token.lock().unwrap() = Some((token.clone(), exp));
+        eprintln!("[sync] QR payload: addr={addr:?}");
 
         Ok(QrPayload {
             public_key_b64: self.identity.public_key_b64(),
             display_name: self.identity.display_name.clone(),
             addr,
-            token: B64.encode(token_bytes),
-            exp: unix_now() + 600,
+            token,
+            exp,
         })
     }
 

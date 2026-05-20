@@ -312,17 +312,49 @@ impl SyncBridge for IosSyncBridge {
         }
 
         let device = KnownDevice {
-            public_key_b64: payload.public_key_b64,
-            display_name: payload.display_name,
+            public_key_b64: payload.public_key_b64.clone(),
+            display_name: payload.display_name.clone(),
             added_at: unix_now(),
         };
 
-        let mut list = self
-            .trust_list
-            .write()
-            .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
-        list.add(device);
-        list.save(&self.identity)?;
+        {
+            let mut list = self
+                .trust_list
+                .write()
+                .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
+            list.add(device);
+            list.save(&self.identity)?;
+        }
+
+        eprintln!("[sync] iOS: paired with '{}' ({}…)", payload.display_name, &payload.public_key_b64[..8.min(payload.public_key_b64.len())]);
+
+        // POST our own identity back to the desktop so it can add us to its
+        // trust list (the QR payload only flows one way; /pair closes the loop).
+        if let Some(addr) = payload.addr {
+            let own_pk   = self.identity.public_key_b64();
+            let own_name = self.identity.display_name.clone();
+            let token    = payload.token;
+            tokio::spawn(async move {
+                let url = format!("http://{addr}/pair");
+                eprintln!("[sync] iOS: POSTing identity to {url}");
+                match reqwest::Client::new()
+                    .post(&url)
+                    .json(&serde_json::json!({
+                        "public_key_b64": own_pk,
+                        "display_name":   own_name,
+                        "token":          token,
+                    }))
+                    .send()
+                    .await
+                {
+                    Ok(r)  => eprintln!("[sync] iOS: /pair response {}", r.status()),
+                    Err(e) => eprintln!("[sync] iOS: /pair failed: {e}"),
+                }
+            });
+        } else {
+            eprintln!("[sync] iOS: QR payload had no addr — desktop won't be notified");
+        }
+
         Ok(())
     }
 
