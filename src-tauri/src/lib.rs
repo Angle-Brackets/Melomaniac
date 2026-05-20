@@ -153,9 +153,13 @@ pub fn run() {
                             .expect("failed to create desktop sync bridge");
                         let ss = app.state::<crate::storage::StorageState>();
                         b.set_storage(Arc::clone(&ss.db), Arc::clone(&ss.cas));
-                        if let Err(e) = b.start_discovery() {
-                            eprintln!("[sync] start_discovery failed: {e}");
-                        }
+                        // start_discovery spawns Tokio tasks; block_on establishes
+                        // the runtime context needed before the event loop starts.
+                        tauri::async_runtime::block_on(async {
+                            if let Err(e) = b.start_discovery() {
+                                eprintln!("[sync] start_discovery failed: {e}");
+                            }
+                        });
                         Arc::new(b) as Arc<dyn SyncBridge>
                     }
 
