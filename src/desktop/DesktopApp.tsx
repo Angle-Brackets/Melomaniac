@@ -34,6 +34,7 @@ import MiniPlayer from './components/MiniPlayer';
 import QueuePanel from './components/QueuePanel';
 import { FiPlay, FiPause } from 'react-icons/fi';
 import { useAnimatedMount } from './hooks/useAnimatedMount';
+import { DiffViewer } from '../components/DiffViewer';
 
 export type { AppSettings };
 
@@ -1439,6 +1440,8 @@ export default function DesktopApp() {
             onClose={() => { setShowCommitGraph(false); setRailItem('playlists'); }}
           />
         )}
+
+        <DiffViewer platform="desktop" />
 
         {/* Git operation toast */}
         {gitToast && (

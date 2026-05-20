@@ -1,6 +1,6 @@
 use crate::{
-    KnownDevice, NodeIdentity, PeerInfo, PlaylistManifest, QrPayload, SyncBridge, SyncError,
-    SyncReport,
+    ConflictChunk, ConflictKind, KnownDevice, NodeIdentity, PeerInfo, PlaylistManifest,
+    QrPayload, SyncBridge, SyncError, SyncReport,
     identity::{TrustList, unix_now},
 };
 use axum::{
@@ -13,6 +13,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::VerifyingKey;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use melomaniac_storage::{CasStore, CommitRecord, Database, TreeBlob};
 use rand::RngCore;
 use std::{
     collections::HashMap,
@@ -43,6 +44,8 @@ fn sync_port() -> u16 {
 struct ServerState {
     identity: Arc<NodeIdentity>,
     trust_list: Arc<RwLock<TrustList>>,
+    db: Arc<RwLock<Option<Arc<Database>>>>,
+    cas: Arc<RwLock<Option<Arc<CasStore>>>>,
 }
 
 // ── DesktopSyncBridge ─────────────────────────────────────────────────────────
@@ -56,6 +59,8 @@ pub struct DesktopSyncBridge {
     #[allow(dead_code)]
     data_dir: PathBuf,
     mdns: Arc<std::sync::Mutex<Option<ServiceDaemon>>>,
+    db: Arc<RwLock<Option<Arc<Database>>>>,
+    cas: Arc<RwLock<Option<Arc<CasStore>>>>,
 }
 
 impl DesktopSyncBridge {
@@ -70,7 +75,16 @@ impl DesktopSyncBridge {
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             mdns: Arc::new(std::sync::Mutex::new(None)),
+            db: Arc::new(RwLock::new(None)),
+            cas: Arc::new(RwLock::new(None)),
         })
+    }
+
+    pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {
+        block(async {
+            *self.db.write().await = Some(db);
+            *self.cas.write().await = Some(cas);
+        });
     }
 
     /// Register (or re-register) the mDNS service with the given `mode` TXT field.
@@ -281,8 +295,55 @@ async fn handle_manifest(
     if let Err(status) = check_auth(&headers, &state.trust_list).await {
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
-    // TODO Phase 1: return real playlist manifests once storage DAG is integrated
-    axum::Json(Vec::<PlaylistManifest>::new()).into_response()
+
+    let db_guard = state.db.read().await;
+    let cas_guard = state.cas.read().await;
+    let (Some(db), Some(cas)) = (db_guard.as_ref(), cas_guard.as_ref()) else {
+        return axum::Json(Vec::<PlaylistManifest>::new()).into_response();
+    };
+
+    let playlists = match db.get_all_playlists().await {
+        Ok(p) => p,
+        Err(_) => return axum::Json(Vec::<PlaylistManifest>::new()).into_response(),
+    };
+
+    let mut manifests = Vec::with_capacity(playlists.len());
+    for playlist in playlists {
+        let branches = match db.get_branches(&playlist.id).await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        let branch_count = branches.len();
+
+        // Use the main branch for representative data, falling back to the first branch.
+        let primary = branches.iter().find(|b| b.name == "main").or_else(|| branches.first());
+        let Some(primary) = primary else { continue };
+        let Some(head_commit) = primary.head_commit.clone() else { continue };
+
+        let size_bytes = db
+            .playlist_total_bytes(cas, &playlist.id, &primary.name)
+            .await
+            .unwrap_or(0);
+
+        let tree = db.read_tree_for_commit(cas, &head_commit).await.ok();
+        let (track_count, artwork_hash) = match &tree {
+            Some(t) => (t.tracks.len(), t.meta.artwork_hash.clone()),
+            None => (0, None),
+        };
+
+        manifests.push(PlaylistManifest {
+            id: playlist.id,
+            name: playlist.name,
+            branch_count,
+            track_count,
+            size_bytes,
+            artwork_hash,
+            head_commit,
+        });
+    }
+
+    axum::Json(manifests).into_response()
 }
 
 async fn handle_hashes(
@@ -292,20 +353,59 @@ async fn handle_hashes(
     if let Err(status) = check_auth(&headers, &state.trust_list).await {
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
-    // TODO Phase 1: return real blob hash list from storage layer
-    axum::Json(Vec::<String>::new()).into_response()
+
+    let cas_guard = state.cas.read().await;
+    let hashes = match cas_guard.as_ref() {
+        Some(cas) => cas.list_all_hashes(),
+        None => vec![],
+    };
+
+    axum::Json(hashes).into_response()
 }
 
 async fn handle_blob(
     State(state): State<ServerState>,
     headers: HeaderMap,
-    Path(_hash): Path<String>,
+    Path(hash): Path<String>,
 ) -> impl IntoResponse {
     if let Err(status) = check_auth(&headers, &state.trust_list).await {
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
-    // TODO Phase 1: serve blob bytes from storage layer
-    (StatusCode::NOT_FOUND, axum::Json(serde_json::Value::Null)).into_response()
+
+    let cas_guard = state.cas.read().await;
+    let Some(cas) = cas_guard.as_ref() else {
+        return (StatusCode::NOT_FOUND, axum::Json(serde_json::Value::Null)).into_response();
+    };
+
+    match cas.read_blob(&hash).await {
+        Ok(bytes) => (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, axum::Json(serde_json::Value::Null)).into_response(),
+    }
+}
+
+async fn handle_commits(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((playlist_id, branch_name)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if let Err(status) = check_auth(&headers, &state.trust_list).await {
+        return (status, axum::Json(serde_json::Value::Null)).into_response();
+    }
+
+    let db_guard = state.db.read().await;
+    let Some(db) = db_guard.as_ref() else {
+        return axum::Json(Vec::<CommitRecord>::new()).into_response();
+    };
+
+    match db.export_commit_chain(&playlist_id, &branch_name).await {
+        Ok(commits) => axum::Json(commits).into_response(),
+        Err(_) => axum::Json(Vec::<CommitRecord>::new()).into_response(),
+    }
 }
 
 fn build_router(state: ServerState) -> Router {
@@ -314,7 +414,279 @@ fn build_router(state: ServerState) -> Router {
         .route("/manifest", get(handle_manifest))
         .route("/hashes", get(handle_hashes))
         .route("/blob/:hash", get(handle_blob))
+        .route("/commits/:playlist_id/:branch_name", get(handle_commits))
         .with_state(state)
+}
+
+// ── HTTP client ───────────────────────────────────────────────────────────────
+
+struct SyncClient {
+    identity: Arc<NodeIdentity>,
+    http: reqwest::Client,
+    base_url: String,
+}
+
+impl SyncClient {
+    fn new(identity: Arc<NodeIdentity>, addr: SocketAddr) -> Self {
+        Self {
+            identity,
+            http: reqwest::Client::new(),
+            base_url: format!("http://{addr}"),
+        }
+    }
+
+    fn auth_header(&self) -> String {
+        let ts = unix_now();
+        let sig = self.identity.sign(ts.to_string().as_bytes());
+        let pk = self.identity.public_key_b64();
+        let sig_b64 = B64.encode(&sig);
+        format!("Melomaniac {pk} {sig_b64}")
+    }
+
+    async fn get_manifest(&self) -> Result<Vec<PlaylistManifest>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/manifest", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<PlaylistManifest>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_hashes(&self) -> Result<Vec<String>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/hashes", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<String>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_blob(&self, hash: &str) -> Result<Vec<u8>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/blob/{hash}", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        if resp.status() == StatusCode::NOT_FOUND {
+            return Err(SyncError::BlobTransferFailed(format!("blob not found: {hash}")));
+        }
+
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_commits(
+        &self,
+        playlist_id: &str,
+        branch: &str,
+    ) -> Result<Vec<CommitRecord>, SyncError> {
+        let resp = self
+            .http
+            .get(format!("{}/commits/{playlist_id}/{branch}", self.base_url))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<CommitRecord>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+}
+
+// ── Tree diff ─────────────────────────────────────────────────────────────────
+
+/// Compare three tree versions and return conflicts plus an auto-merged tree if there are none.
+fn diff_trees(
+    base: &TreeBlob,
+    ours: &TreeBlob,
+    theirs: &TreeBlob,
+) -> (Vec<ConflictChunk>, Option<TreeBlob>) {
+    let mut conflicts = Vec::new();
+
+    // ── Metadata conflict ─────────────────────────────────────────────────────
+    if ours.meta.name != theirs.meta.name
+        && ours.meta.name != base.meta.name
+        && theirs.meta.name != base.meta.name
+    {
+        conflicts.push(ConflictChunk {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: ConflictKind::MetadataEdit,
+            ours: serde_json::json!(ours.meta.name),
+            theirs: serde_json::json!(theirs.meta.name),
+            context: serde_json::json!(base.meta.name),
+        });
+    }
+
+    // ── Track order conflict ──────────────────────────────────────────────────
+    let base_hashes: Vec<&str> = base.tracks.iter().map(|t| t.hash.as_str()).collect();
+    let our_hashes: Vec<&str> = ours.tracks.iter().map(|t| t.hash.as_str()).collect();
+    let their_hashes: Vec<&str> = theirs.tracks.iter().map(|t| t.hash.as_str()).collect();
+
+    let our_set: std::collections::HashSet<&str> = our_hashes.iter().copied().collect();
+    let their_set: std::collections::HashSet<&str> = their_hashes.iter().copied().collect();
+
+    if our_set == their_set && our_hashes != their_hashes && our_hashes != base_hashes && their_hashes != base_hashes {
+        conflicts.push(ConflictChunk {
+            id: uuid::Uuid::new_v4().to_string(),
+            kind: ConflictKind::TrackOrder,
+            ours: serde_json::json!(our_hashes),
+            theirs: serde_json::json!(their_hashes),
+            context: serde_json::json!(base_hashes),
+        });
+    }
+
+    // ── Track deletion vs modification ────────────────────────────────────────
+    for base_track in &base.tracks {
+        let in_ours = ours.tracks.iter().any(|t| t.hash == base_track.hash);
+        let in_theirs = theirs.tracks.iter().any(|t| t.hash == base_track.hash);
+
+        if !in_ours && in_theirs {
+            // We deleted it; they kept/modified it.
+            let their_version = theirs.tracks.iter().find(|t| t.hash == base_track.hash);
+            conflicts.push(ConflictChunk {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: ConflictKind::TrackDeletedVsModified,
+                ours: serde_json::Value::Null,
+                theirs: serde_json::to_value(their_version).unwrap_or(serde_json::Value::Null),
+                context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
+            });
+        } else if in_ours && !in_theirs {
+            // They deleted it; we kept/modified it.
+            let our_version = ours.tracks.iter().find(|t| t.hash == base_track.hash);
+            conflicts.push(ConflictChunk {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: ConflictKind::TrackDeletedVsModified,
+                ours: serde_json::to_value(our_version).unwrap_or(serde_json::Value::Null),
+                theirs: serde_json::Value::Null,
+                context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
+            });
+        }
+    }
+
+    // ── A/B loop point conflicts ──────────────────────────────────────────────
+    for our_track in &ours.tracks {
+        let Some(their_track) = theirs.tracks.iter().find(|t| t.hash == our_track.hash) else {
+            continue;
+        };
+        let base_track = base.tracks.iter().find(|t| t.hash == our_track.hash);
+
+        let ab_differs = our_track.ab_start_ms != their_track.ab_start_ms
+            || our_track.ab_end_ms != their_track.ab_end_ms;
+
+        let both_changed = if let Some(bt) = base_track {
+            (our_track.ab_start_ms != bt.ab_start_ms || our_track.ab_end_ms != bt.ab_end_ms)
+                && (their_track.ab_start_ms != bt.ab_start_ms
+                    || their_track.ab_end_ms != bt.ab_end_ms)
+        } else {
+            // Track is new (added on both sides with different ab points — treat as conflict)
+            ab_differs
+        };
+
+        if ab_differs && both_changed {
+            conflicts.push(ConflictChunk {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: ConflictKind::AbLoopPoints,
+                ours: serde_json::json!({
+                    "hash": our_track.hash,
+                    "ab_start_ms": our_track.ab_start_ms,
+                    "ab_end_ms": our_track.ab_end_ms,
+                }),
+                theirs: serde_json::json!({
+                    "hash": their_track.hash,
+                    "ab_start_ms": their_track.ab_start_ms,
+                    "ab_end_ms": their_track.ab_end_ms,
+                }),
+                context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
+            });
+        }
+    }
+
+    if !conflicts.is_empty() {
+        return (conflicts, None);
+    }
+
+    // ── Auto-merge ────────────────────────────────────────────────────────────
+    let base_set: std::collections::HashSet<&str> = base_hashes.iter().copied().collect();
+
+    // Keep all tracks from ours that are in base (respecting our ordering + deletions)
+    // then add new tracks from theirs (not in base) at the end.
+    let mut merged_tracks: Vec<melomaniac_storage::TrackEntry> = ours
+        .tracks
+        .iter()
+        .filter(|t| base_set.contains(t.hash.as_str()) || their_set.contains(t.hash.as_str()))
+        .cloned()
+        .collect();
+
+    // Apply theirs' deletions: remove tracks that theirs deleted (present in base, absent in theirs).
+    merged_tracks.retain(|t| {
+        !base_set.contains(t.hash.as_str()) || their_set.contains(t.hash.as_str())
+    });
+
+    // Append tracks added only by theirs (not in base, not already in merged).
+    let their_additions: Vec<melomaniac_storage::TrackEntry> = {
+        let merged_hashes: std::collections::HashSet<&str> =
+            merged_tracks.iter().map(|t| t.hash.as_str()).collect();
+        theirs
+            .tracks
+            .iter()
+            .filter(|t| {
+                !base_set.contains(t.hash.as_str())
+                    && !merged_hashes.contains(t.hash.as_str())
+            })
+            .cloned()
+            .collect()
+    };
+    merged_tracks.extend(their_additions);
+
+    // Merge metadata: if only one side changed a field, take that side's value.
+    let merged_name = if ours.meta.name != base.meta.name {
+        ours.meta.name.clone()
+    } else {
+        theirs.meta.name.clone()
+    };
+
+    let merged_desc = if ours.meta.description != base.meta.description {
+        ours.meta.description.clone()
+    } else {
+        theirs.meta.description.clone()
+    };
+
+    let merged_artwork = if ours.meta.artwork_hash != base.meta.artwork_hash {
+        ours.meta.artwork_hash.clone()
+    } else {
+        theirs.meta.artwork_hash.clone()
+    };
+
+    let merged_tree = TreeBlob {
+        v: 2,
+        meta: melomaniac_storage::PlaylistMeta {
+            name: merged_name,
+            description: merged_desc,
+            artwork_hash: merged_artwork,
+            extra: Default::default(),
+        },
+        tracks: merged_tracks,
+        includes: ours.includes.clone(),
+        extra: Default::default(),
+    };
+
+    (vec![], Some(merged_tree))
 }
 
 // ── Sync context bridge (sync → async) ───────────────────────────────────────
@@ -360,6 +732,8 @@ impl SyncBridge for DesktopSyncBridge {
         let server_state = ServerState {
             identity: Arc::clone(&self.identity),
             trust_list: Arc::clone(&self.trust_list),
+            db: Arc::clone(&self.db),
+            cas: Arc::clone(&self.cas),
         };
         let router = build_router(server_state);
         let bind_addr: SocketAddr =
@@ -492,13 +866,170 @@ impl SyncBridge for DesktopSyncBridge {
         })
     }
 
-    #[allow(dead_code)]
-    fn sync_playlist(&self, _playlist_id: &str) -> Result<SyncReport, SyncError> {
-        // TODO Phase 1: implement pull protocol
-        Ok(SyncReport {
-            blobs_fetched: 0,
-            bytes_fetched: 0,
-            conflicts: vec![],
+    fn sync_playlist(&self, playlist_id: &str) -> Result<SyncReport, SyncError> {
+        let identity = Arc::clone(&self.identity);
+        let peers = Arc::clone(&self.peers);
+        let db_lock = Arc::clone(&self.db);
+        let cas_lock = Arc::clone(&self.cas);
+        let playlist_id = playlist_id.to_string();
+
+        block(async move {
+            // 1. Pick best peer.
+            let peer = {
+                let map = peers.read().await;
+                map.values().next().cloned()
+            };
+            let peer = peer.ok_or(SyncError::NotPaired)?;
+
+            // 2. Build client.
+            let client = SyncClient::new(identity.clone(), peer.addr);
+
+            // 3. GET manifest from peer.
+            let manifest = client.get_manifest().await?;
+            let peer_entry = match manifest.into_iter().find(|m| m.id == playlist_id) {
+                Some(m) => m,
+                None => {
+                    return Ok(SyncReport {
+                        blobs_fetched: 0,
+                        bytes_fetched: 0,
+                        conflicts: vec![],
+                    });
+                }
+            };
+
+            let db_guard = db_lock.read().await;
+            let cas_guard = cas_lock.read().await;
+            let db = db_guard.as_ref().ok_or_else(|| {
+                SyncError::Io(std::io::Error::other("storage not initialised"))
+            })?;
+            let cas = cas_guard.as_ref().ok_or_else(|| {
+                SyncError::Io(std::io::Error::other("storage not initialised"))
+            })?;
+
+            // 4. Read local branch list and pick main branch.
+            let local_branches = db.get_branches(&playlist_id).await?;
+            let local_branch = local_branches
+                .iter()
+                .find(|b| b.name == "main")
+                .or_else(|| local_branches.first());
+            let local_branch_name = local_branch.map(|b| b.name.as_str()).unwrap_or("main");
+            let local_head = local_branch.and_then(|b| b.head_commit.clone());
+
+            // 5. Compare heads.
+            if local_head.as_deref() == Some(&peer_entry.head_commit) {
+                return Ok(SyncReport {
+                    blobs_fetched: 0,
+                    bytes_fetched: 0,
+                    conflicts: vec![],
+                });
+            }
+
+            // 6 & 7. Fetch hash sets.
+            let peer_hashes = client.get_hashes().await?;
+            let local_hashes: std::collections::HashSet<String> =
+                cas.list_all_hashes().into_iter().collect();
+            let peer_hash_set: std::collections::HashSet<String> =
+                peer_hashes.into_iter().collect();
+
+            // 8. Missing hashes = peer has them, we don't.
+            let missing: Vec<String> = peer_hash_set
+                .difference(&local_hashes)
+                .cloned()
+                .collect();
+
+            // 9. Pull all missing blobs.
+            let mut blobs_fetched: usize = 0;
+            let mut bytes_fetched: u64 = 0;
+            for hash in &missing {
+                let bytes = client.get_blob(hash).await?;
+                bytes_fetched += bytes.len() as u64;
+                cas.write_blob(&bytes).await?;
+                blobs_fetched += 1;
+            }
+
+            // 10. Import commit chain.
+            let peer_commits = client.get_commits(&playlist_id, "main").await?;
+            db.import_commit_chain(&peer_commits).await?;
+
+            // 11. DAG merge.
+            let peer_head = &peer_entry.head_commit;
+
+            let ancestor = match &local_head {
+                None => {
+                    // We have no local commits — fast-forward to peer head.
+                    db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
+                    return Ok(SyncReport {
+                        blobs_fetched,
+                        bytes_fetched,
+                        conflicts: vec![],
+                    });
+                }
+                Some(lh) => db.find_common_ancestor(lh, peer_head).await?,
+            };
+
+            let local_head = local_head.as_deref().expect("checked above");
+
+            // b. We're ahead — nothing to do.
+            if ancestor.as_deref() == Some(peer_head) {
+                return Ok(SyncReport {
+                    blobs_fetched,
+                    bytes_fetched,
+                    conflicts: vec![],
+                });
+            }
+
+            // c. Fast-forward: our head is the ancestor.
+            if ancestor.as_deref() == Some(local_head) {
+                db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
+                return Ok(SyncReport {
+                    blobs_fetched,
+                    bytes_fetched,
+                    conflicts: vec![],
+                });
+            }
+
+            // d. True merge.
+            let our_tree = db.read_tree_for_commit(cas, local_head).await?;
+            let their_tree = db.read_tree_for_commit(cas, peer_head).await?;
+
+            let base_tree = match &ancestor {
+                Some(ancestor_hash) => db.read_tree_for_commit(cas, ancestor_hash).await?,
+                None => TreeBlob::new(""),
+            };
+
+            let (conflicts, merged_tree) = diff_trees(&base_tree, &our_tree, &their_tree);
+
+            if !conflicts.is_empty() {
+                return Ok(SyncReport {
+                    blobs_fetched,
+                    bytes_fetched,
+                    conflicts,
+                });
+            }
+
+            // Auto-merge: write merged tree and create merge commit.
+            if let Some(tree) = merged_tree {
+                let json = tree.to_json().map_err(|e| {
+                    SyncError::Io(std::io::Error::other(e.to_string()))
+                })?;
+                let tree_hash = cas.write_blob(json.as_bytes()).await?;
+
+                let merge_commit = CommitRecord {
+                    hash: uuid::Uuid::new_v4().to_string(),
+                    tree_hash,
+                    timestamp: unix_now() as i64,
+                    device_id: identity.public_key_b64(),
+                    message: Some("auto-merge".into()),
+                };
+                db.insert_commit(&merge_commit, &[local_head, peer_head]).await?;
+                db.update_branch_head(&playlist_id, local_branch_name, &merge_commit.hash).await?;
+            }
+
+            Ok(SyncReport {
+                blobs_fetched,
+                bytes_fetched,
+                conflicts: vec![],
+            })
         })
     }
 

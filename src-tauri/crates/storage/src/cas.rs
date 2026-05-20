@@ -60,4 +60,28 @@ impl CasStore {
             .await
             .map_err(|_| StorageError::BlobNotFound(hash.to_string()))
     }
+
+    pub fn list_all_hashes(&self) -> Vec<String> {
+        let Ok(prefix_dirs) = std::fs::read_dir(&self.objects_dir) else {
+            return vec![];
+        };
+        let mut hashes = Vec::new();
+        for prefix_entry in prefix_dirs.flatten() {
+            let prefix_path = prefix_entry.path();
+            if !prefix_path.is_dir() { continue; }
+            let Ok(prefix_name) = prefix_entry.file_name().into_string() else { continue; };
+            if prefix_name.len() != 2 { continue; }
+            let Ok(suffix_entries) = std::fs::read_dir(&prefix_path) else { continue; };
+            for suffix_entry in suffix_entries.flatten() {
+                if !suffix_entry.path().is_file() { continue; }
+                let Ok(suffix_name) = suffix_entry.file_name().into_string() else { continue; };
+                if suffix_name.len() != 62 { continue; }
+                let hash = format!("{}{}", prefix_name, suffix_name);
+                if hash.chars().all(|c| c.is_ascii_hexdigit()) {
+                    hashes.push(hash);
+                }
+            }
+        }
+        hashes
+    }
 }

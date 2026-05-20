@@ -3,6 +3,12 @@ use std::net::SocketAddr;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod desktop;
 
+impl From<melomaniac_storage::StorageError> for SyncError {
+    fn from(e: melomaniac_storage::StorageError) -> Self {
+        SyncError::Io(std::io::Error::other(e.to_string()))
+    }
+}
+
 #[cfg(target_os = "ios")]
 pub mod ios;
 

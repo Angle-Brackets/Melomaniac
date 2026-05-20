@@ -87,3 +87,14 @@ pub async fn sync_with_peer(
 pub async fn sync_get_fingerprint(state: State<'_, SyncState>) -> Result<String, String> {
     Ok(state.bridge.fingerprint())
 }
+
+#[tauri::command]
+pub async fn resolve_merge_conflict(
+    playlist_id: String,
+    resolutions: serde_json::Value,
+    _bridge: tauri::State<'_, SyncState>,
+) -> Result<(), String> {
+    // TODO Phase 2: apply resolutions to storage and write merge commit
+    eprintln!("resolve_merge_conflict: playlist={playlist_id} resolutions={resolutions}");
+    Ok(())
+}

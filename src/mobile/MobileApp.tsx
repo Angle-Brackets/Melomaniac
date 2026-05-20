@@ -11,6 +11,7 @@ import { Library, PlaylistsList } from './components/Library';
 import { PlaylistDetail } from './components/PlaylistDetail';
 import { Discover } from './components/Discover';
 import { Settings } from './components/Settings';
+import { DiffViewer } from '../components/DiffViewer';
 import type { TabId } from './components/common';
 
 // TAB_ORDER defines the spatial layout used to derive slide direction.
@@ -289,6 +290,8 @@ export default function MobileApp() {
           <PlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
         </div>
       )}
+
+      <DiffViewer platform="mobile" />
     </div>
   );
 }

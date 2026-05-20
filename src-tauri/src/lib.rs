@@ -259,6 +259,7 @@ pub fn run() {
             sync::sync_playlist,
             sync::sync_with_peer,
             sync::sync_get_fingerprint,
+            sync::resolve_merge_conflict,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

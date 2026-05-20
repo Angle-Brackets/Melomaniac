@@ -541,6 +541,133 @@ impl Database {
         )
         .fetch_all(&self.pool).await?)
     }
+
+    // ── Sync ──────────────────────────────────────────────────────────────────
+
+    pub async fn export_commit_chain(
+        &self,
+        playlist_id: &str,
+        branch_name: &str,
+    ) -> Result<Vec<CommitRecord>, StorageError> {
+        let branch = self.get_branch(playlist_id, branch_name).await?;
+        let head = match branch.and_then(|b| b.head_commit) {
+            Some(h) => h,
+            None => return Ok(vec![]),
+        };
+
+        let mut chain = Vec::new();
+        let mut current = Some(head);
+
+        while let Some(hash) = current {
+            let commit = match self.get_commit(&hash).await? {
+                Some(c) => c,
+                None => break,
+            };
+            let parent: Option<(String,)> = sqlx::query_as(
+                "SELECT parent_hash FROM commit_parents WHERE commit_hash = ? LIMIT 1"
+            )
+            .bind(&commit.hash).fetch_optional(&self.pool).await?;
+            current = parent.map(|(h,)| h);
+            chain.push(commit);
+        }
+
+        Ok(chain)
+    }
+
+    pub async fn import_commit_chain(
+        &self,
+        commits: &[CommitRecord],
+    ) -> Result<(), StorageError> {
+        let mut tx = self.pool.begin().await?;
+
+        // Insert all commit rows first so parent FK references are satisfied.
+        for commit in commits {
+            sqlx::query(
+                "INSERT OR IGNORE INTO commits (hash, tree_hash, timestamp, device_id, message)
+                 VALUES (?, ?, ?, ?, ?)"
+            )
+            .bind(&commit.hash).bind(&commit.tree_hash)
+            .bind(commit.timestamp).bind(&commit.device_id).bind(&commit.message)
+            .execute(&mut *tx).await?;
+        }
+
+        // Link each commit to its parent (next element; chain is HEAD-first).
+        for (i, commit) in commits.iter().enumerate() {
+            if let Some(parent) = commits.get(i + 1) {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO commit_parents (commit_hash, parent_hash) VALUES (?, ?)"
+                )
+                .bind(&commit.hash).bind(&parent.hash)
+                .execute(&mut *tx).await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn find_common_ancestor(
+        &self,
+        hash_a: &str,
+        hash_b: &str,
+    ) -> Result<Option<String>, StorageError> {
+        let mut ancestors_a = std::collections::HashSet::new();
+        let mut current = Some(hash_a.to_string());
+        while let Some(hash) = current {
+            ancestors_a.insert(hash.clone());
+            let parent: Option<(String,)> = sqlx::query_as(
+                "SELECT parent_hash FROM commit_parents WHERE commit_hash = ? LIMIT 1"
+            )
+            .bind(&hash).fetch_optional(&self.pool).await?;
+            current = parent.map(|(h,)| h);
+        }
+
+        let mut current = Some(hash_b.to_string());
+        while let Some(hash) = current {
+            if ancestors_a.contains(&hash) {
+                return Ok(Some(hash));
+            }
+            let parent: Option<(String,)> = sqlx::query_as(
+                "SELECT parent_hash FROM commit_parents WHERE commit_hash = ? LIMIT 1"
+            )
+            .bind(&hash).fetch_optional(&self.pool).await?;
+            current = parent.map(|(h,)| h);
+        }
+
+        Ok(None)
+    }
+
+    pub async fn read_tree_for_commit(
+        &self,
+        cas: &crate::CasStore,
+        commit_hash: &str,
+    ) -> Result<crate::TreeBlob, StorageError> {
+        let commit = self.get_commit(commit_hash).await?
+            .ok_or_else(|| StorageError::BlobNotFound(commit_hash.to_string()))?;
+        let bytes = cas.read_blob(&commit.tree_hash).await?;
+        let tree = crate::TreeBlob::from_bytes(&bytes)?;
+        Ok(tree)
+    }
+
+    pub async fn playlist_total_bytes(
+        &self,
+        cas: &crate::CasStore,
+        playlist_id: &str,
+        branch_name: &str,
+    ) -> Result<u64, StorageError> {
+        let chain = self.export_commit_chain(playlist_id, branch_name).await?;
+        let head = match chain.into_iter().next() {
+            Some(c) => c,
+            None => return Ok(0),
+        };
+        let tree = self.read_tree_for_commit(cas, &head.hash).await?;
+        let total = tree.tracks.iter().map(|t| {
+            std::fs::metadata(cas.blob_path(&t.hash))
+                .map(|m| m.len())
+                .unwrap_or(0)
+        }).sum();
+        Ok(total)
+    }
 }
 
 // ── Artwork library entry ─────────────────────────────────────────────────────
@@ -659,5 +786,117 @@ mod tests {
         let hashes = db.get_active_tree_hashes().await.unwrap();
         assert!(hashes.contains(&"tree-b".to_string()));
         assert!(!hashes.contains(&"tree-a".to_string()));
+    }
+
+    // ── Sync tests ────────────────────────────────────────────────────────────
+
+    fn commit(hash: &str, tree_hash: &str) -> CommitRecord {
+        CommitRecord {
+            hash:      hash.to_string(),
+            tree_hash: tree_hash.to_string(),
+            timestamp: 0,
+            device_id: "test".to_string(),
+            message:   None,
+        }
+    }
+
+    #[tokio::test]
+    async fn export_commit_chain_empty_branch() {
+        let db = mem_db().await;
+        let playlist = db.create_playlist("p", None).await.unwrap();
+        // main branch has NULL head_commit after creation
+        let chain = db.export_commit_chain(&playlist.id, "main").await.unwrap();
+        assert!(chain.is_empty());
+    }
+
+    #[tokio::test]
+    async fn export_commit_chain_single_commit() {
+        let db = mem_db().await;
+        let playlist = db.create_playlist("p", None).await.unwrap();
+        let c = commit("aaa", "tree-aaa");
+        db.insert_commit(&c, &[]).await.unwrap();
+        db.update_branch_head(&playlist.id, "main", "aaa").await.unwrap();
+
+        let chain = db.export_commit_chain(&playlist.id, "main").await.unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].hash, "aaa");
+    }
+
+    #[tokio::test]
+    async fn export_commit_chain_linear() {
+        let db = mem_db().await;
+        let playlist = db.create_playlist("p", None).await.unwrap();
+
+        // A → B → C (C is HEAD)
+        let ca = commit("A", "tA");
+        let cb = commit("B", "tB");
+        let cc = commit("C", "tC");
+        db.insert_commit(&ca, &[]).await.unwrap();
+        db.insert_commit(&cb, &["A"]).await.unwrap();
+        db.insert_commit(&cc, &["B"]).await.unwrap();
+        db.update_branch_head(&playlist.id, "main", "C").await.unwrap();
+
+        let chain = db.export_commit_chain(&playlist.id, "main").await.unwrap();
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain[0].hash, "C");
+        assert_eq!(chain[1].hash, "B");
+        assert_eq!(chain[2].hash, "A");
+    }
+
+    #[tokio::test]
+    async fn import_is_idempotent() {
+        let db = mem_db().await;
+        let commits = vec![commit("X", "tX"), commit("Y", "tY")];
+        db.import_commit_chain(&commits).await.unwrap();
+        db.import_commit_chain(&commits).await.unwrap(); // second import must not error
+
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM commits WHERE hash IN ('X', 'Y')")
+            .fetch_one(&db.pool).await.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn find_common_ancestor_direct() {
+        let db = mem_db().await;
+        // Chain: A → B → C and A → B → D; ancestor of C and D should be B
+        let ca = commit("A", "tA");
+        let cb = commit("B", "tB");
+        let cc = commit("C", "tC");
+        let cd = commit("D", "tD");
+        db.insert_commit(&ca, &[]).await.unwrap();
+        db.insert_commit(&cb, &["A"]).await.unwrap();
+        db.insert_commit(&cc, &["B"]).await.unwrap();
+        db.insert_commit(&cd, &["B"]).await.unwrap();
+
+        let ancestor = db.find_common_ancestor("C", "D").await.unwrap();
+        assert_eq!(ancestor, Some("B".to_string()));
+    }
+
+    #[tokio::test]
+    async fn find_common_ancestor_none() {
+        let db = mem_db().await;
+        let c1 = commit("solo1", "t1");
+        let c2 = commit("solo2", "t2");
+        db.insert_commit(&c1, &[]).await.unwrap();
+        db.insert_commit(&c2, &[]).await.unwrap();
+
+        let ancestor = db.find_common_ancestor("solo1", "solo2").await.unwrap();
+        assert_eq!(ancestor, None);
+    }
+
+    #[tokio::test]
+    async fn cas_list_all_hashes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cas = crate::CasStore::new(dir.path().to_path_buf());
+
+        let h1 = cas.write_blob(b"blob one").await.expect("write 1");
+        let h2 = cas.write_blob(b"blob two").await.expect("write 2");
+        let h3 = cas.write_blob(b"blob three").await.expect("write 3");
+
+        let mut hashes = cas.list_all_hashes();
+        hashes.sort();
+        let mut expected = vec![h1, h2, h3];
+        expected.sort();
+        assert_eq!(hashes, expected);
     }
 }

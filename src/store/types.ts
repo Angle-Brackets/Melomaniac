@@ -66,3 +66,46 @@ export type CommitRecord = {
 
 // Shared across library and playlist slices — avoids repeating the same union in each slice type
 export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+// ── Sync types ────────────────────────────────────────────────────────────────
+
+export type ConflictKind =
+  | 'TrackOrder'
+  | 'TrackDeletedVsModified'
+  | 'MetadataEdit'
+  | 'BranchNameCollision'
+  | 'AbLoopPoints'
+
+export type ConflictChunk = {
+  id:      string
+  kind:    ConflictKind
+  ours:    unknown   // shape depends on kind — see design doc
+  theirs:  unknown
+  context: unknown
+}
+
+export type SyncReport = {
+  blobs_fetched: number
+  bytes_fetched:  number
+  conflicts:      ConflictChunk[]
+}
+
+export type KnownDevice = {
+  public_key_b64: string
+  display_name:   string
+  added_at:       number
+}
+
+export type PeerInfo = {
+  public_key_b64: string
+  display_name:   string
+  addr:           string
+  latency_ms:     number | null
+}
+
+export type ConflictResolution = {
+  conflict_id: string
+  choice: 'KeepOurs' | 'KeepTheirs' | 'KeepBoth' | 'Delete'
+  // For BranchNameCollision with rename:
+  rename_to?: string
+}
