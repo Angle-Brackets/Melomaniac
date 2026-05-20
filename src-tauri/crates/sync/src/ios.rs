@@ -206,11 +206,13 @@ pub struct IosSyncBridge {
 
 impl IosSyncBridge {
     pub fn new(identity: NodeIdentity, data_dir: PathBuf) -> Result<Self, SyncError> {
-        // Pre-populate sync_name.txt from UIDevice.current.name on first run so
-        // other devices see a friendly name like "Ankit's iPhone" instead of a
-        // hostname fallback.
+        // Write sync_name.txt from UIDevice.current.name if the file is missing
+        // or still contains the generic "Melomaniac" fallback from a previous run.
         let name_file = data_dir.join("sync_name.txt");
-        if !name_file.exists() {
+        let existing = std::fs::read_to_string(&name_file)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if existing.is_empty() || existing == "Melomaniac" {
             let mut buf = vec![0i8; 256];
             unsafe { melo_get_device_name(buf.as_mut_ptr(), buf.len()) };
             let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
