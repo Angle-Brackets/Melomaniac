@@ -43,10 +43,10 @@ private func withCString(_ s: String, _ body: (UnsafePointer<CChar>) -> Void) {
 /// Uses getEntry(for:) rather than apply(_:) because apply was unavailable
 /// in the iOS SDK version targeted by this build.
 private func extractPK(from txt: NWTXTRecord) -> String? {
-    guard let (value, state) = txt.getEntry(for: "pk"),
-          case .present = state,
-          !value.isEmpty else { return nil }
-    return value
+    guard let entry = txt.getEntry(for: "pk"),
+          let data = entry.value,
+          !data.isEmpty else { return nil }
+    return String(bytes: data, encoding: .utf8)
 }
 
 /// Parse the remote endpoint of a ready connection into an "ip:port" string.
