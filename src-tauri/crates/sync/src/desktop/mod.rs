@@ -682,6 +682,7 @@ impl SyncBridge for DesktopSyncBridge {
         tokio::spawn(async move {
             match tokio::net::TcpListener::bind(bind_addr).await {
                 Ok(listener) => {
+                    eprintln!("[sync] HTTP server listening on {bind_addr}");
                     if let Err(e) = axum::serve(listener, router).await {
                         eprintln!("[sync] HTTP server error: {e}");
                     }
