@@ -32,6 +32,7 @@ export default function MobileApp() {
 
   const loadLibrary   = useStore(s => s.loadLibrary);
   const loadPlaylists = useStore(s => s.loadPlaylists);
+  const syncToast     = useStore(s => s.syncToast);
 
   useEffect(() => {
     const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
@@ -294,6 +295,20 @@ export default function MobileApp() {
 
       <DiffViewer platform="mobile" />
       <PairingModal platform="mobile" />
+
+      {syncToast && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom) + 80px)',
+          left: '50%', transform: 'translateX(-50%)',
+          background: 'var(--bg-1)', border: '1px solid var(--border-2)',
+          borderRadius: 20, padding: '8px 18px',
+          fontSize: 13, color: 'var(--accent-light)',
+          fontFamily: 'system-ui, sans-serif', fontWeight: 500,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+          pointerEvents: 'none', zIndex: 200,
+          whiteSpace: 'nowrap',
+        }}>{syncToast}</div>
+      )}
     </div>
   );
 }

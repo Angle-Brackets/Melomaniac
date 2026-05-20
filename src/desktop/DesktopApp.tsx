@@ -118,6 +118,7 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 // ── Root App ──────────────────────────────────────────────────────────────────
 export default function DesktopApp() {
   const openPairingDisplay = useStore(s => s.openPairingDisplay);
+  const syncToast          = useStore(s => s.syncToast);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -1449,6 +1450,19 @@ export default function DesktopApp() {
         <PairingModal platform="desktop" />
 
         {/* Git operation toast */}
+        {syncToast && (
+          <div style={{
+            position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)',
+            background: 'var(--bg-1)', border: '1px solid var(--border-2)',
+            borderRadius: 6, padding: '7px 14px',
+            fontSize: 11, color: 'var(--accent-light)',
+            fontFamily: "'JetBrains Mono', monospace",
+            boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            pointerEvents: 'none', zIndex: 100,
+            animation: 'fadeIn 0.2s ease',
+          }}>{syncToast}</div>
+        )}
+
         {gitToast && (
           <div style={{
             position: 'absolute', bottom: loadedHash ? 92 : 30, left: '50%', transform: 'translateX(-50%)',

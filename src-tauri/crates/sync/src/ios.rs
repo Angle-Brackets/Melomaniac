@@ -20,6 +20,9 @@ unsafe extern "C" {
         on_lost: extern "C" fn(*const std::ffi::c_char),
     );
     fn melo_sync_stop_discovery();
+    fn melo_sync_register_service(pk: *const std::ffi::c_char, name: *const std::ffi::c_char, port: u16);
+    fn melo_sync_unregister_service();
+    fn melo_get_device_name(buf: *mut std::ffi::c_char, len: usize);
 }
 
 // ── Process-global peer registry ──────────────────────────────────────────────
@@ -203,6 +206,26 @@ pub struct IosSyncBridge {
 
 impl IosSyncBridge {
     pub fn new(identity: NodeIdentity, data_dir: PathBuf) -> Result<Self, SyncError> {
+        // Pre-populate sync_name.txt from UIDevice.current.name on first run so
+        // other devices see a friendly name like "Ankit's iPhone" instead of a
+        // hostname fallback.
+        let name_file = data_dir.join("sync_name.txt");
+        if !name_file.exists() {
+            let mut buf = vec![0i8; 256];
+            unsafe { melo_get_device_name(buf.as_mut_ptr(), buf.len()) };
+            let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            let device_name = buf[..end]
+                .iter()
+                .map(|&b| b as u8)
+                .collect::<Vec<_>>();
+            if let Ok(name) = std::str::from_utf8(&device_name) {
+                let name = name.trim();
+                if !name.is_empty() {
+                    std::fs::write(&name_file, name).ok();
+                }
+            }
+        }
+
         let trust_list_path = data_dir.join("known_devices.json");
         let trust_list = TrustList::load(&trust_list_path)?;
         let instance = Self {
@@ -230,7 +253,10 @@ impl IosSyncBridge {
 
 impl SyncBridge for IosSyncBridge {
     fn start_discovery(&self) -> Result<(), SyncError> {
+        let pk   = std::ffi::CString::new(self.identity.public_key_b64()).unwrap_or_default();
+        let name = std::ffi::CString::new(self.identity.display_name.clone()).unwrap_or_default();
         unsafe {
+            melo_sync_register_service(pk.as_ptr(), name.as_ptr(), 7700);
             melo_sync_start_discovery(on_peer_discovered, on_peer_lost);
         }
         Ok(())
@@ -238,6 +264,7 @@ impl SyncBridge for IosSyncBridge {
 
     fn stop_discovery(&self) -> Result<(), SyncError> {
         unsafe {
+            melo_sync_unregister_service();
             melo_sync_stop_discovery();
         }
         Ok(())

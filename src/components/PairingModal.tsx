@@ -56,11 +56,28 @@ function QrImage({ payload }: { payload: QrPayload }) {
 }
 
 function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
-  const qrPayload         = useStore(s => s.qrPayload)
-  const fingerprint       = useStore(s => s.fingerprint)
-  const knownDevices      = useStore(s => s.knownDevices)
+  const qrPayload          = useStore(s => s.qrPayload)
+  const fingerprint        = useStore(s => s.fingerprint)
+  const knownDevices       = useStore(s => s.knownDevices)
+  const livePeers          = useStore(s => s.livePeers)
   const openPairingDisplay = useStore(s => s.openPairingDisplay)
   const openPairingScanner = useStore(s => s.openPairingScanner)
+  const refreshLivePeers   = useStore(s => s.refreshLivePeers)
+  const syncWithPeer       = useStore(s => s.syncWithPeer)
+  const [syncing, setSyncing] = useState<string | null>(null)
+
+  // Poll for live peers while the modal is open
+  useEffect(() => {
+    refreshLivePeers()
+    const id = setInterval(refreshLivePeers, 4000)
+    return () => clearInterval(id)
+  }, [refreshLivePeers])
+
+  const handleSync = async (pk: string) => {
+    setSyncing(pk)
+    await syncWithPeer(pk)
+    setSyncing(null)
+  }
 
   const secondsLeft = useCountdown(
     qrPayload?.exp ?? null,
@@ -86,6 +103,38 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
         >
           Switch to scan mode
         </button>
+      )}
+
+      {livePeers.length > 0 && (
+        <div className="w-full mt-2">
+          <div className="text-xs font-mono uppercase tracking-widest opacity-40 mb-2">
+            Nearby
+          </div>
+          <div className="flex flex-col gap-1">
+            {livePeers.map(peer => (
+              <div
+                key={peer.public_key_b64}
+                className="flex items-center justify-between bg-base-200 rounded px-3 py-2"
+              >
+                <div>
+                  <div className="text-sm font-medium">{peer.display_name}</div>
+                  {peer.latency_ms != null && (
+                    <div className="text-xs font-mono opacity-40">{peer.latency_ms}ms</div>
+                  )}
+                </div>
+                <button
+                  className="btn btn-xs btn-primary"
+                  disabled={syncing === peer.public_key_b64}
+                  onClick={() => handleSync(peer.public_key_b64)}
+                >
+                  {syncing === peer.public_key_b64
+                    ? <span className="loading loading-spinner loading-xs" />
+                    : 'Sync'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {knownDevices.length > 0 && (

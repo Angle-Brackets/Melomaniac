@@ -69,11 +69,34 @@ impl NodeIdentity {
             }
         }
 
-        // Default: hostname, or "Melomaniac" as a fallback.
-        let default_name = std::env::var("HOSTNAME").unwrap_or_else(|_| "Melomaniac".into());
+        // Default: system hostname via gethostname(2), or env vars, or "Melomaniac".
+        let default_name = Self::system_hostname();
         std::fs::write(&path, &default_name)
             .map_err(|e| SyncError::IdentityError(format!("write sync_name.txt: {e}")))?;
         Ok(default_name)
+    }
+
+    fn system_hostname() -> String {
+        // gethostname(2) is available on all our platforms (macOS, Linux, iOS).
+        #[cfg(unix)]
+        {
+            let mut buf = [0u8; 256];
+            let ret = unsafe {
+                libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len())
+            };
+            if ret == 0 {
+                let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+                if let Ok(s) = std::str::from_utf8(&buf[..end]) {
+                    let s = s.trim().trim_end_matches(".local").to_string();
+                    if !s.is_empty() {
+                        return s;
+                    }
+                }
+            }
+        }
+        std::env::var("COMPUTERNAME")
+            .or_else(|_| std::env::var("HOSTNAME"))
+            .unwrap_or_else(|_| "Melomaniac".into())
     }
 
     /// Base64-encoded 32-byte Ed25519 verifying (public) key.

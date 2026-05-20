@@ -1,5 +1,8 @@
 import Foundation
 import Network
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // ── Callback type aliases ─────────────────────────────────────────────────────
 //
@@ -26,7 +29,8 @@ public typealias MeloNetworkChangeCallback = @convention(c) (Int32) -> Void
 
 // ── Module-level state ────────────────────────────────────────────────────────
 
-private var _browser: NWBrowser? = nil
+private var _browser:  NWBrowser?  = nil
+private var _listener: NWListener?  = nil
 private let _mdnsQueue = DispatchQueue(label: "melo.sync.mdns", qos: .utility)
 
 // Default port used when the service endpoint does not carry a port number.
@@ -220,6 +224,79 @@ private func handleRemoved(
 public func meloSyncStopDiscovery() {
     _browser?.cancel()
     _browser = nil
+}
+
+// ── melo_sync_register_service ────────────────────────────────────────────────
+
+/// Advertise this device as a Melomaniac node on the local network.
+/// Must be called after melo_sync_start_discovery so other devices can find us.
+@_cdecl("melo_sync_register_service")
+public func meloSyncRegisterService(
+    _ pk:   UnsafePointer<CChar>,
+    _ name: UnsafePointer<CChar>,
+    _ port: UInt16
+) {
+    _listener?.cancel()
+    _listener = nil
+
+    let pkStr   = String(cString: pk)
+    let nameStr = String(cString: name)
+    let txt     = NWTXTRecord(["v": "1", "pk": pkStr, "name": nameStr, "mode": "closed"])
+
+    let params = NWParameters.tcp
+    params.includePeerToPeer = true
+
+    guard let listener = try? NWListener(using: params, on: NWEndpoint.Port(rawValue: port) ?? 7700) else {
+        fputs("[MeloSync] NWListener init failed\n", stderr)
+        return
+    }
+    listener.service = NWListener.Service(
+        name: nameStr,
+        type: "_melomaniac._tcp",
+        domain: "local.",
+        txtRecord: txt
+    )
+    listener.stateUpdateHandler = { state in
+        switch state {
+        case .ready:   fputs("[MeloSync] NWListener ready on port \(port)\n", stderr)
+        case .failed(let e): fputs("[MeloSync] NWListener failed: \(e)\n", stderr)
+        default: break
+        }
+    }
+    // Reject all incoming connections — we only need the advertisement.
+    listener.newConnectionHandler = { conn in conn.cancel() }
+    listener.start(queue: _mdnsQueue)
+    _listener = listener
+}
+
+/// Stop advertising this device on the local network.
+@_cdecl("melo_sync_unregister_service")
+public func meloSyncUnregisterService() {
+    _listener?.cancel()
+    _listener = nil
+}
+
+// ── melo_get_device_name ──────────────────────────────────────────────────────
+
+/// Copy the human-readable device name into `buf` (max `len` bytes, null-terminated).
+/// On iOS this is UIDevice.current.name ("Ankit's iPhone"); on other Apple
+/// platforms it falls back to the Bonjour hostname.
+@_cdecl("melo_get_device_name")
+public func meloGetDeviceName(
+    _ buf: UnsafeMutablePointer<CChar>,
+    _ len: Int
+) {
+    #if canImport(UIKit)
+    let name = UIDevice.current.name
+    #else
+    let name = Host.current().localizedName ?? "Melomaniac"
+    #endif
+    let utf8 = Array(name.utf8CString)
+    let count = min(utf8.count, len)
+    for i in 0..<count {
+        buf[i] = utf8[i]
+    }
+    buf[count - 1] = 0  // ensure null termination
 }
 
 // ── melo_sync_register_network_change ────────────────────────────────────────
