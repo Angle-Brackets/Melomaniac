@@ -148,6 +148,8 @@ pub fn run() {
                         use melomaniac_sync::desktop::DesktopSyncBridge;
                         let b = DesktopSyncBridge::new(identity, sync_data_dir)
                             .expect("failed to create desktop sync bridge");
+                        let ss = app.state::<crate::storage::StorageState>();
+                        b.set_storage(Arc::clone(&ss.db), Arc::clone(&ss.cas));
                         b.start_discovery().ok();
                         Arc::new(b) as Arc<dyn SyncBridge>
                     }

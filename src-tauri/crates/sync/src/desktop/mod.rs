@@ -1,6 +1,6 @@
 use crate::{
-    ConflictChunk, ConflictKind, KnownDevice, NodeIdentity, PeerInfo, PlaylistManifest,
-    QrPayload, SyncBridge, SyncError, SyncReport,
+    ConflictChunk, ConflictKind, KnownDevice, NodeIdentity, PeerInfo, PendingMerge,
+    PlaylistManifest, QrPayload, SyncBridge, SyncError, SyncReport,
     identity::{TrustList, unix_now},
 };
 use axum::{
@@ -61,6 +61,7 @@ pub struct DesktopSyncBridge {
     mdns: Arc<std::sync::Mutex<Option<ServiceDaemon>>>,
     db: Arc<RwLock<Option<Arc<Database>>>>,
     cas: Arc<RwLock<Option<Arc<CasStore>>>>,
+    pending_merges: Arc<tokio::sync::Mutex<HashMap<String, PendingMerge>>>,
 }
 
 impl DesktopSyncBridge {
@@ -77,6 +78,7 @@ impl DesktopSyncBridge {
             mdns: Arc::new(std::sync::Mutex::new(None)),
             db: Arc::new(RwLock::new(None)),
             cas: Arc::new(RwLock::new(None)),
+            pending_merges: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -1000,6 +1002,14 @@ impl SyncBridge for DesktopSyncBridge {
             let (conflicts, merged_tree) = diff_trees(&base_tree, &our_tree, &their_tree);
 
             if !conflicts.is_empty() {
+                let pending = PendingMerge {
+                    local_head:    local_head.to_string(),
+                    peer_head:     peer_head.to_string(),
+                    ancestor_hash: ancestor.clone(),
+                    branch_name:   local_branch_name.to_string(),
+                    conflicts:     conflicts.clone(),
+                };
+                self.pending_merges.blocking_lock().insert(playlist_id.to_string(), pending);
                 return Ok(SyncReport {
                     blobs_fetched,
                     bytes_fetched,
@@ -1045,5 +1055,17 @@ impl SyncBridge for DesktopSyncBridge {
 
     fn fingerprint(&self) -> String {
         self.identity.fingerprint()
+    }
+
+    fn set_pending_merge(&self, playlist_id: &str, merge: PendingMerge) {
+        self.pending_merges.blocking_lock().insert(playlist_id.to_string(), merge);
+    }
+
+    fn pending_merge(&self, playlist_id: &str) -> Option<PendingMerge> {
+        self.pending_merges.blocking_lock().get(playlist_id).cloned()
+    }
+
+    fn clear_pending_merge(&self, playlist_id: &str) {
+        self.pending_merges.blocking_lock().remove(playlist_id);
     }
 }

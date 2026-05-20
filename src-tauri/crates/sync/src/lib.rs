@@ -82,6 +82,19 @@ pub struct SyncReport {
     pub conflicts: Vec<ConflictChunk>,
 }
 
+// ── PendingMerge ──────────────────────────────────────────────────────────────
+
+/// Merge state stored in memory when sync_playlist returns conflicts.
+/// Kept until the user resolves every ConflictChunk and calls resolve_merge_conflict.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PendingMerge {
+    pub local_head:    String,
+    pub peer_head:     String,
+    pub ancestor_hash: Option<String>,
+    pub branch_name:   String,
+    pub conflicts:     Vec<ConflictChunk>,
+}
+
 // ── ConflictChunk ─────────────────────────────────────────────────────────────
 
 /// A single conflict that could not be resolved automatically during a merge.
@@ -232,6 +245,17 @@ pub trait SyncBridge: Send + Sync {
 
     /// Returns this node's display fingerprint (e.g. `"AB12·CD34·EF56"`).
     fn fingerprint(&self) -> String;
+
+    // ── Pending merge state ───────────────────────────────────────────────────
+
+    /// Store merge state for a playlist that could not be auto-merged.
+    fn set_pending_merge(&self, playlist_id: &str, merge: PendingMerge);
+
+    /// Retrieve stored merge state, if any.
+    fn pending_merge(&self, playlist_id: &str) -> Option<PendingMerge>;
+
+    /// Clear stored merge state after the user resolves or dismisses it.
+    fn clear_pending_merge(&self, playlist_id: &str);
 }
 
 // ── Serialization tests ───────────────────────────────────────────────────────

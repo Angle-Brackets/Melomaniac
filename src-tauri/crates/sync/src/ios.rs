@@ -1,5 +1,5 @@
 use crate::identity::{TrustList, unix_now};
-use crate::{KnownDevice, NodeIdentity, PeerInfo, QrPayload, SyncBridge, SyncError, SyncReport};
+use crate::{KnownDevice, NodeIdentity, PeerInfo, PendingMerge, QrPayload, SyncBridge, SyncError, SyncReport};
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use rand::RngCore;
 use rand::rngs::OsRng;
@@ -155,4 +155,8 @@ impl SyncBridge for IosSyncBridge {
     fn fingerprint(&self) -> String {
         self.identity.fingerprint()
     }
+
+    fn set_pending_merge(&self, _playlist_id: &str, _merge: PendingMerge) {}
+    fn pending_merge(&self, _playlist_id: &str) -> Option<PendingMerge> { None }
+    fn clear_pending_merge(&self, _playlist_id: &str) {}
 }
