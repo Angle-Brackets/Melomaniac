@@ -11,12 +11,13 @@ interface SettingsModalProps {
   updateSetting: (key: keyof AppSettings | Partial<AppSettings>, value?: unknown) => void;
   onClose: () => void;
   onReset: () => void;
+  onPairDevice?: () => void;
   closing?: boolean;
 }
 
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
 
-export default function SettingsModal({ settings, updateSetting, onClose, onReset, closing }: SettingsModalProps) {
+export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing }: SettingsModalProps) {
   return (
     // DaisyUI modal — backdrop click closes
     <dialog className={`modal modal-open ${closing ? 'mm-backdrop-exit' : 'mm-backdrop'}`} style={{ zIndex: 60 }}>
@@ -175,6 +176,22 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               />
             </div>
           </section>
+
+          {/* ── Sync ── */}
+          {onPairDevice && (
+            <section>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Sync</p>
+              <div className="flex items-center justify-between py-2 border-b border-mm-b0">
+                <div>
+                  <span className="text-xs text-mm-t1">Device pairing</span>
+                  <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Sync playlists with other devices over LAN</p>
+                </div>
+                <button onClick={onPairDevice} className="btn btn-xs btn-primary">
+                  Pair a device
+                </button>
+              </div>
+            </section>
+          )}
 
           {/* ── About ── */}
           <section className="flex items-center justify-between">

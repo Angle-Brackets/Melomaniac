@@ -1282,13 +1282,6 @@ export default function DesktopApp() {
                 RAM: {appStats.memory_mb.toFixed(1)} MB | CPU: {appStats.cpu_usage.toFixed(1)}%
               </span>
             )}
-            <button
-              onClick={() => openPairingDisplay().catch(console.error)}
-              className="ml-2 px-1.5 py-0.5 rounded text-mm-t2 hover:text-mm-accent hover:bg-mm-3 transition-colors"
-              title="Pair a device"
-            >
-              Pair device
-            </button>
           </span>
           <span className="font-mono text-[9px] text-mm-t2">
             {(() => {
@@ -1441,6 +1434,7 @@ export default function DesktopApp() {
             updateSetting={handleUpdateSetting}
             onClose={() => setShowSettings(false)}
             onReset={() => { updateSetting(SETTING_DEFAULTS); setShowSettings(false); }}
+            onPairDevice={() => { setShowSettings(false); openPairingDisplay().catch(console.error); }}
           />
         )}
 

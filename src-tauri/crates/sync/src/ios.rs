@@ -22,14 +22,87 @@ extern "C" {
     fn melo_sync_stop_discovery();
 }
 
-// Stub callbacks — the real peer-update loop will be wired by a subsequent agent.
+// ── Process-global peer registry ──────────────────────────────────────────────
+//
+// `extern "C" fn` pointers cannot capture state, so peer list and trust list
+// are shared via process-globals that `IosSyncBridge::new` populates once.
+
+static PEER_LIST: std::sync::OnceLock<Arc<RwLock<Vec<PeerInfo>>>> = std::sync::OnceLock::new();
+static TRUST_LIST: std::sync::OnceLock<Arc<RwLock<TrustList>>> = std::sync::OnceLock::new();
+
 extern "C" fn on_peer_discovered(
-    _public_key: *const std::ffi::c_char,
-    _addr: *const std::ffi::c_char,
+    pk_ptr: *const std::ffi::c_char,
+    addr_ptr: *const std::ffi::c_char,
 ) {
+    // SAFETY: Swift guarantees these are valid null-terminated UTF-8 strings
+    // for the duration of the callback.
+    let (pk, addr_str) = unsafe {
+        let pk = std::ffi::CStr::from_ptr(pk_ptr)
+            .to_str()
+            .unwrap_or("")
+            .to_string();
+        let addr = std::ffi::CStr::from_ptr(addr_ptr)
+            .to_str()
+            .unwrap_or("")
+            .to_string();
+        (pk, addr)
+    };
+
+    if pk.is_empty() || addr_str.is_empty() {
+        return;
+    }
+
+    // Only add trusted peers.
+    let Some(trust) = TRUST_LIST.get() else { return };
+    let Ok(tl) = trust.read() else { return };
+    if !tl.is_known(&pk) {
+        return;
+    }
+    drop(tl);
+
+    let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() else { return };
+
+    // Display name: look up from trust list, fall back to truncated pk.
+    let display_name = {
+        let Ok(tl) = trust.read() else { return };
+        tl.devices()
+            .into_iter()
+            .find(|d| d.public_key_b64 == pk)
+            .map(|d| d.display_name)
+            .unwrap_or_else(|| pk[..8.min(pk.len())].to_string())
+    };
+
+    let Some(peers) = PEER_LIST.get() else { return };
+    let Ok(mut list) = peers.write() else { return };
+    // Update in place or append.
+    if let Some(existing) = list.iter_mut().find(|p| p.public_key_b64 == pk) {
+        existing.addr = addr;
+    } else {
+        list.push(PeerInfo {
+            public_key_b64: pk,
+            display_name,
+            addr,
+            latency_ms: None,
+        });
+    }
 }
 
-extern "C" fn on_peer_lost(_public_key: *const std::ffi::c_char) {}
+extern "C" fn on_peer_lost(pk_ptr: *const std::ffi::c_char) {
+    // SAFETY: Swift guarantees this is a valid null-terminated UTF-8 string
+    // for the duration of the callback.
+    let pk = unsafe {
+        std::ffi::CStr::from_ptr(pk_ptr)
+            .to_str()
+            .unwrap_or("")
+            .to_string()
+    };
+    if pk.is_empty() {
+        return;
+    }
+    let Some(peers) = PEER_LIST.get() else { return };
+    let Ok(mut list) = peers.write() else { return };
+    list.retain(|p| p.public_key_b64 != pk);
+}
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
@@ -132,7 +205,7 @@ impl IosSyncBridge {
     pub fn new(identity: NodeIdentity, data_dir: PathBuf) -> Result<Self, SyncError> {
         let trust_list_path = data_dir.join("known_devices.json");
         let trust_list = TrustList::load(&trust_list_path)?;
-        Ok(Self {
+        let instance = Self {
             identity: Arc::new(identity),
             peers: Arc::new(RwLock::new(Vec::new())),
             discovery_open: Arc::new(AtomicBool::new(false)),
@@ -140,7 +213,13 @@ impl IosSyncBridge {
             trust_list: Arc::new(RwLock::new(trust_list)),
             db: Arc::new(OnceLock::new()),
             cas: Arc::new(OnceLock::new()),
-        })
+        };
+        // Populate process-globals so the bare `extern "C"` callbacks can reach
+        // the peer list and trust list. `.set()` is a no-op if already set,
+        // which is fine — there is only one bridge instance per process.
+        PEER_LIST.set(Arc::clone(&instance.peers)).ok();
+        TRUST_LIST.set(Arc::clone(&instance.trust_list)).ok();
+        Ok(instance)
     }
 
     pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {

@@ -6,5 +6,11 @@
     <array>
         <string>audio</string>
     </array>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Melomaniac uses your local network to sync playlists with other devices running Melomaniac nearby.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_melomaniac._tcp</string>
+    </array>
 </dict>
 </plist>
