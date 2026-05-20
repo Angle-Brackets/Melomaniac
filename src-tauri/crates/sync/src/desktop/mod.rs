@@ -516,7 +516,11 @@ fn block<F, T>(fut: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    tokio::runtime::Handle::current().block_on(fut)
+    // block_in_place hands this thread to blocking work and moves async tasks
+    // elsewhere, so block_on doesn't panic when called from a Tokio worker.
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(fut)
+    })
 }
 
 // ── SyncBridge impl ───────────────────────────────────────────────────────────
