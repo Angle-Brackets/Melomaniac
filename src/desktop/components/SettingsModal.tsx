@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppSettings } from '../types';
 import { NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
+import { useStore } from '../../store';
 
 type NamedThemeName = Exclude<ThemeName, 'custom'>;
 const NAMED_THEME_ENTRIES = Object.entries(NAMED_THEMES) as [NamedThemeName, typeof NAMED_THEMES[NamedThemeName]][];
@@ -18,6 +20,25 @@ interface SettingsModalProps {
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
 
 export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing }: SettingsModalProps) {
+  const knownDevices      = useStore(s => s.knownDevices);
+  const livePeers         = useStore(s => s.livePeers);
+  const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
+  const refreshLivePeers  = useStore(s => s.refreshLivePeers);
+  const syncWithPeer      = useStore(s => s.syncWithPeer);
+  const [syncing, setSyncing] = useState<string | null>(null);
+
+  useEffect(() => {
+    refreshKnownDevices();
+    refreshLivePeers();
+    const id = setInterval(refreshLivePeers, 4000);
+    return () => clearInterval(id);
+  }, [refreshKnownDevices, refreshLivePeers]);
+
+  const handleSync = async (pk: string) => {
+    setSyncing(pk);
+    await syncWithPeer(pk);
+    setSyncing(null);
+  };
   return (
     // DaisyUI modal — backdrop click closes
     <dialog className={`modal modal-open ${closing ? 'mm-backdrop-exit' : 'mm-backdrop'}`} style={{ zIndex: 60 }}>
@@ -178,20 +199,73 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
           </section>
 
           {/* ── Sync ── */}
-          {onPairDevice && (
-            <section>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Sync</p>
-              <div className="flex items-center justify-between py-2 border-b border-mm-b0">
-                <div>
-                  <span className="text-xs text-mm-t1">Device pairing</span>
-                  <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Sync playlists with other devices over LAN</p>
+          <section>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Sync</p>
+
+            {/* Nearby — live trusted peers */}
+            {livePeers.length > 0 && (
+              <div className="mb-2">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-mm-t2 mb-1.5 opacity-60">Nearby</p>
+                <div className="flex flex-col gap-1">
+                  {livePeers.map(peer => (
+                    <div key={peer.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2">
+                      <div>
+                        <span className="text-xs text-mm-t0">{peer.display_name}</span>
+                        {peer.latency_ms != null && (
+                          <span className="font-mono text-[9px] text-mm-t2 ml-2">{peer.latency_ms}ms</span>
+                        )}
+                      </div>
+                      <button
+                        className="btn btn-xs btn-primary"
+                        disabled={syncing === peer.public_key_b64}
+                        onClick={() => handleSync(peer.public_key_b64)}
+                      >
+                        {syncing === peer.public_key_b64
+                          ? <span className="loading loading-spinner loading-xs" />
+                          : 'Sync'}
+                      </button>
+                    </div>
+                  ))}
                 </div>
+              </div>
+            )}
+
+            {/* Paired devices list */}
+            {knownDevices.length > 0 && (
+              <div className="mb-2">
+                <p className="text-[9px] font-mono uppercase tracking-widest text-mm-t2 mb-1.5 opacity-60">Paired devices</p>
+                <div className="flex flex-col gap-1">
+                  {knownDevices.map(device => {
+                    const isOnline = livePeers.some(p => p.public_key_b64 === device.public_key_b64);
+                    return (
+                      <div key={device.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-400' : 'bg-mm-t2 opacity-30'}`} />
+                          <span className="text-xs text-mm-t0">{device.display_name}</span>
+                        </div>
+                        <span className="font-mono text-[9px] text-mm-t2">
+                          {new Date(device.added_at * 1000).toLocaleDateString()}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Pair button */}
+            <div className="flex items-center justify-between py-2 border-t border-mm-b0 mt-1">
+              <div>
+                <span className="text-xs text-mm-t1">Add a device</span>
+                <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Sync playlists over LAN via QR pairing</p>
+              </div>
+              {onPairDevice && (
                 <button onClick={onPairDevice} className="btn btn-xs btn-primary">
                   Pair a device
                 </button>
-              </div>
-            </section>
-          )}
+              )}
+            </div>
+          </section>
 
           {/* ── About ── */}
           <section className="flex items-center justify-between">
