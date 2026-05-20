@@ -239,13 +239,55 @@ fn local_hostname() -> String {
 }
 
 /// Probe the OS routing table to find the preferred local non-loopback address.
+/// Falls back to enumerating network interfaces on Unix if routing probe fails.
 fn local_ip() -> Option<std::net::IpAddr> {
     use std::net::{IpAddr, Ipv4Addr, UdpSocket};
-    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect("8.8.8.8:80").ok()?;
-    match socket.local_addr().ok()?.ip() {
-        ip @ IpAddr::V4(v4) if v4 != Ipv4Addr::LOCALHOST => Some(ip),
-        _ => None,
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("8.8.8.8:80").is_ok() {
+            if let Some(ip @ IpAddr::V4(v4)) = socket.local_addr().ok().map(|a| a.ip()) {
+                if v4 != Ipv4Addr::LOCALHOST {
+                    eprintln!("[sync] local_ip (routing): {ip}");
+                    return Some(ip);
+                }
+            }
+        }
+    }
+    #[cfg(unix)]
+    if let Some(ip) = local_ip_from_interfaces() {
+        eprintln!("[sync] local_ip (getifaddrs fallback): {ip}");
+        return Some(ip);
+    }
+    eprintln!("[sync] local_ip: could not determine non-loopback IPv4 address");
+    None
+}
+
+/// Enumerate network interfaces and return the first non-loopback, non-link-local IPv4 address.
+#[cfg(unix)]
+fn local_ip_from_interfaces() -> Option<std::net::IpAddr> {
+    use std::net::{IpAddr, Ipv4Addr};
+    unsafe {
+        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifap) != 0 {
+            return None;
+        }
+        let mut result = None;
+        let mut ifa = ifap;
+        while !ifa.is_null() {
+            let addr_ptr = (*ifa).ifa_addr;
+            if !addr_ptr.is_null()
+                && (*addr_ptr).sa_family as libc::c_int == libc::AF_INET
+            {
+                let sin = &*(addr_ptr as *const libc::sockaddr_in);
+                let ip = Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
+                if !ip.is_loopback() && !ip.is_link_local() {
+                    result = Some(IpAddr::V4(ip));
+                    break;
+                }
+            }
+            ifa = (*ifa).ifa_next;
+        }
+        libc::freeifaddrs(ifap);
+        result
     }
 }
 
@@ -436,11 +478,22 @@ async fn handle_pair(
     State(state): State<ServerState>,
     Json(req): Json<PairRequest>,
 ) -> StatusCode {
+    let now = unix_now();
+    eprintln!("[sync] /pair: received from '{}' ({}…)", req.display_name, &req.public_key_b64[..8.min(req.public_key_b64.len())]);
     let valid = {
         let guard = state.pending_qr_token.lock().unwrap();
-        guard.as_ref().map_or(false, |(tok, exp)| {
-            tok == &req.token && *exp > unix_now()
-        })
+        match guard.as_ref() {
+            None => {
+                eprintln!("[sync] /pair: no pending token — QR was never generated or already used");
+                false
+            }
+            Some((tok, exp)) => {
+                let token_match = tok == &req.token;
+                let not_expired = *exp > now;
+                eprintln!("[sync] /pair: token_match={token_match} not_expired={not_expired} (exp={exp} now={now})");
+                token_match && not_expired
+            }
+        }
     };
     if !valid {
         eprintln!("[sync] /pair: rejected — invalid or expired token");

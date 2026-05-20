@@ -106,12 +106,18 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
       </div>
 
       {platform === 'desktop' && qrPayload && (
-        <button
-          className="btn btn-xs btn-outline w-full"
-          onClick={copyJson}
-        >
-          {copied ? '✓ Copied' : 'Copy pairing code'}
-        </button>
+        <>
+          <button
+            className="btn btn-xs btn-outline w-full"
+            onClick={copyJson}
+          >
+            {copied ? '✓ Copied' : 'Copy pairing code'}
+          </button>
+          {qrPayload.addr
+            ? <div className="text-xs font-mono opacity-40">Reachable at {qrPayload.addr}</div>
+            : <div className="text-xs text-warning opacity-80">Could not detect local IP — back-channel unavailable</div>
+          }
+        </>
       )}
 
       {platform === 'mobile' && (
