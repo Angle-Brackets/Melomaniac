@@ -327,25 +327,29 @@ impl SyncBridge for IosSyncBridge {
         }
 
         eprintln!("[sync] iOS: paired with '{}' ({}…)", payload.display_name, &payload.public_key_b64[..8.min(payload.public_key_b64.len())]);
+        eprintln!("[sync] iOS: QR payload addr = {:?}", payload.addr);
 
         // POST our own identity back to the desktop so it can add us to its
         // trust list (the QR payload only flows one way; /pair closes the loop).
+        // Use a plain OS thread + blocking reqwest to avoid any Tokio runtime
+        // dependency and bypass iOS ATS (NSAllowsLocalNetworking in Info.plist
+        // permits plain HTTP to LAN addresses).
         if let Some(addr) = payload.addr {
             let own_pk   = self.identity.public_key_b64();
             let own_name = self.identity.display_name.clone();
             let token    = payload.token;
-            tokio::spawn(async move {
+            std::thread::spawn(move || {
                 let url = format!("http://{addr}/pair");
                 eprintln!("[sync] iOS: POSTing identity to {url}");
-                match reqwest::Client::new()
+                let body = serde_json::json!({
+                    "public_key_b64": own_pk,
+                    "display_name":   own_name,
+                    "token":          token,
+                });
+                match reqwest::blocking::Client::new()
                     .post(&url)
-                    .json(&serde_json::json!({
-                        "public_key_b64": own_pk,
-                        "display_name":   own_name,
-                        "token":          token,
-                    }))
+                    .json(&body)
                     .send()
-                    .await
                 {
                     Ok(r)  => eprintln!("[sync] iOS: /pair response {}", r.status()),
                     Err(e) => eprintln!("[sync] iOS: /pair failed: {e}"),
