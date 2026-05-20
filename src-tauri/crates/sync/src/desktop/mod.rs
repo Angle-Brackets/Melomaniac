@@ -120,6 +120,7 @@ impl DesktopSyncBridge {
             .register(service)
             .map_err(|e| SyncError::IdentityError(format!("mDNS register: {e}")))?;
 
+        eprintln!("[sync] mDNS registered: {} on port {port} (mode={mode})", identity.display_name);
         Ok(())
     }
 
@@ -150,32 +151,42 @@ impl DesktopSyncBridge {
 
                         let pk = match props.get("pk").map(|p| p.val_str().to_string()) {
                             Some(p) => p,
-                            None => continue,
+                            None => {
+                                eprintln!("[sync] resolved service missing pk TXT key — skipping");
+                                continue;
+                            }
                         };
 
                         if pk == own_pk {
+                            eprintln!("[sync] discovered own service — skipping");
                             continue;
                         }
 
                         let name = props
                             .get("name")
                             .map(|p| p.val_str().to_string())
-                            .unwrap_or_default();
+                            .unwrap_or_else(|| "<unnamed>".into());
                         let mode = props
                             .get("mode")
                             .map(|p| p.val_str().to_string())
                             .unwrap_or_default();
 
                         let port = info.get_port();
-                        let addr: Option<SocketAddr> = info
-                            .get_addresses()
+                        let addrs: Vec<_> = info.get_addresses().iter().cloned().collect();
+                        eprintln!("[sync] resolved peer: name={name} pk={}… mode={mode} port={port} addrs={addrs:?}", &pk[..8.min(pk.len())]);
+
+                        let addr: Option<SocketAddr> = addrs
                             .iter()
                             .find_map(|ip| format!("{ip}:{port}").parse().ok());
 
-                        let Some(addr) = addr else { continue };
+                        let Some(addr) = addr else {
+                            eprintln!("[sync] no usable address for {name} — skipping");
+                            continue;
+                        };
 
                         let tl = trust_list.read().await;
                         if tl.is_known(&pk) {
+                            eprintln!("[sync] trusted peer online: {name} at {addr}");
                             drop(tl);
                             peers.write().await.insert(
                                 pk.clone(),
@@ -187,21 +198,22 @@ impl DesktopSyncBridge {
                                 },
                             );
                         } else {
+                            eprintln!("[sync] unknown peer: {name} pk={}… mode={mode} — not in trust list", &pk[..8.min(pk.len())]);
                             drop(tl);
-                            // Unknown peer. If their discovery window is open, log for
-                            // potential pairing. Tauri handle is not available at this layer.
-                            // TODO: emit Tauri event `sync://pairing-request` with { pk, name, addr }
                             if mode == "open" {
-                                eprintln!(
-                                    "[sync] pairing-request from {name} ({pk}) at {addr}"
-                                );
+                                eprintln!("[sync] pairing-request from {name} at {addr}");
                             }
                         }
                     }
 
                     ServiceEvent::ServiceRemoved(_ty, fullname) => {
+                        eprintln!("[sync] service removed: {fullname}");
                         let mut map = peers.write().await;
+                        let before = map.len();
                         map.retain(|_, v| !fullname.contains(&v.public_key_b64[..8]));
+                        if map.len() < before {
+                            eprintln!("[sync] peer removed, {} remaining", map.len());
+                        }
                     }
 
                     _ => {}

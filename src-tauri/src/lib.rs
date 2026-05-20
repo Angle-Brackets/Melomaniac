@@ -139,6 +139,9 @@ pub fn run() {
                     .app_data_dir()
                     .expect("failed to resolve app data dir");
 
+                #[cfg(debug_assertions)]
+                melomaniac_sync::purge_dev_sync_state(&sync_data_dir);
+
                 let identity = NodeIdentity::load_or_create(&sync_data_dir)
                     .expect("failed to load or create node identity");
 

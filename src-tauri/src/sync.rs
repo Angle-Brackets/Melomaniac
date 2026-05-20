@@ -12,7 +12,9 @@ pub struct SyncState {
 
 #[tauri::command]
 pub async fn sync_get_peers(state: State<'_, SyncState>) -> Result<Vec<PeerInfo>, String> {
-    Ok(state.bridge.peers())
+    let peers = state.bridge.peers();
+    eprintln!("[sync] sync_get_peers: {} peer(s): {:?}", peers.len(), peers.iter().map(|p| &p.display_name).collect::<Vec<_>>());
+    Ok(peers)
 }
 
 #[tauri::command]
@@ -42,15 +44,17 @@ pub async fn sync_accept_qr_pairing(
     payload: QrPayload,
     state: State<'_, SyncState>,
 ) -> Result<(), String> {
-    state
-        .bridge
-        .accept_qr_pairing(payload)
-        .map_err(|e| e.to_string())
+    eprintln!("[sync] accept_qr_pairing from: {} ({})", payload.display_name, &payload.public_key_b64[..8.min(payload.public_key_b64.len())]);
+    let result = state.bridge.accept_qr_pairing(payload).map_err(|e| e.to_string());
+    eprintln!("[sync] accept_qr_pairing result: {:?}", result.as_ref().map(|_| "ok").map_err(|e| e.as_str()));
+    result
 }
 
 #[tauri::command]
 pub async fn sync_known_devices(state: State<'_, SyncState>) -> Result<Vec<KnownDevice>, String> {
-    Ok(state.bridge.known_devices())
+    let devices = state.bridge.known_devices();
+    eprintln!("[sync] sync_known_devices: {} device(s): {:?}", devices.len(), devices.iter().map(|d| &d.display_name).collect::<Vec<_>>());
+    Ok(devices)
 }
 
 #[tauri::command]
@@ -80,10 +84,13 @@ pub async fn sync_with_peer(
     public_key_b64: String,
     state: State<'_, SyncState>,
 ) -> Result<SyncReport, String> {
-    state
-        .bridge
-        .sync_with_peer(&public_key_b64)
-        .map_err(|e| e.to_string())
+    eprintln!("[sync] sync_with_peer: {}…", &public_key_b64[..8.min(public_key_b64.len())]);
+    let result = state.bridge.sync_with_peer(&public_key_b64).map_err(|e| e.to_string());
+    match &result {
+        Ok(r) => eprintln!("[sync] sync_with_peer ok: blobs={} conflicts={}", r.blobs_fetched, r.conflicts.len()),
+        Err(e) => eprintln!("[sync] sync_with_peer error: {e}"),
+    }
+    result
 }
 
 #[tauri::command]

@@ -3,6 +3,25 @@ use std::net::SocketAddr;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod desktop;
 
+/// Delete all persisted sync state so the next launch starts completely fresh.
+/// Only compiled in debug builds; call this before `NodeIdentity::load_or_create`.
+#[cfg(debug_assertions)]
+pub fn purge_dev_sync_state(data_dir: &std::path::Path) {
+    for file in &["known_devices.json", "known_devices.json.sig", "sync_name.txt"] {
+        let p = data_dir.join(file);
+        if p.exists() {
+            std::fs::remove_file(&p).ok();
+            eprintln!("[sync] dev-purge: deleted {}", p.display());
+        }
+    }
+    if let Ok(entry) = keyring::Entry::new("melomaniac", "sync_keypair") {
+        match entry.delete_credential() {
+            Ok(()) => eprintln!("[sync] dev-purge: cleared keyring"),
+            Err(e) => eprintln!("[sync] dev-purge: keyring clear skipped ({e})"),
+        }
+    }
+}
+
 impl From<melomaniac_storage::StorageError> for SyncError {
     fn from(e: melomaniac_storage::StorageError) -> Self {
         SyncError::Io(std::io::Error::other(e.to_string()))
