@@ -2552,6 +2552,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "keyring",
+ "libc",
  "mdns-sd",
  "melomaniac-storage",
  "rand 0.8.6",
