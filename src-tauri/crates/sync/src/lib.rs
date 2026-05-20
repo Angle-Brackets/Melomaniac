@@ -80,6 +80,7 @@ pub struct PeerInfo {
 pub struct PlaylistManifest {
     pub id: String,
     pub name: String,
+    pub description: Option<String>,
     pub branch_count: usize,
     pub track_count: usize,
     /// Sum of all audio blob sizes for this playlist in bytes.

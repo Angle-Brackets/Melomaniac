@@ -9,39 +9,57 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
+function ArtworkThumb({ hash, peerAddr, faded }: { hash: string; peerAddr: string; faded: boolean }) {
+  return (
+    <img
+      src={`http://${peerAddr}/blob/${hash}`}
+      className={`w-10 h-10 rounded object-cover shrink-0 ${faded ? 'opacity-50' : ''}`}
+      onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+    />
+  )
+}
+
 function PlaylistCard({
   manifest,
+  peerAddr,
   isLocal,
   isDownloading,
   onDownload,
 }: {
   manifest: PlaylistManifest
+  peerAddr: string
   isLocal: boolean
   isDownloading: boolean
   onDownload: () => void
 }) {
+  const meta = (
+    <div className="min-w-0 flex-1">
+      <div className={`text-sm font-medium truncate ${isLocal ? '' : 'opacity-60'}`}>{manifest.name}</div>
+      {manifest.description && (
+        <div className={`text-xs truncate mt-0.5 ${isLocal ? 'opacity-50' : 'opacity-35'}`}>
+          {manifest.description}
+        </div>
+      )}
+      <div className="text-xs font-mono opacity-40 mt-0.5">
+        {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''} · {formatBytes(manifest.size_bytes)}
+      </div>
+    </div>
+  )
+
   if (isLocal) {
     return (
-      <div className="bg-base-200 rounded-lg p-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium truncate">{manifest.name}</div>
-          <div className="text-xs font-mono opacity-40 mt-0.5">
-            {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''} · {formatBytes(manifest.size_bytes)}
-          </div>
-        </div>
+      <div className="bg-base-200 rounded-lg p-3 flex items-center gap-3">
+        {manifest.artwork_hash && <ArtworkThumb hash={manifest.artwork_hash} peerAddr={peerAddr} faded={false} />}
+        {meta}
         <span className="text-xs text-success shrink-0">Synced</span>
       </div>
     )
   }
 
   return (
-    <div className="border border-dashed border-base-content/15 bg-base-200/40 rounded-lg p-3 flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <div className="text-sm font-medium truncate opacity-60">{manifest.name}</div>
-        <div className="text-xs font-mono opacity-40 mt-0.5">
-          {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''} · {formatBytes(manifest.size_bytes)}
-        </div>
-      </div>
+    <div className="border border-dashed border-base-content/15 bg-base-200/40 rounded-lg p-3 flex items-center gap-3">
+      {manifest.artwork_hash && <ArtworkThumb hash={manifest.artwork_hash} peerAddr={peerAddr} faded={true} />}
+      {meta}
       <button
         className="btn btn-xs btn-outline shrink-0 gap-1"
         disabled={isDownloading}
@@ -67,6 +85,7 @@ function PeerPlaylistsModalInner({ platform }: { platform: 'desktop' | 'mobile' 
 
   const localIds = new Set(localPlaylists.map(p => p.id))
   const peerName = peerManifestPeer?.display_name ?? 'Peer'
+  const peerAddr = peerManifestPeer?.addr ?? ''
 
   const header = (
     <div className="flex items-center justify-between mb-4">
@@ -101,6 +120,7 @@ function PeerPlaylistsModalInner({ platform }: { platform: 'desktop' | 'mobile' 
           <PlaylistCard
             key={manifest.id}
             manifest={manifest}
+            peerAddr={peerAddr}
             isLocal={localIds.has(manifest.id)}
             isDownloading={downloadingPlaylists.includes(manifest.id)}
             onDownload={() => downloadPlaylist(manifest.id)}

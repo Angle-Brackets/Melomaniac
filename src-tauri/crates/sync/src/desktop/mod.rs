@@ -405,6 +405,7 @@ async fn handle_manifest(
         manifests.push(PlaylistManifest {
             id: playlist.id,
             name: playlist.name,
+            description: playlist.description,
             branch_count,
             track_count,
             size_bytes,

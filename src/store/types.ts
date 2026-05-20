@@ -121,6 +121,7 @@ export type QrPayload = {
 export type PlaylistManifest = {
   id:           string
   name:         string
+  description:  string | null
   branch_count: number
   track_count:  number
   size_bytes:   number
