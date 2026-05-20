@@ -212,7 +212,7 @@ impl IosSyncBridge {
         let existing = std::fs::read_to_string(&name_file)
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
-        if existing.is_empty() || existing == "Melomaniac" {
+        if existing.is_empty() || existing == "Melomaniac" || existing == "localhost" {
             let mut buf = vec![0i8; 256];
             unsafe { melo_get_device_name(buf.as_mut_ptr(), buf.len()) };
             let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
