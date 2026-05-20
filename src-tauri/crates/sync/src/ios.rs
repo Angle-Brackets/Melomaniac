@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 // ── Swift FFI ─────────────────────────────────────────────────────────────────
 
-extern "C" {
+unsafe extern "C" {
     fn melo_sync_start_discovery(
         on_discovered: extern "C" fn(*const std::ffi::c_char, *const std::ffi::c_char),
         on_lost: extern "C" fn(*const std::ffi::c_char),
@@ -437,11 +437,11 @@ impl SyncBridge for IosSyncBridge {
             }
 
             // True merge.
-            let our_tree = db.read_tree_for_commit(cas, local_head_str).await?;
-            let their_tree = db.read_tree_for_commit(cas, peer_head).await?;
+            let our_tree = db.read_tree_for_commit(&cas, local_head_str).await?;
+            let their_tree = db.read_tree_for_commit(&cas, peer_head).await?;
 
             let base_tree = match &ancestor {
-                Some(ancestor_hash) => db.read_tree_for_commit(cas, ancestor_hash).await?,
+                Some(ancestor_hash) => db.read_tree_for_commit(&cas, ancestor_hash).await?,
                 None => TreeBlob::new(""),
             };
 
