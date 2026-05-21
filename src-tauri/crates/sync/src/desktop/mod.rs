@@ -949,6 +949,11 @@ impl SyncBridge for DesktopSyncBridge {
                                 if !local_hashes.contains(&track.hash) {
                                     needed.insert(track.hash.clone());
                                 }
+                                if let Some(ref art) = track.artwork_hash {
+                                    if !local_hashes.contains(art) {
+                                        needed.insert(art.clone());
+                                    }
+                                }
                             }
                             if let Some(ref art) = tree.meta.artwork_hash {
                                 if !local_hashes.contains(art) {
@@ -964,6 +969,11 @@ impl SyncBridge for DesktopSyncBridge {
                         for track in &tree.tracks {
                             if !local_hashes.contains(&track.hash) {
                                 needed.insert(track.hash.clone());
+                            }
+                            if let Some(ref art) = track.artwork_hash {
+                                if !local_hashes.contains(art) {
+                                    needed.insert(art.clone());
+                                }
                             }
                         }
                         if let Some(ref art) = tree.meta.artwork_hash {
