@@ -296,9 +296,17 @@ async fn load_tree(storage: &StorageState, playlist_id: &str, branch_name: &str)
     let mut tree = match branch.and_then(|b| b.head_commit) {
         None => TreeBlob::new(""),
         Some(commit_hash) => {
-            let commit_bytes = storage.cas.read_blob(&commit_hash).await.map_err(|e| e.to_string())?;
-            let commit: serde_json::Value = serde_json::from_slice(&commit_bytes).map_err(|e| e.to_string())?;
-            let tree_hash = commit["tree_hash"].as_str().ok_or("missing tree_hash in commit")?.to_string();
+            // Resolve commit → tree_hash. Prefer SQL (covers synced commits that
+            // exist only in the commits table, not as CAS blobs), then fall back to
+            // reading the commit JSON from CAS (locally-written commits store it there).
+            let tree_hash = if let Ok(Some(record)) = storage.db.get_commit(&commit_hash).await {
+                record.tree_hash
+            } else if let Ok(bytes) = storage.cas.read_blob(&commit_hash).await {
+                let commit: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+                commit["tree_hash"].as_str().ok_or("missing tree_hash in commit")?.to_string()
+            } else {
+                return Err(format!("commit not found: {commit_hash}"));
+            };
             let tree_bytes = storage.cas.read_blob(&tree_hash).await.map_err(|e| e.to_string())?;
             TreeBlob::from_bytes(&tree_bytes).map_err(|e| e.to_string())?
         }
