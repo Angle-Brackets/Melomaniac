@@ -99,7 +99,10 @@ const THEME_PILLS: { id: ThemeName; label: string }[] = [
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
-  const openPairingDisplay = useStore(s => s.openPairingDisplay);
+  const openPairingDisplay  = useStore(s => s.openPairingDisplay);
+  const livePeers           = useStore(s => s.livePeers);
+  const refreshLivePeers    = useStore(s => s.refreshLivePeers);
+  const openPeerManifest    = useStore(s => s.openPeerManifest);
   const [settings, setSettings] = useState<StoredSettings>(() => loadSettings());
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft]     = useState(settings.commitAuthor);
@@ -139,6 +142,13 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   useEffect(() => {
     if (editingAuthor) authorInputRef.current?.focus();
   }, [editingAuthor]);
+
+  // Poll for live peers while Settings is mounted
+  useEffect(() => {
+    refreshLivePeers();
+    const id = setInterval(refreshLivePeers, 5000);
+    return () => clearInterval(id);
+  }, [refreshLivePeers]);
 
   // ── Theme helpers ─────────────────────────────────────────────────────────
   function applyAndSaveTheme(name: ThemeName) {
@@ -300,6 +310,16 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
 
         {/* Sync */}
         <SettingsGroup label="Sync">
+          {livePeers.map((peer) => (
+            <Row
+              key={peer.public_key_b64}
+              title={peer.display_name}
+              detail={peer.latency_ms != null ? `${peer.latency_ms}ms` : undefined}
+              onClick={() => openPeerManifest(peer)}
+            >
+              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>Sync</span>
+            </Row>
+          ))}
           <Row title="Pair a device" chev isLast onClick={() => { openPairingDisplay().catch(console.error); }}>
             <span style={{ fontSize: 13, color: 'var(--text-2)' }}>QR</span>
           </Row>

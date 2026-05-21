@@ -157,17 +157,34 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
             Paired devices
           </div>
           <div className="flex flex-col gap-1">
-            {knownDevices.map(device => (
-              <div
-                key={device.public_key_b64}
-                className="flex items-center justify-between bg-base-200 rounded px-3 py-2 text-sm"
-              >
-                <span className="truncate">{device.display_name}</span>
-                <span className="text-xs font-mono opacity-40 ml-2 shrink-0">
-                  {new Date(device.added_at * 1000).toLocaleDateString()}
-                </span>
-              </div>
-            ))}
+            {knownDevices.map(device => {
+              const livePeer = livePeers.find(p => p.public_key_b64 === device.public_key_b64)
+              return (
+                <div
+                  key={device.public_key_b64}
+                  className="flex items-center justify-between bg-base-200 rounded px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate">{device.display_name}</div>
+                    {livePeer?.latency_ms != null && (
+                      <div className="text-xs font-mono opacity-40">{livePeer.latency_ms}ms</div>
+                    )}
+                  </div>
+                  {livePeer ? (
+                    <button
+                      className="btn btn-xs btn-primary shrink-0 ml-2"
+                      onClick={() => openPeerManifest(livePeer)}
+                    >
+                      Sync
+                    </button>
+                  ) : (
+                    <span className="text-xs font-mono opacity-40 ml-2 shrink-0">
+                      {new Date(device.added_at * 1000).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
