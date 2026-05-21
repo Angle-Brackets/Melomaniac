@@ -884,15 +884,28 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
 }
 
 export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) => void; onPlaylistDetail: () => void }) {
-  const playlists           = useStore(s => s.playlists);
-  const setCurrentPlaylist  = useStore(s => s.setCurrentPlaylist);
-  const branchByPlaylist    = useStore(s => s.branchByPlaylist);
-  const peerManifest        = useStore(s => s.peerManifest);
-  const peerManifestPeer    = useStore(s => s.peerManifestPeer);
-  const peerManifestLoading = useStore(s => s.peerManifestLoading);
+  const playlists            = useStore(s => s.playlists);
+  const setCurrentPlaylist   = useStore(s => s.setCurrentPlaylist);
+  const branchByPlaylist     = useStore(s => s.branchByPlaylist);
+  const peerManifest         = useStore(s => s.peerManifest);
+  const peerManifestPeer     = useStore(s => s.peerManifestPeer);
+  const peerManifestLoading  = useStore(s => s.peerManifestLoading);
   const downloadingPlaylists = useStore(s => s.downloadingPlaylists);
-  const downloadPlaylist    = useStore(s => s.downloadPlaylist);
-  const [query, setQuery]   = useState('');
+  const downloadPlaylist     = useStore(s => s.downloadPlaylist);
+  const livePeers            = useStore(s => s.livePeers);
+  const knownDevices         = useStore(s => s.knownDevices);
+  const openPeerManifest     = useStore(s => s.openPeerManifest);
+  const [query, setQuery]    = useState('');
+
+  // Auto-fetch the manifest from the first trusted live peer so ghost cards
+  // appear without the user having to navigate to Settings first.
+  useEffect(() => {
+    if (livePeers.length === 0) return;
+    const trusted = livePeers.find(p => knownDevices.some(k => k.public_key_b64 === p.public_key_b64));
+    if (!trusted) return;
+    if (peerManifestPeer?.public_key_b64 === trusted.public_key_b64 && peerManifest !== null) return;
+    openPeerManifest(trusted);
+  }, [livePeers, knownDevices]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const localIds = useMemo(() => new Set(playlists.map(p => p.id)), [playlists]);
   const peerAddr = peerManifestPeer?.addr ?? '';

@@ -537,7 +537,9 @@ impl SyncBridge for IosSyncBridge {
 
             let ancestor = match &local_head {
                 None => {
-                    // We have no local commits — fast-forward to peer head.
+                    // New playlist — create the playlist and branch rows before updating head.
+                    db.ensure_playlist_and_branch(&playlist_id, &peer_entry.name, local_branch_name)
+                        .await?;
                     db.update_branch_head(&playlist_id, local_branch_name, peer_head)
                         .await?;
                     return Ok(SyncReport {

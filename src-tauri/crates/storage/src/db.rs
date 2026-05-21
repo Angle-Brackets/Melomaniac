@@ -412,6 +412,32 @@ impl Database {
         Ok(())
     }
 
+    /// Ensure a playlist row and branch row exist with the given IDs.
+    /// Uses INSERT OR IGNORE so it is safe to call on already-imported playlists.
+    pub async fn ensure_playlist_and_branch(
+        &self,
+        playlist_id: &str,
+        playlist_name: &str,
+        branch_name: &str,
+    ) -> Result<(), StorageError> {
+        let now = unix_now();
+        sqlx::query(
+            "INSERT OR IGNORE INTO playlists (id, name, description, created_at, forked_from, forked_at_commit)
+             VALUES (?, ?, NULL, ?, NULL, NULL)"
+        )
+        .bind(playlist_id).bind(playlist_name).bind(now)
+        .execute(&self.pool).await?;
+
+        let branch_id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT OR IGNORE INTO branches (id, playlist_id, name, head_commit) VALUES (?, ?, ?, NULL)"
+        )
+        .bind(&branch_id).bind(playlist_id).bind(branch_name)
+        .execute(&self.pool).await?;
+
+        Ok(())
+    }
+
     // ── Commits ───────────────────────────────────────────────────────────────
 
     pub async fn insert_commit(
