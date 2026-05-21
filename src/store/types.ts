@@ -127,4 +127,5 @@ export type PlaylistManifest = {
   size_bytes:   number
   artwork_hash: string | null
   head_commit:  string
+  branches:     string[]
 }

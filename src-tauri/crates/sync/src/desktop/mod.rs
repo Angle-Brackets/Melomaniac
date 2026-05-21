@@ -406,6 +406,8 @@ async fn handle_manifest(
             None => (0, None),
         };
 
+        let branch_names: Vec<String> = branches.iter().map(|b| b.name.clone()).collect();
+
         manifests.push(PlaylistManifest {
             id: playlist.id,
             name: playlist.name,
@@ -415,6 +417,7 @@ async fn handle_manifest(
             size_bytes,
             artwork_hash,
             head_commit,
+            branches: branch_names,
         });
     }
 
@@ -879,12 +882,13 @@ impl SyncBridge for DesktopSyncBridge {
         })
     }
 
-    fn sync_playlist(&self, playlist_id: &str) -> Result<SyncReport, SyncError> {
+    fn sync_playlist(&self, playlist_id: &str, branch_name: &str) -> Result<SyncReport, SyncError> {
         let identity = Arc::clone(&self.identity);
         let peers = Arc::clone(&self.peers);
         let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
         let cas = self.cas.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
         let playlist_id = playlist_id.to_string();
+        let branch_name = branch_name.to_string();
 
         block(async move {
             // 1. Pick best peer.
@@ -911,17 +915,15 @@ impl SyncBridge for DesktopSyncBridge {
             };
 
 
-            // 4. Read local branch list and pick main branch.
+            // 4. Read local branch state for the requested branch.
             let local_branches = db.get_branches(&playlist_id).await?;
-            let local_branch = local_branches
-                .iter()
-                .find(|b| b.name == "main")
-                .or_else(|| local_branches.first());
-            let local_branch_name = local_branch.map(|b| b.name.as_str()).unwrap_or("main");
+            let local_branch = local_branches.iter().find(|b| b.name == branch_name);
+            let local_branch_name = branch_name.as_str();
             let local_head = local_branch.and_then(|b| b.head_commit.clone());
 
-            // 5. Compare heads.
-            if local_head.as_deref() == Some(&peer_entry.head_commit) {
+            // 5. Compare heads — only meaningful for the "main" branch since that's what
+            // the manifest's head_commit reflects.
+            if branch_name == "main" && local_head.as_deref() == Some(&peer_entry.head_commit) {
                 return Ok(SyncReport {
                     blobs_fetched: 0,
                     bytes_fetched: 0,
@@ -929,8 +931,8 @@ impl SyncBridge for DesktopSyncBridge {
                 });
             }
 
-            // 6. Fetch commit chain — tree hashes tell us exactly which blobs to pull.
-            let peer_commits = client.get_commits(&playlist_id, "main").await?;
+            // 6. Fetch commit chain for the requested branch.
+            let peer_commits = client.get_commits(&playlist_id, &branch_name).await?;
 
             // 7. Walk each commit's tree: fetch missing tree blobs, collect track/artwork hashes.
             let local_hashes: std::collections::HashSet<String> =
@@ -1010,7 +1012,12 @@ impl SyncBridge for DesktopSyncBridge {
             db.import_commit_chain(&peer_commits).await?;
 
             // 11. DAG merge.
-            let peer_head = &peer_entry.head_commit;
+            // peer_commits[0] is the branch HEAD (export_commit_chain starts from HEAD).
+            // Fall back to peer_entry.head_commit only for the main branch.
+            let peer_head_owned = peer_commits.first()
+                .map(|c| c.hash.clone())
+                .unwrap_or_else(|| peer_entry.head_commit.clone());
+            let peer_head = &peer_head_owned;
 
             let ancestor = match &local_head {
                 None => {

@@ -123,7 +123,7 @@ function PeerPlaylistsModalInner({ platform }: { platform: 'desktop' | 'mobile' 
             peerAddr={peerAddr}
             isLocal={localIds.has(manifest.id)}
             isDownloading={downloadingPlaylists.includes(manifest.id)}
-            onDownload={() => downloadPlaylist(manifest.id)}
+            onDownload={() => downloadPlaylist(manifest.id, manifest.branches?.length > 0 ? manifest.branches : ['main'])}
           />
         ))}
       </div>

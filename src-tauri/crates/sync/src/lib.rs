@@ -106,6 +106,9 @@ pub struct PlaylistManifest {
     pub artwork_hash: Option<String>,
     /// The HEAD commit hash on the serving node's DAG for this playlist.
     pub head_commit: String,
+    /// All branch names available on the serving node for this playlist.
+    #[serde(default)]
+    pub branches: Vec<String>,
 }
 
 // ── SyncReport ────────────────────────────────────────────────────────────────
@@ -269,12 +272,12 @@ pub trait SyncBridge: Send + Sync {
 
     // ── Sync ──────────────────────────────────────────────────────────────────
 
-    /// Pull the given playlist from the best available trusted peer.
+    /// Pull the given playlist branch from the best available trusted peer.
     ///
     /// "Best" is implementation-defined (typically lowest latency). Returns a
     /// [`SyncReport`]; if `report.conflicts` is non-empty the caller must
     /// resolve them before the playlist is updated on disk.
-    fn sync_playlist(&self, playlist_id: &str) -> Result<SyncReport, SyncError>;
+    fn sync_playlist(&self, playlist_id: &str, branch_name: &str) -> Result<SyncReport, SyncError>;
 
     /// Perform a full bidirectional sync with a specific peer (identified by
     /// their base64 public key). Intended for desktop-to-desktop workflows

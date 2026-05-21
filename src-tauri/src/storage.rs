@@ -446,13 +446,31 @@ pub async fn playlist_get_tracks(
     let tree = load_tree(&storage, &playlist_id, &branch_name).await?;
     let mut records = Vec::with_capacity(tree.tracks.len());
     for entry in &tree.tracks {
-        if let Some(r) = storage.db.get_track(&entry.hash).await.map_err(|e| e.to_string())? {
-            records.push(PlaylistTrackRecord {
-                record:      r,
-                ab_start_ms: entry.ab_start_ms,
-                ab_end_ms:   entry.ab_end_ms,
-            });
-        }
+        let record = match storage.db.get_track(&entry.hash).await.map_err(|e| e.to_string())? {
+            Some(r) => r,
+            None if entry.title.is_some() => {
+                // Track not yet in local library — synthesise a minimal record from
+                // the metadata embedded in the tree blob by the originating device.
+                TrackRecord {
+                    hash:         entry.hash.clone(),
+                    title:        entry.title.clone().unwrap_or_default(),
+                    artist:       entry.artist.clone().unwrap_or_default(),
+                    album:        entry.album.clone(),
+                    artwork_hash: entry.artwork_hash.clone(),
+                    duration_ms:  entry.duration_ms.unwrap_or(0),
+                    favorited:    false,
+                    ingested_at:  0,
+                    source_url:   None,
+                    mime_type:    entry.mime_type.clone(),
+                }
+            }
+            None => continue,
+        };
+        records.push(PlaylistTrackRecord {
+            record,
+            ab_start_ms: entry.ab_start_ms,
+            ab_end_ms:   entry.ab_end_ms,
+        });
     }
     Ok(records)
 }
@@ -889,14 +907,19 @@ async fn append_tracks_inner(
     let mut added_titles: Vec<String> = Vec::new();
     for hash in hashes {
         if !existing_hashes.contains(hash) {
+            let track = storage.db.get_track(hash).await.ok().flatten();
+            let title = track.as_ref().map(|t| t.title.clone())
+                .unwrap_or_else(|| hash[..hash.len().min(7)].to_string());
             tree.tracks.push(melomaniac_storage::TrackEntry {
                 hash: hash.clone(),
+                title:       track.as_ref().map(|t| t.title.clone()),
+                artist:      track.as_ref().map(|t| t.artist.clone()),
+                album:       track.as_ref().and_then(|t| t.album.clone()),
+                duration_ms: track.as_ref().map(|t| t.duration_ms),
+                mime_type:   track.as_ref().and_then(|t| t.mime_type.clone()),
+                artwork_hash: track.as_ref().and_then(|t| t.artwork_hash.clone()),
                 ..Default::default()
             });
-            let title = storage.db.get_track(hash).await
-                .ok().flatten()
-                .map(|t| t.title)
-                .unwrap_or_else(|| hash[..hash.len().min(7)].to_string());
             added_titles.push(title);
         }
     }

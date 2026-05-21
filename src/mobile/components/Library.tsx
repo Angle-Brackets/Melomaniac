@@ -823,66 +823,185 @@ function SectionHeadPlain({ label, trailing, collapsible }: { label: string; tra
   );
 }
 
+function fmtBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// Branch selection sheet shown before downloading a peer playlist.
+function BranchSelectSheet({ manifest, onConfirm, onCancel }: {
+  manifest: import('../../store/types').PlaylistManifest
+  onConfirm: (branches: string[]) => void
+  onCancel: () => void
+}) {
+  const branches = manifest.branches.length > 0 ? manifest.branches : ['main']
+  const [selected, setSelected] = useState<Set<string>>(new Set(['main'].filter(n => branches.includes(n)).concat(branches.length === 1 ? branches : [])))
+
+  const toggle = (name: string) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(name)) {
+      if (next.size === 1) return prev // keep at least one selected
+      next.delete(name)
+    } else {
+      next.add(name)
+    }
+    return next
+  })
+
+  return (
+    <>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>
+          Choose which branches to download from <span style={{ color: 'var(--accent)' }}>{manifest.name}</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+          {fmtBytes(manifest.size_bytes)} total · {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''}
+        </div>
+      </div>
+      {branches.map(name => (
+        <button
+          key={name}
+          onClick={() => toggle(name)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+            padding: '10px 0', background: 'none', border: 'none',
+            borderBottom: '0.5px solid var(--border-0)', cursor: 'pointer', color: 'inherit',
+          }}
+        >
+          <div style={{
+            width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+            background: selected.has(name) ? 'var(--accent)' : 'transparent',
+            border: selected.has(name) ? 'none' : '1.5px solid var(--border-2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {selected.has(name) && <Icons.check size={12} stroke="var(--bg-0)"/>}
+          </div>
+          <span style={{ fontSize: 13.5, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
+          <span style={{ flex: 1, textAlign: 'left', fontSize: 15, color: 'var(--text-0)', fontWeight: 500 }}>{name}</span>
+          {name === 'main' && <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>primary</span>}
+        </button>
+      ))}
+      <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+        <button
+          onClick={onCancel}
+          style={{ flex: 1, padding: '11px 0', borderRadius: 12, background: 'var(--bg-3)', border: 'none', cursor: 'pointer', color: 'var(--text-1)', fontSize: 14, fontWeight: 500 }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onConfirm([...selected])}
+          disabled={selected.size === 0}
+          style={{ flex: 2, padding: '11px 0', borderRadius: 12, background: 'var(--accent)', border: 'none', cursor: 'pointer', color: 'var(--bg-0)', fontSize: 14, fontWeight: 600 }}
+        >
+          Download {selected.size > 1 ? `${selected.size} branches` : '1 branch'}
+        </button>
+      </div>
+    </>
+  )
+}
+
 // Tapping a playlist card sets it as the current playlist and opens the detail
 // overlay (PlaylistDetail) — the detail component reads currentPlaylistId from
 // the store rather than receiving it as a prop.
-function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal, onDownload }: {
+function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal, onRequestDownload }: {
   manifest: import('../../store/types').PlaylistManifest
   peerAddr: string
   peerName: string
   isDownloading: boolean
   isLocal: boolean
-  onDownload: () => void
+  onRequestDownload: (branches: string[]) => void
 }) {
+  const [showSheet, setShowSheet] = useState(false)
+
+  const handleTap = () => {
+    if (isLocal || isDownloading) return
+    const branches = manifest.branches.length > 0 ? manifest.branches : ['main']
+    if (branches.length === 1) {
+      onRequestDownload(branches)
+    } else {
+      setShowSheet(true)
+    }
+  }
+
   return (
-    <div
-      onClick={isLocal || isDownloading ? undefined : onDownload}
-      style={{
-        margin: '4px 16px',
-        padding: '10px 12px',
-        background: isLocal ? 'var(--bg-2)' : 'color-mix(in srgb, var(--bg-2) 60%, transparent)',
-        border: isLocal ? '0.5px solid var(--border-1)' : '0.5px dashed var(--border-2)',
-        borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
-        cursor: isLocal || isDownloading ? 'default' : 'pointer',
-        opacity: isLocal ? 1 : 0.8,
-      }}
-    >
-      {manifest.artwork_hash ? (
-        <img
-          src={`http://${peerAddr}/blob/${manifest.artwork_hash}`}
-          style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flexShrink: 0, opacity: isLocal ? 1 : 0.65 }}
-          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-        />
-      ) : (
-        <MMArt size={54} radius={9}/>
-      )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 600, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {manifest.name}
-        </span>
-        {manifest.description && (
-          <span style={{ fontSize: 11.5, color: 'var(--text-2)', display: 'block', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {manifest.description}
-          </span>
+    <>
+      <div
+        onClick={handleTap}
+        style={{
+          margin: '4px 16px',
+          padding: '10px 12px',
+          background: isLocal ? 'var(--bg-2)' : 'color-mix(in srgb, var(--bg-2) 60%, transparent)',
+          border: isLocal ? '0.5px solid var(--border-1)' : '0.5px dashed var(--border-2)',
+          borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
+          cursor: isLocal || isDownloading ? 'default' : 'pointer',
+          opacity: isLocal ? 1 : 0.8,
+        }}
+      >
+        {manifest.artwork_hash ? (
+          <img
+            src={`http://${peerAddr}/blob/${manifest.artwork_hash}`}
+            style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flexShrink: 0, opacity: isLocal ? 1 : 0.65 }}
+            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+        ) : (
+          <MMArt size={54} radius={9}/>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
-          <span style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>
-            from {peerName}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 600, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {manifest.name}
           </span>
-          <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
-            {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''}
-          </span>
-          {isLocal && (
-            <span style={{ fontSize: 10.5, color: 'var(--green, #4ade80)', fontFamily: 'JetBrains Mono, monospace' }}>✓ synced</span>
+          {manifest.description && (
+            <span style={{ fontSize: 11.5, color: 'var(--text-2)', display: 'block', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {manifest.description}
+            </span>
           )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+            <span style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>
+              from {peerName}
+            </span>
+            <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+              {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''}
+            </span>
+            {isDownloading && (
+              <span style={{ fontSize: 10.5, color: 'var(--accent-light, var(--accent))', fontFamily: 'JetBrains Mono, monospace' }}>
+                syncing · {fmtBytes(manifest.size_bytes)}
+              </span>
+            )}
+            {isLocal && !isDownloading && (
+              <span style={{ fontSize: 10.5, color: 'var(--green, #4ade80)', fontFamily: 'JetBrains Mono, monospace' }}>✓ synced</span>
+            )}
+            {!isLocal && !isDownloading && manifest.branches.length > 1 && (
+              <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+                {manifest.branches.length} branches
+              </span>
+            )}
+          </div>
         </div>
+        {!isLocal && (
+          isDownloading
+            ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
+            : <Icons.download size={17} stroke="var(--text-2)"/>
+        )}
       </div>
-      {!isLocal && (
-        isDownloading
-          ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
-          : <Icons.download size={17} stroke="var(--text-2)"/>
+
+      {showSheet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 80 }}>
+          <div onClick={() => setShowSheet(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
+          <MMSheet
+            title="Download Branches"
+            height="56%"
+            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+            onClose={() => setShowSheet(false)}
+          >
+            <BranchSelectSheet
+              manifest={manifest}
+              onConfirm={branches => { setShowSheet(false); onRequestDownload(branches) }}
+              onCancel={() => setShowSheet(false)}
+            />
+          </MMSheet>
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -999,7 +1118,7 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
                 peerName={peerName}
                 isLocal={localIds.has(manifest.id)}
                 isDownloading={downloadingPlaylists.includes(manifest.id)}
-                onDownload={() => downloadPlaylist(manifest.id)}
+                onRequestDownload={branches => downloadPlaylist(manifest.id, branches)}
               />
             ))}
           </>

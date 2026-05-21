@@ -5,10 +5,24 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrackEntry {
     pub hash: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ab_start_ms: Option<u64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ab_end_ms: Option<u64>,
+    /// Embedded track metadata so sync-receiving peers can populate their library
+    /// without a separate /tracks round-trip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artist: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artwork_hash: Option<String>,
     /// Preserves unknown fields added by newer clients so round-trips never strip data.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,

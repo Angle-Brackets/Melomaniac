@@ -270,6 +270,7 @@ pub fn run() {
             sync::sync_known_devices,
             sync::sync_remove_device,
             sync::sync_playlist,
+            sync::sync_playlist_branches,
             sync::sync_with_peer,
             sync::sync_fetch_peer_manifest,
             sync::sync_get_fingerprint,

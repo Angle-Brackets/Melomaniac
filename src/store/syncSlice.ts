@@ -50,7 +50,7 @@ export type SyncSlice = {
   // Peer manifest actions
   openPeerManifest:  (peer: PeerInfo) => Promise<void>
   closePeerManifest: () => void
-  downloadPlaylist:  (playlistId: string) => Promise<void>
+  downloadPlaylist:  (playlistId: string, branchNames: string[]) => Promise<void>
 }
 
 export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set, get) => ({
@@ -184,10 +184,12 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     peerManifestLoading: false,
   }),
 
-  downloadPlaylist: async (playlistId) => {
+  downloadPlaylist: async (playlistId, branchNames) => {
     set(state => ({ downloadingPlaylists: [...state.downloadingPlaylists, playlistId] }))
     try {
-      const report = await invoke<SyncReport>('sync_playlist', { playlistId })
+      const report = branchNames.length === 1
+        ? await invoke<SyncReport>('sync_playlist', { playlistId, branchName: branchNames[0] })
+        : await invoke<SyncReport>('sync_playlist_branches', { playlistId, branchNames })
       set(state => ({ downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId) }))
       await get().loadPlaylists()
       const items = report.blobs_fetched

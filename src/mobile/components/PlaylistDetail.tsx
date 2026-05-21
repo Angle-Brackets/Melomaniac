@@ -286,6 +286,24 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [downloadingBranch, setDownloadingBranch] = useState<string | null>(null);
+
+  // Ghost branches: branches on the peer that haven't been downloaded yet.
+  const peerManifest    = useStore(s => s.peerManifest);
+  const downloadPlaylist = useStore(s => s.downloadPlaylist);
+  const peerEntry = peerManifest?.find(m => m.id === playlist.id);
+  const localBranchNames = new Set(playlist.branches.map(b => b.name));
+  const ghostBranches = peerEntry?.branches.filter(n => !localBranchNames.has(n)) ?? [];
+
+  const handleDownloadBranch = async (branchName: string) => {
+    setDownloadingBranch(branchName);
+    try {
+      await downloadPlaylist(playlist.id, [branchName]);
+      onRefresh();
+    } finally {
+      setDownloadingBranch(null);
+    }
+  };
 
   const activeBranchHead = playlist.branches.find(b => b.name === activeBranchName)?.head_commit ?? null;
 
@@ -388,6 +406,37 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
               </div>
             );
           })}
+
+          {ghostBranches.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.12, fontFamily: 'JetBrains Mono, monospace', padding: '10px 2px 4px' }}>
+                On peer · not downloaded
+              </div>
+              {ghostBranches.map(name => {
+                const isLoading = downloadingBranch === name;
+                return (
+                  <div key={name} onClick={() => !isLoading && handleDownloadBranch(name)} style={{
+                    padding: '11px 13px', borderRadius: 12,
+                    background: 'color-mix(in srgb, var(--bg-3) 50%, transparent)',
+                    border: '0.5px dashed var(--border-2)',
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    cursor: isLoading ? 'default' : 'pointer',
+                    opacity: 0.7,
+                  }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 14, background: 'var(--border-1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 14 }}>⎇</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 14, color: 'var(--text-2)', fontWeight: 500, fontFamily: 'JetBrains Mono, monospace' }}>{name}</span>
+                      <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>not downloaded</div>
+                    </div>
+                    {isLoading
+                      ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
+                      : <Icons.download size={15} stroke="var(--text-3)"/>
+                    }
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       </MMSheet>
     </div>

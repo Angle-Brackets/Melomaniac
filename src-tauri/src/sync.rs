@@ -71,14 +71,49 @@ pub async fn sync_remove_device(
 #[tauri::command]
 pub async fn sync_playlist(
     playlist_id: String,
+    branch_name: Option<String>,
     state: State<'_, SyncState>,
 ) -> Result<SyncReport, String> {
+    let branch = branch_name.unwrap_or_else(|| "main".to_string());
     let bridge = Arc::clone(&state.bridge);
     tokio::task::spawn_blocking(move || {
-        bridge.sync_playlist(&playlist_id).map_err(|e| e.to_string())
+        bridge.sync_playlist(&playlist_id, &branch).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Sync multiple branches of a playlist in sequence.
+/// Returns aggregated blobs/bytes counts; stops early on first error.
+#[tauri::command]
+pub async fn sync_playlist_branches(
+    playlist_id: String,
+    branch_names: Vec<String>,
+    state: State<'_, SyncState>,
+) -> Result<SyncReport, String> {
+    let mut total_blobs = 0usize;
+    let mut total_bytes = 0u64;
+    let mut all_conflicts = Vec::new();
+
+    for branch in branch_names {
+        let bridge = Arc::clone(&state.bridge);
+        let pid = playlist_id.clone();
+        let report = tokio::task::spawn_blocking(move || {
+            bridge.sync_playlist(&pid, &branch).map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+
+        total_blobs += report.blobs_fetched;
+        total_bytes += report.bytes_fetched;
+        all_conflicts.extend(report.conflicts);
+    }
+
+    Ok(SyncReport {
+        blobs_fetched: total_blobs,
+        bytes_fetched: total_bytes,
+        conflicts: all_conflicts,
+    })
 }
 
 #[tauri::command]
