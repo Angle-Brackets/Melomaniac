@@ -414,3 +414,92 @@ export function MarqueeText({ text, active, style, textStyle }: {
     </div>
   );
 }
+
+// ── Pull-to-refresh ────────────────────────────────────────────────────────────
+
+const PTR_THRESHOLD = 64;
+
+export function usePullToRefresh(onRefresh: () => Promise<void>) {
+  const scrollRef     = useRef<HTMLDivElement>(null);
+  const startY        = useRef(0);
+  const pullYRef      = useRef(0);
+  const activeRef     = useRef(false);
+  const refreshingRef = useRef(false);
+  const onRefreshRef  = useRef(onRefresh);
+  useEffect(() => { onRefreshRef.current = onRefresh; });
+
+  const [state, setState] = useState<{ pullY: number; refreshing: boolean }>({ pullY: 0, refreshing: false });
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onStart = (e: TouchEvent) => {
+      if (el.scrollTop > 0 || refreshingRef.current) return;
+      startY.current = e.touches[0].clientY;
+      activeRef.current = true;
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (!activeRef.current) return;
+      const dy = e.touches[0].clientY - startY.current;
+      if (dy <= 0) { activeRef.current = false; pullYRef.current = 0; setState(s => ({ ...s, pullY: 0 })); return; }
+      pullYRef.current = Math.min(dy * 0.45, PTR_THRESHOLD + 24);
+      setState(s => ({ ...s, pullY: pullYRef.current }));
+    };
+
+    const onEnd = () => {
+      if (!activeRef.current) return;
+      activeRef.current = false;
+      if (pullYRef.current >= PTR_THRESHOLD) {
+        refreshingRef.current = true;
+        pullYRef.current = PTR_THRESHOLD;
+        setState({ pullY: PTR_THRESHOLD, refreshing: true });
+        onRefreshRef.current().finally(() => {
+          refreshingRef.current = false;
+          pullYRef.current = 0;
+          setState({ pullY: 0, refreshing: false });
+        });
+      } else {
+        pullYRef.current = 0;
+        setState({ pullY: 0, refreshing: false });
+      }
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: true });
+    el.addEventListener('touchend', onEnd);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { scrollRef, pullY: state.pullY, refreshing: state.refreshing };
+}
+
+export function PullSpinner({ pullY, refreshing }: { pullY: number; refreshing: boolean }) {
+  if (pullY === 0 && !refreshing) return null;
+  const progress = Math.min(pullY / PTR_THRESHOLD, 1);
+  return (
+    <div style={{
+      position: 'absolute', top: pullY - 44, left: '50%',
+      transform: 'translateX(-50%)',
+      width: 28, height: 28,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      transition: refreshing || pullY > 0 ? 'none' : 'top 0.3s, opacity 0.3s',
+      opacity: Math.max(progress, refreshing ? 1 : 0),
+      pointerEvents: 'none', zIndex: 20,
+    }}>
+      <div style={{
+        width: 22, height: 22,
+        border: '2.5px solid var(--border-2)',
+        borderTopColor: 'var(--accent)',
+        borderRadius: '50%',
+        animation: refreshing ? 'mmSpin 0.7s linear infinite' : 'none',
+        transform: refreshing ? 'none' : `rotate(${progress * 280}deg)`,
+      }}/>
+    </div>
+  );
+}

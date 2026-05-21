@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import { Icons } from '../icons';
-import { MMTabBar } from './common';
+import { MMTabBar, usePullToRefresh, PullSpinner } from './common';
 import type { TabId } from './common';
 import { applyTheme, writeCustomHue, NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
@@ -102,7 +102,12 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const openPairingDisplay  = useStore(s => s.openPairingDisplay);
   const livePeers           = useStore(s => s.livePeers);
   const refreshLivePeers    = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
   const openPeerManifest    = useStore(s => s.openPeerManifest);
+  const handleRefresh       = useCallback(async () => {
+    await Promise.all([refreshLivePeers(), refreshKnownDevices()]);
+  }, [refreshLivePeers, refreshKnownDevices]);
+  const { scrollRef, pullY, refreshing } = usePullToRefresh(handleRefresh);
   const [settings, setSettings] = useState<StoredSettings>(() => loadSettings());
   const [editingAuthor, setEditingAuthor] = useState(false);
   const [authorDraft, setAuthorDraft]     = useState(settings.commitAuthor);
@@ -202,7 +207,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden', fontFamily: 'Outfit, system-ui, sans-serif' }}>
-      <div style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
+      <div ref={scrollRef} style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
+        <PullSpinner pullY={pullY} refreshing={refreshing}/>
 
         {/* Header */}
         <div style={{ padding: '12px 22px 6px' }}>

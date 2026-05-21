@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
 import type { TrackRecord } from '../../store/types';
 import { Icons } from '../icons';
-import { MMArt, MMTabBar, MMHash, MMBranchPill, MMSheet, MarqueeText, iconBtn } from './common';
+import { MMArt, MMTabBar, MMHash, MMBranchPill, MMSheet, MarqueeText, iconBtn, usePullToRefresh, PullSpinner } from './common';
 import type { TabId } from './common';
 import type { PlaylistRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
@@ -525,6 +525,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const listRef      = useRef<HTMLDivElement>(null);
   const filterScroll = useHorizDragScroll();
   const sortScroll   = useHorizDragScroll();
+  const loadLibrary  = useStore(s => s.loadLibrary);
+  const { scrollRef: ptrRef, pullY, refreshing } = usePullToRefresh(useCallback(() => loadLibrary(), [loadLibrary]));
 
   const showToast = useCallback((msg: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -695,7 +697,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       </div>
 
       {/* Virtualized track list */}
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
+      <div ref={el => { (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el; (ptrRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }} style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
+        <PullSpinner pullY={pullY} refreshing={refreshing}/>
         {libraryStatus === 'ready' && flatItems.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
             {query ? 'No tracks match your search.' : 'No tracks in library.'}
@@ -907,6 +910,20 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
     openPeerManifest(trusted);
   }, [livePeers, knownDevices]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadPlaylists    = useStore(s => s.loadPlaylists);
+  const refreshLivePeers = useStore(s => s.refreshLivePeers);
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([loadPlaylists(), refreshLivePeers()]);
+    // Re-fetch peer manifest for the current or newly discovered trusted peer
+    const allPeers = useStore.getState().livePeers;
+    const allKnown = useStore.getState().knownDevices;
+    const trusted  = allPeers.find(p => allKnown.some(k => k.public_key_b64 === p.public_key_b64));
+    if (trusted) openPeerManifest(trusted);
+  }, [loadPlaylists, refreshLivePeers, openPeerManifest]);
+
+  const { scrollRef, pullY, refreshing } = usePullToRefresh(handleRefresh);
+
   const localIds = useMemo(() => new Set(playlists.map(p => p.id)), [playlists]);
   const peerAddr = peerManifestPeer?.addr ?? '';
   const peerName = peerManifestPeer?.display_name ?? 'Peer';
@@ -922,7 +939,8 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
+      <div ref={scrollRef} style={{ position: 'absolute', inset: 'calc(16px + var(--safe-top)) 0 var(--tab-h)', overflowY: 'auto' }} className="mm-scroll">
+        <PullSpinner pullY={pullY} refreshing={refreshing}/>
         <div style={{ padding: '14px 22px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.5 }}>Playlists</h1>
           <button style={iconBtn(36)}><Icons.plus size={20} stroke="var(--accent)"/></button>
