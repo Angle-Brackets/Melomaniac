@@ -395,18 +395,41 @@ async fn handle_manifest(
         let Some(primary) = primary else { continue };
         let Some(head_commit) = primary.head_commit.clone() else { continue };
 
-        let size_bytes = db
-            .playlist_total_bytes(cas, &playlist.id, &primary.name)
-            .await
-            .unwrap_or(0);
-
-        let tree = db.read_tree_for_commit(cas, &head_commit).await.ok();
-        let (track_count, artwork_hash) = match &tree {
+        let primary_tree = db.read_tree_for_commit(cas, &head_commit).await.ok();
+        let (track_count, artwork_hash) = match &primary_tree {
             Some(t) => (t.tracks.len(), t.meta.artwork_hash.clone()),
             None => (0, None),
         };
 
-        let branch_names: Vec<String> = branches.iter().map(|b| b.name.clone()).collect();
+        // Primary-branch size (fast path used for the top-level size_bytes field).
+        let size_bytes = primary_tree.as_ref().map(|t| {
+            t.tracks.iter().map(|e| {
+                std::fs::metadata(cas.blob_path(&e.hash)).map(|m| m.len()).unwrap_or(0)
+            }).sum::<u64>()
+        }).unwrap_or(0);
+
+        // Per-branch detail — track hashes + sizes so the receiver can deduplicate.
+        let mut branch_infos: Vec<super::BranchInfo> = Vec::with_capacity(branches.len());
+        for b in &branches {
+            let Some(ref hc) = b.head_commit else { continue };
+            let tree = if b.name == primary.name {
+                primary_tree.clone()
+            } else {
+                db.read_tree_for_commit(cas, hc).await.ok()
+            };
+            let Some(tree) = tree else { continue };
+            let mut branch_size: u64 = 0;
+            let track_hashes: Vec<String> = tree.tracks.iter().map(|e| {
+                branch_size += std::fs::metadata(cas.blob_path(&e.hash)).map(|m| m.len()).unwrap_or(0);
+                e.hash.clone()
+            }).collect();
+            branch_infos.push(super::BranchInfo {
+                name: b.name.clone(),
+                track_count: tree.tracks.len(),
+                size_bytes: branch_size,
+                track_hashes,
+            });
+        }
 
         manifests.push(PlaylistManifest {
             id: playlist.id,
@@ -417,7 +440,7 @@ async fn handle_manifest(
             size_bytes,
             artwork_hash,
             head_commit,
-            branches: branch_names,
+            branches: branch_infos,
         });
     }
 
@@ -882,7 +905,12 @@ impl SyncBridge for DesktopSyncBridge {
         })
     }
 
-    fn sync_playlist(&self, playlist_id: &str, branch_name: &str) -> Result<SyncReport, SyncError> {
+    fn sync_playlist(
+        &self,
+        playlist_id: &str,
+        branch_name: &str,
+        progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
+    ) -> Result<SyncReport, SyncError> {
         let identity = Arc::clone(&self.identity);
         let peers = Arc::clone(&self.peers);
         let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
@@ -988,11 +1016,21 @@ impl SyncBridge for DesktopSyncBridge {
             }
 
             // 8. Download missing track + artwork blobs (only what this playlist needs).
+            let total_needed = needed.len();
+            let mut done_needed: usize = 0;
             for hash in &needed {
                 let bytes = client.get_blob(hash).await?;
                 bytes_fetched += bytes.len() as u64;
                 cas.write_blob(&bytes).await?;
                 blobs_fetched += 1;
+                done_needed += 1;
+                if let Some(ref tx) = progress_tx {
+                    tx.try_send(super::SyncProgress {
+                        playlist_id: playlist_id.clone(),
+                        done: done_needed,
+                        total: total_needed.max(1),
+                    }).ok();
+                }
             }
 
             // 8b. Insert track metadata into the local tracks table so track_play can find them.

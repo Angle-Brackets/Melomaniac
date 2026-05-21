@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use melomaniac_storage::{CommitRecord, TreeBlob};
-use melomaniac_sync::{ConflictKind, KnownDevice, PeerInfo, PlaylistManifest, QrPayload, SyncBridge, SyncReport};
-use tauri::State;
+use melomaniac_sync::{ConflictKind, KnownDevice, PeerInfo, PlaylistManifest, QrPayload, SyncBridge, SyncProgress, SyncReport};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::storage::StorageState;
 
@@ -68,16 +68,39 @@ pub async fn sync_remove_device(
         .map_err(|e| e.to_string())
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ProgressPayload {
+    playlist_id: String,
+    done: usize,
+    total: usize,
+}
+
+fn spawn_progress_forwarder(app: AppHandle) -> std::sync::mpsc::SyncSender<SyncProgress> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<SyncProgress>(64);
+    std::thread::spawn(move || {
+        while let Ok(p) = rx.recv() {
+            app.emit("sync://progress", ProgressPayload {
+                playlist_id: p.playlist_id,
+                done: p.done,
+                total: p.total,
+            }).ok();
+        }
+    });
+    tx
+}
+
 #[tauri::command]
 pub async fn sync_playlist(
     playlist_id: String,
     branch_name: Option<String>,
     state: State<'_, SyncState>,
+    app: AppHandle,
 ) -> Result<SyncReport, String> {
     let branch = branch_name.unwrap_or_else(|| "main".to_string());
     let bridge = Arc::clone(&state.bridge);
+    let progress_tx = spawn_progress_forwarder(app);
     tokio::task::spawn_blocking(move || {
-        bridge.sync_playlist(&playlist_id, &branch).map_err(|e| e.to_string())
+        bridge.sync_playlist(&playlist_id, &branch, Some(progress_tx)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -90,6 +113,7 @@ pub async fn sync_playlist_branches(
     playlist_id: String,
     branch_names: Vec<String>,
     state: State<'_, SyncState>,
+    app: AppHandle,
 ) -> Result<SyncReport, String> {
     let mut total_blobs = 0usize;
     let mut total_bytes = 0u64;
@@ -98,8 +122,9 @@ pub async fn sync_playlist_branches(
     for branch in branch_names {
         let bridge = Arc::clone(&state.bridge);
         let pid = playlist_id.clone();
+        let progress_tx = spawn_progress_forwarder(app.clone());
         let report = tokio::task::spawn_blocking(move || {
-            bridge.sync_playlist(&pid, &branch).map_err(|e| e.to_string())
+            bridge.sync_playlist(&pid, &branch, Some(progress_tx)).map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())??;

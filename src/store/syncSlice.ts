@@ -30,6 +30,11 @@ export type SyncSlice = {
   // Sync toast message
   syncToast: string | null
 
+  // Per-playlist download progress (0–1). Present while downloading, absent when idle.
+  downloadProgress: Record<string, number>
+  setDownloadProgress: (playlistId: string, pct: number) => void
+  clearDownloadProgress: (playlistId: string) => void
+
   // Peer playlist browser state
   peerManifestOpen:     boolean
   peerManifestPeer:     PeerInfo | null
@@ -95,13 +100,24 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   },
 
   // Pairing initial state
-  pairingOpen:  false,
-  pairingMode:  null,
-  qrPayload:    null,
-  knownDevices: [],
-  fingerprint:  '',
-  livePeers:    [],
-  syncToast:    null,
+  pairingOpen:       false,
+  pairingMode:       null,
+  qrPayload:         null,
+  knownDevices:      [],
+  fingerprint:       '',
+  livePeers:         [],
+  syncToast:         null,
+  downloadProgress:  {},
+
+  setDownloadProgress: (playlistId, pct) => set(state => ({
+    downloadProgress: { ...state.downloadProgress, [playlistId]: pct },
+  })),
+
+  clearDownloadProgress: (playlistId) => set(state => {
+    const next = { ...state.downloadProgress }
+    delete next[playlistId]
+    return { downloadProgress: next }
+  }),
 
   // Peer manifest initial state
   peerManifestOpen:     false,
@@ -194,7 +210,10 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       const report = branchNames.length === 1
         ? await invoke<SyncReport>('sync_playlist', { playlistId, branchName: branchNames[0] })
         : await invoke<SyncReport>('sync_playlist_branches', { playlistId, branchNames })
-      set(state => ({ downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId) }))
+      set(state => ({
+        downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId),
+        downloadProgress: (() => { const n = { ...state.downloadProgress }; delete n[playlistId]; return n })(),
+      }))
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
 
       if (report.conflicts.length > 0) {
@@ -209,10 +228,15 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         })
       }
     } catch (e) {
-      set(state => ({
-        downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId),
-        syncToast: `Sync failed: ${String(e).slice(0, 60)}`,
-      }))
+      set(state => {
+        const dp = { ...state.downloadProgress }
+        delete dp[playlistId]
+        return {
+          downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId),
+          downloadProgress: dp,
+          syncToast: `Sync failed: ${String(e).slice(0, 60)}`,
+        }
+      })
     }
     setTimeout(() => set({ syncToast: null }), 3000)
   },

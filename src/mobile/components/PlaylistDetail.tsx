@@ -293,7 +293,7 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
   const downloadPlaylist = useStore(s => s.downloadPlaylist);
   const peerEntry = peerManifest?.find(m => m.id === playlist.id);
   const localBranchNames = new Set(playlist.branches.map(b => b.name));
-  const ghostBranches = peerEntry?.branches.filter(n => !localBranchNames.has(n)) ?? [];
+  const ghostBranches = (peerEntry?.branches ?? []).filter(b => !localBranchNames.has(b.name));
 
   const handleDownloadBranch = async (branchName: string) => {
     setDownloadingBranch(branchName);
@@ -412,10 +412,10 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
               <div style={{ fontSize: 10, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 0.12, fontFamily: 'JetBrains Mono, monospace', padding: '10px 2px 4px' }}>
                 On peer · not downloaded
               </div>
-              {ghostBranches.map(name => {
-                const isLoading = downloadingBranch === name;
+              {ghostBranches.map(b => {
+                const isLoading = downloadingBranch === b.name;
                 return (
-                  <div key={name} onClick={() => !isLoading && handleDownloadBranch(name)} style={{
+                  <div key={b.name} onClick={() => !isLoading && handleDownloadBranch(b.name)} style={{
                     padding: '11px 13px', borderRadius: 12,
                     background: 'color-mix(in srgb, var(--bg-3) 50%, transparent)',
                     border: '0.5px dashed var(--border-2)',
@@ -425,8 +425,10 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
                   }}>
                     <div style={{ width: 28, height: 28, borderRadius: 14, background: 'var(--border-1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 14 }}>⎇</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 14, color: 'var(--text-2)', fontWeight: 500, fontFamily: 'JetBrains Mono, monospace' }}>{name}</span>
-                      <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>not downloaded</div>
+                      <span style={{ fontSize: 14, color: 'var(--text-2)', fontWeight: 500, fontFamily: 'JetBrains Mono, monospace' }}>{b.name}</span>
+                      <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>
+                        not downloaded{b.size_bytes > 0 ? ` · ${b.size_bytes > 1048576 ? `${(b.size_bytes / 1048576).toFixed(1)} MB` : `${(b.size_bytes / 1024).toFixed(0)} KB`}` : ''}
+                      </div>
                     </div>
                     {isLoading
                       ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>

@@ -31,9 +31,10 @@ export default function MobileApp() {
   const [detailActive,  setDetailActive]  = useState(false);
   const detailActiveRef = useRef(false);
 
-  const loadLibrary   = useStore(s => s.loadLibrary);
-  const loadPlaylists = useStore(s => s.loadPlaylists);
-  const syncToast     = useStore(s => s.syncToast);
+  const loadLibrary          = useStore(s => s.loadLibrary);
+  const loadPlaylists        = useStore(s => s.loadPlaylists);
+  const syncToast            = useStore(s => s.syncToast);
+  const setDownloadProgress  = useStore(s => s.setDownloadProgress);
 
   useEffect(() => {
     const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
@@ -76,6 +77,18 @@ export default function MobileApp() {
       if (id) localStorage.setItem('mm_last_playlist', id);
     });
   }, []);
+
+  // ── Sync progress listener ────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+    listen<{ playlist_id: string; done: number; total: number }>('sync://progress', ({ payload }) => {
+      const pct = payload.total > 0 ? payload.done / payload.total : 0
+      setDownloadProgress(payload.playlist_id, pct)
+    }).then(fn => { if (cancelled) fn(); else unlisten = fn })
+    return () => { cancelled = true; unlisten?.() }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Global audio event listener ───────────────────────────────────────────────
   // Lives outside NowPlaying so it stays active when the user switches tabs

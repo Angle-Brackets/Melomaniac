@@ -90,6 +90,22 @@ pub struct TrackSyncRecord {
     pub mime_type:    Option<String>,
 }
 
+// ── BranchInfo ────────────────────────────────────────────────────────────────
+
+/// Per-branch metadata included in a [`PlaylistManifest`].
+/// Receivers use `track_hashes` to compute the unique set when selecting
+/// multiple branches (avoiding double-counting shared tracks).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BranchInfo {
+    pub name: String,
+    pub track_count: usize,
+    /// Sum of CAS audio-blob sizes for all tracks in this branch (bytes).
+    pub size_bytes: u64,
+    /// BLAKE3 hashes of every track in this branch's HEAD tree.
+    /// Allows the receiver to deduplicate across branch selections.
+    pub track_hashes: Vec<String>,
+}
+
 // ── PlaylistManifest ──────────────────────────────────────────────────────────
 
 /// Manifest entry returned by `GET /manifest` on a peer's sync server.
@@ -100,15 +116,24 @@ pub struct PlaylistManifest {
     pub description: Option<String>,
     pub branch_count: usize,
     pub track_count: usize,
-    /// Sum of all audio blob sizes for this playlist in bytes.
+    /// Sum of all audio blob sizes for the primary (main) branch in bytes.
     pub size_bytes: u64,
     /// Optional BLAKE3 hash of the playlist artwork blob.
     pub artwork_hash: Option<String>,
     /// The HEAD commit hash on the serving node's DAG for this playlist.
     pub head_commit: String,
-    /// All branch names available on the serving node for this playlist.
+    /// Per-branch detail (name + sizes + track hashes for dedup).
     #[serde(default)]
-    pub branches: Vec<String>,
+    pub branches: Vec<BranchInfo>,
+}
+
+// ── SyncProgress ─────────────────────────────────────────────────────────────
+
+/// Progress notification sent from `sync_playlist` to the Tauri command layer.
+pub struct SyncProgress {
+    pub playlist_id: String,
+    pub done: usize,
+    pub total: usize,
 }
 
 // ── SyncReport ────────────────────────────────────────────────────────────────
@@ -277,7 +302,12 @@ pub trait SyncBridge: Send + Sync {
     /// "Best" is implementation-defined (typically lowest latency). Returns a
     /// [`SyncReport`]; if `report.conflicts` is non-empty the caller must
     /// resolve them before the playlist is updated on disk.
-    fn sync_playlist(&self, playlist_id: &str, branch_name: &str) -> Result<SyncReport, SyncError>;
+    fn sync_playlist(
+        &self,
+        playlist_id: &str,
+        branch_name: &str,
+        progress_tx: Option<std::sync::mpsc::SyncSender<SyncProgress>>,
+    ) -> Result<SyncReport, SyncError>;
 
     /// Perform a full bidirectional sync with a specific peer (identified by
     /// their base64 public key). Intended for desktop-to-desktop workflows

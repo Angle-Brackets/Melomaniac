@@ -432,7 +432,12 @@ impl SyncBridge for IosSyncBridge {
         Ok(())
     }
 
-    fn sync_playlist(&self, playlist_id: &str, branch_name: &str) -> Result<SyncReport, SyncError> {
+    fn sync_playlist(
+        &self,
+        playlist_id: &str,
+        branch_name: &str,
+        progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
+    ) -> Result<SyncReport, SyncError> {
         let identity = Arc::clone(&self.identity);
         let peers = Arc::clone(&self.peers);
         let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
@@ -545,11 +550,21 @@ impl SyncBridge for IosSyncBridge {
             }
 
             // 8. Download missing track + artwork blobs (only what this playlist needs).
+            let total_needed = needed.len();
+            let mut done_needed: usize = 0;
             for hash in &needed {
                 let bytes = client.get_blob(hash).await?;
                 bytes_fetched += bytes.len() as u64;
                 cas.write_blob(&bytes).await?;
                 blobs_fetched += 1;
+                done_needed += 1;
+                if let Some(ref tx) = progress_tx {
+                    tx.try_send(super::SyncProgress {
+                        playlist_id: playlist_id.clone(),
+                        done: done_needed,
+                        total: total_needed.max(1),
+                    }).ok();
+                }
             }
 
             // 8b. Insert track metadata into the local tracks table so track_play can find them.

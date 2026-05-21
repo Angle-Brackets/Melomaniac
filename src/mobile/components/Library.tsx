@@ -828,19 +828,44 @@ function fmtBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// SVG arc progress ring. r=radius, pct=0..1, stroke width is fixed at 2.5px.
+function ProgressRing({ pct, size = 22, color = 'var(--accent)' }: { pct: number; size?: number; color?: string }) {
+  const r = (size - 3) / 2
+  const circ = 2 * Math.PI * r
+  const dash = pct * circ
+  return (
+    <svg width={size} height={size} style={{ flexShrink: 0, transform: 'rotate(-90deg)' }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border-2)" strokeWidth={2.5}/>
+      <circle
+        cx={size/2} cy={size/2} r={r} fill="none"
+        stroke={color} strokeWidth={2.5}
+        strokeDasharray={`${dash} ${circ}`}
+        strokeLinecap="round"
+        style={{ transition: 'stroke-dasharray 0.2s ease' }}
+      />
+    </svg>
+  )
+}
+
 // Branch selection sheet shown before downloading a peer playlist.
 function BranchSelectSheet({ manifest, onConfirm, onCancel }: {
   manifest: import('../../store/types').PlaylistManifest
   onConfirm: (branches: string[]) => void
   onCancel: () => void
 }) {
-  const branches = manifest.branches.length > 0 ? manifest.branches : ['main']
-  const [selected, setSelected] = useState<Set<string>>(new Set(['main'].filter(n => branches.includes(n)).concat(branches.length === 1 ? branches : [])))
+  const branchInfos = manifest.branches.length > 0
+    ? manifest.branches
+    : [{ name: 'main', track_count: manifest.track_count, size_bytes: manifest.size_bytes, track_hashes: [] }]
+
+  const branchNames = branchInfos.map(b => b.name)
+  const [selected, setSelected] = useState<Set<string>>(
+    new Set(['main'].filter(n => branchNames.includes(n)).concat(branchInfos.length === 1 ? branchNames : []))
+  )
 
   const toggle = (name: string) => setSelected(prev => {
     const next = new Set(prev)
     if (next.has(name)) {
-      if (next.size === 1) return prev // keep at least one selected
+      if (next.size === 1) return prev
       next.delete(name)
     } else {
       next.add(name)
@@ -848,20 +873,44 @@ function BranchSelectSheet({ manifest, onConfirm, onCancel }: {
     return next
   })
 
+  // Unique track count + total size across selected branches.
+  const { uniqueTracks, totalBytes } = useMemo(() => {
+    const uniqueHashes = new Set<string>()
+    let bytes = 0
+    let noHashCount = 0
+    for (const b of branchInfos) {
+      if (!selected.has(b.name)) continue
+      bytes += b.size_bytes
+      if (b.track_hashes.length > 0) {
+        b.track_hashes.forEach(h => uniqueHashes.add(h))
+      } else {
+        noHashCount += b.track_count
+      }
+    }
+    return {
+      uniqueTracks: uniqueHashes.size > 0 ? uniqueHashes.size : noHashCount,
+      totalBytes: bytes,
+    }
+  }, [selected, branchInfos])
+
   return (
     <>
       <div style={{ marginBottom: 14 }}>
-        <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>
-          Choose which branches to download from <span style={{ color: 'var(--accent)' }}>{manifest.name}</span>
+        <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 6 }}>
+          Choose branches to download from <span style={{ color: 'var(--accent)' }}>{manifest.name}</span>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
-          {fmtBytes(manifest.size_bytes)} total · {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-3)', borderRadius: 10 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+            {selected.size > 0 ? (
+              <>{uniqueTracks} unique track{uniqueTracks !== 1 ? 's' : ''} · <span style={{ color: 'var(--accent-light, var(--accent))' }}>{fmtBytes(totalBytes)}</span></>
+            ) : 'Select at least one branch'}
+          </span>
         </div>
       </div>
-      {branches.map(name => (
+      {branchInfos.map(b => (
         <button
-          key={name}
-          onClick={() => toggle(name)}
+          key={b.name}
+          onClick={() => toggle(b.name)}
           style={{
             display: 'flex', alignItems: 'center', gap: 12, width: '100%',
             padding: '10px 0', background: 'none', border: 'none',
@@ -870,15 +919,21 @@ function BranchSelectSheet({ manifest, onConfirm, onCancel }: {
         >
           <div style={{
             width: 20, height: 20, borderRadius: 6, flexShrink: 0,
-            background: selected.has(name) ? 'var(--accent)' : 'transparent',
-            border: selected.has(name) ? 'none' : '1.5px solid var(--border-2)',
+            background: selected.has(b.name) ? 'var(--accent)' : 'transparent',
+            border: selected.has(b.name) ? 'none' : '1.5px solid var(--border-2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            {selected.has(name) && <Icons.check size={12} stroke="var(--bg-0)"/>}
+            {selected.has(b.name) && <Icons.check size={12} stroke="var(--bg-0)"/>}
           </div>
           <span style={{ fontSize: 13.5, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>⎇</span>
-          <span style={{ flex: 1, textAlign: 'left', fontSize: 15, color: 'var(--text-0)', fontWeight: 500 }}>{name}</span>
-          {name === 'main' && <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>primary</span>}
+          <span style={{ flex: 1, textAlign: 'left', fontSize: 15, color: 'var(--text-0)', fontWeight: 500 }}>{b.name}</span>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>{fmtBytes(b.size_bytes)}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
+              {b.track_count} track{b.track_count !== 1 ? 's' : ''}
+              {b.name === 'main' ? ' · primary' : ''}
+            </div>
+          </div>
         </button>
       ))}
       <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
@@ -893,7 +948,7 @@ function BranchSelectSheet({ manifest, onConfirm, onCancel }: {
           disabled={selected.size === 0}
           style={{ flex: 2, padding: '11px 0', borderRadius: 12, background: 'var(--accent)', border: 'none', cursor: 'pointer', color: 'var(--bg-0)', fontSize: 14, fontWeight: 600 }}
         >
-          Download {selected.size > 1 ? `${selected.size} branches` : '1 branch'}
+          {selected.size > 1 ? `Download ${selected.size} branches` : 'Download'}
         </button>
       </div>
     </>
@@ -903,21 +958,22 @@ function BranchSelectSheet({ manifest, onConfirm, onCancel }: {
 // Tapping a playlist card sets it as the current playlist and opens the detail
 // overlay (PlaylistDetail) — the detail component reads currentPlaylistId from
 // the store rather than receiving it as a prop.
-function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal, onRequestDownload }: {
+function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal, progress, onRequestDownload }: {
   manifest: import('../../store/types').PlaylistManifest
   peerAddr: string
   peerName: string
   isDownloading: boolean
   isLocal: boolean
+  progress: number  // 0..1, only meaningful when isDownloading
   onRequestDownload: (branches: string[]) => void
 }) {
   const [showSheet, setShowSheet] = useState(false)
 
   const handleTap = () => {
     if (isDownloading) return
-    const branches = manifest.branches.length > 0 ? manifest.branches : ['main']
-    if (branches.length === 1) {
-      onRequestDownload(branches)
+    const branchNames = manifest.branches.length > 0 ? manifest.branches.map(b => b.name) : ['main']
+    if (branchNames.length === 1) {
+      onRequestDownload(branchNames)
     } else {
       setShowSheet(true)
     }
@@ -978,7 +1034,7 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
           </div>
         </div>
         {isDownloading
-          ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
+          ? <ProgressRing pct={progress} size={22}/>
           : isLocal
             ? <Icons.sync size={16} stroke="var(--text-3)"/>
             : <Icons.download size={17} stroke="var(--text-2)"/>
@@ -1015,6 +1071,7 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
   const peerManifestLoading  = useStore(s => s.peerManifestLoading);
   const downloadingPlaylists = useStore(s => s.downloadingPlaylists);
   const downloadPlaylist     = useStore(s => s.downloadPlaylist);
+  const downloadProgress     = useStore(s => s.downloadProgress);
   const livePeers            = useStore(s => s.livePeers);
   const knownDevices         = useStore(s => s.knownDevices);
   const openPeerManifest     = useStore(s => s.openPeerManifest);
@@ -1119,6 +1176,7 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
                 peerName={peerName}
                 isLocal={localIds.has(manifest.id)}
                 isDownloading={downloadingPlaylists.includes(manifest.id)}
+                progress={downloadProgress[manifest.id] ?? 0}
                 onRequestDownload={branches => downloadPlaylist(manifest.id, branches)}
               />
             ))}

@@ -118,6 +118,13 @@ export type QrPayload = {
   exp:            number  // Unix timestamp seconds
 }
 
+export type BranchInfo = {
+  name:         string
+  track_count:  number
+  size_bytes:   number
+  track_hashes: string[]
+}
+
 export type PlaylistManifest = {
   id:           string
   name:         string
@@ -127,5 +134,5 @@ export type PlaylistManifest = {
   size_bytes:   number
   artwork_hash: string | null
   head_commit:  string
-  branches:     string[]
+  branches:     BranchInfo[]
 }
