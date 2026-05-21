@@ -105,12 +105,16 @@ impl DesktopSyncBridge {
         let pk_b64 = identity.public_key_b64();
         let hostname = local_hostname();
         let instance_name = format!("melomaniac-{}", &pk_b64[..8]);
+        let ip_str = local_ip()
+            .map(|ip| format!("{ip}:{port}"))
+            .unwrap_or_default();
 
         let properties = [
             ("v", "1"),
             ("pk", pk_b64.as_str()),
             ("name", identity.display_name.as_str()),
             ("mode", mode),
+            ("addr", ip_str.as_str()),
         ];
 
         let service = ServiceInfo::new(

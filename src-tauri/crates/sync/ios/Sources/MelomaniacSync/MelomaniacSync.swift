@@ -149,7 +149,6 @@ private func handleAdded(
     result: NWBrowser.Result,
     onDiscovered: MeloPeerDiscoveredCallback
 ) {
-    // Extract TXT-record pk immediately — it is available without a connection.
     guard
         case .bonjour(let txt) = result.metadata,
         let pk = extractPK(from: txt),
@@ -159,10 +158,21 @@ private func handleAdded(
         return
     }
 
-    // Determine the advertised port from the service endpoint (best-effort).
-    let advertisedPort = servicePort(from: result.endpoint)
+    // Read the pre-resolved "ip:port" string the desktop embeds in the TXT
+    // record.  This avoids an NWConnection round-trip whose remoteEndpoint can
+    // resolve to a .name (hostname) string that Rust's SocketAddr::parse
+    // cannot handle.
+    if let addr = txt.dictionary["addr"], !addr.isEmpty {
+        fputs("[MeloSync] peer discovered via TXT addr: pk=\(pk.prefix(8))… addr=\(addr)\n", stderr)
+        withCString(pk)   { pkPtr  in
+        withCString(addr) { addrPtr in
+            onDiscovered(pkPtr, addrPtr)
+        }}
+        return
+    }
 
-    // Open an NWConnection to resolve the IP address.
+    // Fallback: open a connection to let NWFramework resolve the IP.
+    let advertisedPort = servicePort(from: result.endpoint)
     let params = NWParameters.tcp
     let conn = NWConnection(to: result.endpoint, using: params)
 
@@ -170,22 +180,31 @@ private func handleAdded(
         switch state {
         case .ready:
             let remote = conn.currentPath?.remoteEndpoint
-            let addr = endpointAddress(from: remote, fallbackPort: advertisedPort)
-                    ?? endpointAddress(from: result.endpoint, fallbackPort: advertisedPort)
-
-            if let addr = addr {
-                withCString(pk)   { pkPtr  in
-                withCString(addr) { addrPtr in
+            // Only accept a resolved hostPort — .name endpoints produce hostname
+            // strings that Rust's SocketAddr::parse rejects.
+            if case .hostPort(let host, let port) = remote {
+                let portVal = port.rawValue != 0 ? port.rawValue : advertisedPort
+                let addrStr: String
+                switch host {
+                case .ipv4(let v4): addrStr = "\(v4):\(portVal)"
+                case .ipv6(let v6): addrStr = "[\(v6)]:\(portVal)"
+                default:
+                    fputs("[MeloSync] remote endpoint resolved to hostname — skipping peer \(pk.prefix(8))…\n", stderr)
+                    conn.cancel()
+                    return
+                }
+                fputs("[MeloSync] peer discovered via NWConnection: pk=\(pk.prefix(8))… addr=\(addrStr)\n", stderr)
+                withCString(pk)      { pkPtr  in
+                withCString(addrStr) { addrPtr in
                     onDiscovered(pkPtr, addrPtr)
                 }}
             } else {
-                fputs("[MeloSync] could not resolve address for peer \(pk)\n", stderr)
+                fputs("[MeloSync] remote endpoint not hostPort for peer \(pk.prefix(8))… — skipping\n", stderr)
             }
-            // We only needed the address; cancel the connection immediately.
             conn.cancel()
 
         case .failed(let error):
-            fputs("[MeloSync] resolution connection failed for peer \(pk): \(error)\n", stderr)
+            fputs("[MeloSync] resolution connection failed for peer \(pk.prefix(8))…: \(error)\n", stderr)
             conn.cancel()
 
         case .cancelled:

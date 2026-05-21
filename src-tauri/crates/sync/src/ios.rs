@@ -55,15 +55,21 @@ extern "C" fn on_peer_discovered(
         return;
     }
 
+    eprintln!("[sync] on_peer_discovered: pk={}… addr={}", &pk[..8.min(pk.len())], addr_str);
+
     // Only add trusted peers.
     let Some(trust) = TRUST_LIST.get() else { return };
     let Ok(tl) = trust.read() else { return };
     if !tl.is_known(&pk) {
+        eprintln!("[sync] on_peer_discovered: peer not in trust list — skipping");
         return;
     }
     drop(tl);
 
-    let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() else { return };
+    let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() else {
+        eprintln!("[sync] on_peer_discovered: cannot parse addr '{}' — skipping", addr_str);
+        return;
+    };
 
     // Display name: look up from trust list, fall back to truncated pk.
     let display_name = {
