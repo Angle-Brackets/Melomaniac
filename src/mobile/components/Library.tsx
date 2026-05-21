@@ -823,13 +823,83 @@ function SectionHeadPlain({ label, trailing, collapsible }: { label: string; tra
 // Tapping a playlist card sets it as the current playlist and opens the detail
 // overlay (PlaylistDetail) — the detail component reads currentPlaylistId from
 // the store rather than receiving it as a prop.
+function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal, onDownload }: {
+  manifest: import('../../store/types').PlaylistManifest
+  peerAddr: string
+  peerName: string
+  isDownloading: boolean
+  isLocal: boolean
+  onDownload: () => void
+}) {
+  return (
+    <div
+      onClick={isLocal || isDownloading ? undefined : onDownload}
+      style={{
+        margin: '4px 16px',
+        padding: '10px 12px',
+        background: isLocal ? 'var(--bg-2)' : 'color-mix(in srgb, var(--bg-2) 60%, transparent)',
+        border: isLocal ? '0.5px solid var(--border-1)' : '0.5px dashed var(--border-2)',
+        borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
+        cursor: isLocal || isDownloading ? 'default' : 'pointer',
+        opacity: isLocal ? 1 : 0.8,
+      }}
+    >
+      {manifest.artwork_hash ? (
+        <img
+          src={`http://${peerAddr}/blob/${manifest.artwork_hash}`}
+          style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flexShrink: 0, opacity: isLocal ? 1 : 0.65 }}
+          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+        />
+      ) : (
+        <MMArt size={54} radius={9}/>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 600, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {manifest.name}
+        </span>
+        {manifest.description && (
+          <span style={{ fontSize: 11.5, color: 'var(--text-2)', display: 'block', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {manifest.description}
+          </span>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 5 }}>
+          <span style={{ fontSize: 10.5, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>
+            from {peerName}
+          </span>
+          <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+            {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''}
+          </span>
+          {isLocal && (
+            <span style={{ fontSize: 10.5, color: 'var(--green, #4ade80)', fontFamily: 'JetBrains Mono, monospace' }}>✓ synced</span>
+          )}
+        </div>
+      </div>
+      {!isLocal && (
+        isDownloading
+          ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
+          : <Icons.download size={17} stroke="var(--text-2)"/>
+      )}
+    </div>
+  )
+}
+
 export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) => void; onPlaylistDetail: () => void }) {
-  const playlists          = useStore(s => s.playlists);
-  const setCurrentPlaylist = useStore(s => s.setCurrentPlaylist);
-  // branchByPlaylist persists the user's last-viewed branch per playlist so the
-  // card shows the correct branch pill even before the detail is opened.
-  const branchByPlaylist   = useStore(s => s.branchByPlaylist);
-  const [query, setQuery]  = useState('');
+  const playlists           = useStore(s => s.playlists);
+  const setCurrentPlaylist  = useStore(s => s.setCurrentPlaylist);
+  const branchByPlaylist    = useStore(s => s.branchByPlaylist);
+  const peerManifest        = useStore(s => s.peerManifest);
+  const peerManifestPeer    = useStore(s => s.peerManifestPeer);
+  const peerManifestLoading = useStore(s => s.peerManifestLoading);
+  const downloadingPlaylists = useStore(s => s.downloadingPlaylists);
+  const downloadPlaylist    = useStore(s => s.downloadPlaylist);
+  const [query, setQuery]   = useState('');
+
+  const localIds = useMemo(() => new Set(playlists.map(p => p.id)), [playlists]);
+  const peerAddr = peerManifestPeer?.addr ?? '';
+  const peerName = peerManifestPeer?.display_name ?? 'Peer';
+
+  // Peer playlists that aren't already local (ghost cards) + already-synced ones
+  const peerPlaylists = peerManifest ?? [];
 
   const displayed = useMemo(() => {
     if (!query.trim()) return playlists;
@@ -853,13 +923,14 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
           <MMSearchBar value={query} onChange={setQuery} placeholder="Search playlists"/>
         </div>
 
-        {displayed.length === 0 ? (
+        {/* Local playlists */}
+        {displayed.length === 0 && peerPlaylists.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
             {query ? 'No playlists match.' : 'No playlists yet.'}
           </div>
-        ) : (
+        ) : displayed.length > 0 && (
           <>
-            <SectionHeadPlain label="All playlists" trailing={String(displayed.length)}/>
+            <SectionHeadPlain label="My playlists" trailing={String(displayed.length)}/>
             {displayed.map(p => {
               const selectedBranchName = branchByPlaylist[p.id] ?? 'main';
               const activeBranch = p.branches.find(b => b.name === selectedBranchName) ?? p.branches.find(b => b.name === 'main') ?? p.branches[0];
@@ -877,6 +948,29 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
                 />
               );
             })}
+          </>
+        )}
+
+        {/* Peer playlists */}
+        {peerManifestLoading && (
+          <div style={{ padding: '24px', textAlign: 'center' }}>
+            <div style={{ width: 20, height: 20, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', margin: '0 auto' }}/>
+          </div>
+        )}
+        {peerPlaylists.length > 0 && (
+          <>
+            <SectionHeadPlain label={`From ${peerName}`} trailing={String(peerPlaylists.length)}/>
+            {peerPlaylists.map(manifest => (
+              <PeerPlaylistCard
+                key={manifest.id}
+                manifest={manifest}
+                peerAddr={peerAddr}
+                peerName={peerName}
+                isLocal={localIds.has(manifest.id)}
+                isDownloading={downloadingPlaylists.includes(manifest.id)}
+                onDownload={() => downloadPlaylist(manifest.id)}
+              />
+            ))}
           </>
         )}
 
