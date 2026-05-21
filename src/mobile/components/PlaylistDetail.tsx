@@ -1215,9 +1215,10 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const setPlaying         = useStore(s => s.setPlaying);
   const loadQueue          = useStore(s => s.loadQueue);
   const shuffle            = useStore(s => s.shuffle);
-  const toggleFavorite     = useStore(s => s.toggleFavorite);
-  const setShuffle         = useStore(s => s.setShuffle);
-  const queueTracks        = useStore(s => s.queueTracks);
+  const toggleFavorite            = useStore(s => s.toggleFavorite);
+  const setShuffle                = useStore(s => s.setShuffle);
+  const queueTracks               = useStore(s => s.queueTracks);
+  const hydrateTracksFromPlaylist = useStore(s => s.hydrateTracksFromPlaylist);
 
   const playlist = playlists.find(p => p.id === currentPlaylistId) ?? null;
   const artUrl   = usePlaylistArtwork(currentPlaylistId, currentBranchName);
@@ -1267,8 +1268,13 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     invoke<PlaylistTrackRecord[]>('playlist_get_tracks', {
       playlistId: currentPlaylistId,
       branchName: currentBranchName,
-    }).then(t => { setPlaylistTracks(t); setTracksLoading(false); })
-      .catch(() => setTracksLoading(false));
+    }).then(t => {
+      setPlaylistTracks(t);
+      setTracksLoading(false);
+      // Merge track metadata into the global library so NowPlaying can display
+      // synced tracks that aren't yet in the local library.
+      hydrateTracksFromPlaylist(t);
+    }).catch(() => setTracksLoading(false));
   };
 
   useEffect(() => { loadTracks(); }, [currentPlaylistId, currentBranchName]);

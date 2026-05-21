@@ -57,8 +57,11 @@ export default function MobileApp() {
       const branchName = useStore.getState().currentBranchName;
       const validBranch = pl.branches.find(b => b.name === branchName)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
       setPlayingBranch(validBranch); // initialize playing branch to match restored queue
-      invoke<{ hash: string }[]>('playlist_get_tracks', { playlistId: saved, branchName: validBranch })
-        .then(ptracks => { loadQueue(ptracks.map(t => t.hash)); })
+      invoke<import('../store/types').PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: saved, branchName: validBranch })
+        .then(ptracks => {
+          loadQueue(ptracks.map(t => t.hash));
+          useStore.getState().hydrateTracksFromPlaylist(ptracks);
+        })
         .catch(() => {});
       // Prefetch playlist artworks (use persisted branch per playlist)
       const { branchByPlaylist } = useStore.getState();

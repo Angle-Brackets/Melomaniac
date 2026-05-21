@@ -191,7 +191,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         ? await invoke<SyncReport>('sync_playlist', { playlistId, branchName: branchNames[0] })
         : await invoke<SyncReport>('sync_playlist_branches', { playlistId, branchNames })
       set(state => ({ downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId) }))
-      await get().loadPlaylists()
+      await Promise.all([get().loadPlaylists(), get().loadLibrary()])
       const items = report.blobs_fetched
       set({ syncToast: items > 0
         ? `Downloaded playlist — ${items} item${items !== 1 ? 's' : ''} synced`

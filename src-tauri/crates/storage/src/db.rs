@@ -100,6 +100,31 @@ impl Database {
         Ok(())
     }
 
+    /// Upsert track metadata from a sync peer.
+    ///
+    /// Inserts a new row or updates an existing one, but never overwrites
+    /// `favorited` or `ingested_at` — those are local-only fields.
+    /// Metadata fields are only overwritten when the incoming value is "better"
+    /// (non-empty title/artist, non-null artwork/album/mime_type, positive duration).
+    pub async fn upsert_track_from_sync(&self, r: &TrackRecord) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO tracks (hash, title, artist, album, artwork_hash, duration_ms, favorited, mime_type)
+             VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+             ON CONFLICT(hash) DO UPDATE SET
+               title        = CASE WHEN NULLIF(excluded.title, '') IS NOT NULL THEN excluded.title ELSE tracks.title END,
+               artist       = CASE WHEN NULLIF(excluded.artist, '') IS NOT NULL THEN excluded.artist ELSE tracks.artist END,
+               album        = COALESCE(excluded.album, tracks.album),
+               artwork_hash = COALESCE(excluded.artwork_hash, tracks.artwork_hash),
+               duration_ms  = CASE WHEN excluded.duration_ms > 0 THEN excluded.duration_ms ELSE tracks.duration_ms END,
+               mime_type    = COALESCE(excluded.mime_type, tracks.mime_type)"
+        )
+        .bind(&r.hash).bind(&r.title).bind(&r.artist)
+        .bind(&r.album).bind(&r.artwork_hash)
+        .bind(r.duration_ms).bind(&r.mime_type)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Set ingested_at + source_url on a track. Only writes ingested_at if it is
     /// currently 0 (i.e. never set), so re-downloading the same track doesn't
     /// reset its NEW badge timer.

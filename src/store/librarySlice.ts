@@ -8,6 +8,9 @@ export type LibrarySlice = {
 
   loadLibrary: () => Promise<void>
   toggleFavorite: (hash: string) => void
+  /** Merge playlist track metadata into the global tracks array without a DB round-trip.
+   *  Used to make synced tracks visible to the player before loadLibrary() completes. */
+  hydrateTracksFromPlaylist: (playlistTracks: TrackRecord[]) => void
 }
 
 export const createLibrarySlice: StateCreator<LibrarySlice> = (set, get) => ({
@@ -22,6 +25,19 @@ export const createLibrarySlice: StateCreator<LibrarySlice> = (set, get) => ({
     } catch {
       set({ libraryStatus: 'error' })
     }
+  },
+
+  hydrateTracksFromPlaylist: (playlistTracks) => {
+    const current = get().tracks
+    const existing = new Map(current.map(t => [t.hash, t]))
+    let changed = false
+    for (const pt of playlistTracks) {
+      if (!existing.has(pt.hash)) {
+        existing.set(pt.hash, pt)
+        changed = true
+      }
+    }
+    if (changed) set({ tracks: [...existing.values()] })
   },
 
   toggleFavorite: (hash) => {

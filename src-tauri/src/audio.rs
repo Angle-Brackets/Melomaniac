@@ -79,19 +79,30 @@ pub async fn track_play(
         .db
         .get_track(&hash)
         .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("track not found in library: {hash}"))?;
+        .map_err(|e| e.to_string())?;
 
     let path = storage.cas.blob_path(&hash);
-    let artwork_path = record.artwork_hash.as_deref().map(|h| storage.cas.blob_path(h));
 
-    let meta = TrackMetadata {
-        title:        record.title,
-        artist:       record.artist,
-        album:        record.album,
-        artwork_path,
-        duration_ms:  Some(record.duration_ms as u64),
-        mime_type:    record.mime_type,
+    // If the track isn't in the DB yet (e.g. mid-sync), play the blob with
+    // whatever metadata we have — audio still works, lock-screen will just
+    // show an empty title until the next sync run fills the row.
+    let meta = match record {
+        Some(r) => TrackMetadata {
+            title:       r.title,
+            artist:      r.artist,
+            album:       r.album,
+            artwork_path: r.artwork_hash.as_deref().map(|h| storage.cas.blob_path(h)),
+            duration_ms: Some(r.duration_ms as u64),
+            mime_type:   r.mime_type,
+        },
+        None => TrackMetadata {
+            title:       hash[..hash.len().min(8)].to_string(),
+            artist:      String::new(),
+            album:       None,
+            artwork_path: None,
+            duration_ms: None,
+            mime_type:   None,
+        },
     };
 
     let source = AudioSource::File(path);
