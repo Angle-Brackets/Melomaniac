@@ -25,6 +25,15 @@ unsafe extern "C" {
     fn melo_get_device_name(buf: *mut std::ffi::c_char, len: usize);
 }
 
+/// Called from Swift so that NWBrowser/NWListener state messages appear in the
+/// same `eprintln!` stream as other Rust logs (Swift's own stderr goes to
+/// Xcode's device console, not the `tauri ios dev` terminal).
+#[unsafe(no_mangle)]
+pub extern "C" fn melo_sync_log(msg: *const std::ffi::c_char) {
+    let s = unsafe { std::ffi::CStr::from_ptr(msg).to_str().unwrap_or("?") };
+    eprintln!("[MeloSync] {s}");
+}
+
 // ── Process-global peer registry ──────────────────────────────────────────────
 //
 // `extern "C" fn` pointers cannot capture state, so peer list and trust list
@@ -261,12 +270,16 @@ impl IosSyncBridge {
 
 impl SyncBridge for IosSyncBridge {
     fn start_discovery(&self) -> Result<(), SyncError> {
+        eprintln!("[sync] iOS start_discovery: name='{}' pk={}…",
+            self.identity.display_name,
+            &self.identity.public_key_b64()[..8]);
         let pk   = std::ffi::CString::new(self.identity.public_key_b64()).unwrap_or_default();
         let name = std::ffi::CString::new(self.identity.display_name.clone()).unwrap_or_default();
         unsafe {
             melo_sync_register_service(pk.as_ptr(), name.as_ptr(), 7700);
             melo_sync_start_discovery(on_peer_discovered, on_peer_lost);
         }
+        eprintln!("[sync] iOS start_discovery: NWBrowser and NWListener started");
         Ok(())
     }
 
