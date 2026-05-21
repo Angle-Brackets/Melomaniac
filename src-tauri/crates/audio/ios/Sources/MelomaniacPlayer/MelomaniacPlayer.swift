@@ -296,7 +296,8 @@ public func meloSetArtworkPath(_ pathPtr: UnsafePointer<CChar>?) {
 // static extern "C" fn in Rust). It is safe to capture in closures and use
 // across threads.
 
-public typealias MeloCommandCallback = @convention(c) (Int32) -> Void
+// Second arg is the seek position in seconds; 0.0 for all non-seek commands.
+public typealias MeloCommandCallback = @convention(c) (Int32, Double) -> Void
 
 /// Registers lock-screen transport controls that call back into Rust.
 ///
@@ -311,18 +312,33 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
 
         // isEnabled defaults to true when addTarget is called, but setting it
         // explicitly prevents stale false state from a prior partial registration.
-        c.playCommand.isEnabled             = true
-        c.pauseCommand.isEnabled            = true
-        c.nextTrackCommand.isEnabled        = true
-        c.previousTrackCommand.isEnabled    = true
-        c.togglePlayPauseCommand.isEnabled  = true
+        c.playCommand.isEnabled                    = true
+        c.pauseCommand.isEnabled                   = true
+        c.nextTrackCommand.isEnabled               = true
+        c.previousTrackCommand.isEnabled           = true
+        c.togglePlayPauseCommand.isEnabled         = true
+        c.changePlaybackPositionCommand.isEnabled  = true
 
         remoteCommandTokens = [
-            c.playCommand.addTarget            { _ in callback(0); return .success },
-            c.pauseCommand.addTarget           { _ in callback(1); return .success },
-            c.nextTrackCommand.addTarget       { _ in callback(2); return .success },
-            c.previousTrackCommand.addTarget   { _ in callback(3); return .success },
-            c.togglePlayPauseCommand.addTarget { _ in callback(4); return .success },
+            c.playCommand.addTarget            { _ in callback(0, 0.0); return .success },
+            c.pauseCommand.addTarget           { _ in callback(1, 0.0); return .success },
+            c.nextTrackCommand.addTarget       { _ in callback(2, 0.0); return .success },
+            c.previousTrackCommand.addTarget   { _ in callback(3, 0.0); return .success },
+            c.togglePlayPauseCommand.addTarget { _ in callback(4, 0.0); return .success },
+            c.changePlaybackPositionCommand.addTarget { event in
+                guard let seekEvent = event as? MPChangePlaybackPositionCommandEvent else {
+                    return .commandFailed
+                }
+                let secs = seekEvent.positionTime
+                // Seek immediately for a responsive scrubber; also notify Rust/frontend.
+                player?.currentTime = secs
+                if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
+                    info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = secs
+                    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+                }
+                callback(5, secs)
+                return .success
+            },
         ]
         NSLog("[Melo] Remote commands registered (\(remoteCommandTokens.count) tokens)")
     }

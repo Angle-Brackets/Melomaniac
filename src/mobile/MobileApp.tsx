@@ -82,6 +82,7 @@ export default function MobileApp() {
       | 'RemoteNextTrack' | 'RemotePreviousTrack' | 'RemoteTogglePlayPause'
       | { PositionChanged: number }
       | { DurationKnown: number }
+      | { RemoteSeek: number }
       | { Error: string };
 
     // ── playNext / playPrev ────────────────────────────────────────────────────
@@ -176,6 +177,12 @@ export default function MobileApp() {
       }
       if (payload === 'RemoteNextTrack')     { playNext(); return; }
       if (payload === 'RemotePreviousTrack') { playPrev(); return; }
+      if (typeof payload === 'object' && 'RemoteSeek' in payload) {
+        const posMs = payload.RemoteSeek;
+        positionMsRef.current = posMs;
+        invoke('audio_seek', { positionMs: posMs }).catch(console.error);
+        return;
+      }
     }).then(fn => { if (cancelled) fn(); else unlisten = fn; });
     return () => { cancelled = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps

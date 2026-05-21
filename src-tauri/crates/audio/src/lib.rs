@@ -84,6 +84,8 @@ pub enum AudioEvent {
     RemotePreviousTrack,
     /// Lock-screen remote: headphone toggle (play/pause).
     RemoteTogglePlayPause,
+    /// Lock-screen / Control Centre scrubber: user seeked to position (milliseconds).
+    RemoteSeek(u64),
 }
 
 // ── Error type ────────────────────────────────────────────────────────────────

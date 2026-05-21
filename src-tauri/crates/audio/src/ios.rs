@@ -27,7 +27,7 @@ unsafe extern "C" {
         position_secs: f32,
     );
     fn melo_set_artwork_path(path: *const c_char);
-    fn melo_register_remote_commands(callback: extern "C" fn(i32));
+    fn melo_register_remote_commands(callback: extern "C" fn(i32, f64));
 }
 
 // ── Remote command routing ────────────────────────────────────────────────────
@@ -37,13 +37,14 @@ unsafe extern "C" {
 
 static REMOTE_CMD_TX: OnceLock<Sender<AudioEvent>> = OnceLock::new();
 
-extern "C" fn remote_cmd_callback(code: i32) {
+extern "C" fn remote_cmd_callback(code: i32, position_secs: f64) {
     let event = match code {
         0 => AudioEvent::RemotePlay,
         1 => AudioEvent::RemotePause,
         2 => AudioEvent::RemoteNextTrack,
         3 => AudioEvent::RemotePreviousTrack,
         4 => AudioEvent::RemoteTogglePlayPause,
+        5 => AudioEvent::RemoteSeek((position_secs * 1000.0) as u64),
         _ => return,
     };
     if let Some(tx) = REMOTE_CMD_TX.get() {
