@@ -348,11 +348,29 @@ impl SyncBridge for IosSyncBridge {
         eprintln!("[sync] iOS: paired with '{}' ({}…)", payload.display_name, &payload.public_key_b64[..8.min(payload.public_key_b64.len())]);
         eprintln!("[sync] iOS: QR payload addr = {:?}", payload.addr);
 
+        // Seed the peer list immediately from the QR addr so the desktop
+        // appears in livePeers right after pairing without waiting for
+        // mDNS discovery (which is unreliable across OS/platform boundaries).
+        if let Some(ref addr_str) = payload.addr {
+            if let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() {
+                if let Some(peers_lock) = PEER_LIST.get() {
+                    if let Ok(mut peers) = peers_lock.write() {
+                        if !peers.iter().any(|p| p.public_key_b64 == payload.public_key_b64) {
+                            peers.push(PeerInfo {
+                                public_key_b64: payload.public_key_b64.clone(),
+                                display_name: payload.display_name.clone(),
+                                addr,
+                                latency_ms: None,
+                            });
+                            eprintln!("[sync] iOS: seeded peer '{}' at {} from QR addr", payload.display_name, addr);
+                        }
+                    }
+                }
+            }
+        }
+
         // POST our own identity back to the desktop so it can add us to its
         // trust list (the QR payload only flows one way; /pair closes the loop).
-        // Use tokio::spawn + async reqwest so we stay on the existing Tauri
-        // runtime — plain OS threads on iOS have restricted network access and
-        // reqwest::blocking creates a second runtime that can conflict.
         if let Some(addr) = payload.addr {
             let own_pk   = self.identity.public_key_b64();
             let own_name = self.identity.display_name.clone();
