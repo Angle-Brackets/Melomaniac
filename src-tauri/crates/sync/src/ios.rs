@@ -473,31 +473,63 @@ impl SyncBridge for IosSyncBridge {
                 });
             }
 
-            // 6 & 7. Fetch hash sets.
-            let peer_hashes = client.get_hashes().await?;
+            // 6. Fetch commit chain — tree hashes tell us exactly which blobs to pull.
+            let peer_commits = client.get_commits(&playlist_id, "main").await?;
+
+            // 7. Walk each commit's tree: fetch missing tree blobs, collect track/artwork hashes.
             let local_hashes: std::collections::HashSet<String> =
                 cas.list_all_hashes().into_iter().collect();
-            let peer_hash_set: std::collections::HashSet<String> =
-                peer_hashes.into_iter().collect();
-
-            // 8. Missing hashes = peer has them, we don't.
-            let missing: Vec<String> = peer_hash_set
-                .difference(&local_hashes)
-                .cloned()
-                .collect();
-
-            // 9. Pull all missing blobs.
+            let mut needed: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut blobs_fetched: usize = 0;
             let mut bytes_fetched: u64 = 0;
-            for hash in &missing {
+
+            for commit in &peer_commits {
+                if local_hashes.contains(&commit.tree_hash) {
+                    // Tree already local — read it to find referenced track/artwork hashes.
+                    if let Ok(bytes) = cas.read_blob(&commit.tree_hash).await {
+                        if let Ok(tree) = TreeBlob::from_bytes(&bytes) {
+                            for track in &tree.tracks {
+                                if !local_hashes.contains(&track.hash) {
+                                    needed.insert(track.hash.clone());
+                                }
+                            }
+                            if let Some(ref art) = tree.meta.artwork_hash {
+                                if !local_hashes.contains(art) {
+                                    needed.insert(art.clone());
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Fetch tree blob from peer and collect its track/artwork hashes.
+                    let bytes = client.get_blob(&commit.tree_hash).await?;
+                    bytes_fetched += bytes.len() as u64;
+                    if let Ok(tree) = TreeBlob::from_bytes(&bytes) {
+                        for track in &tree.tracks {
+                            if !local_hashes.contains(&track.hash) {
+                                needed.insert(track.hash.clone());
+                            }
+                        }
+                        if let Some(ref art) = tree.meta.artwork_hash {
+                            if !local_hashes.contains(art) {
+                                needed.insert(art.clone());
+                            }
+                        }
+                    }
+                    cas.write_blob(&bytes).await?;
+                    blobs_fetched += 1;
+                }
+            }
+
+            // 8. Download missing track + artwork blobs (only what this playlist needs).
+            for hash in &needed {
                 let bytes = client.get_blob(hash).await?;
                 bytes_fetched += bytes.len() as u64;
                 cas.write_blob(&bytes).await?;
                 blobs_fetched += 1;
             }
 
-            // 10. Import commit chain.
-            let peer_commits = client.get_commits(&playlist_id, "main").await?;
+            // 9. Import commits into local DAG.
             db.import_commit_chain(&peer_commits).await?;
 
             // 11. DAG merge.
