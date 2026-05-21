@@ -73,6 +73,23 @@ pub struct PeerInfo {
     pub latency_ms: Option<u32>,
 }
 
+// ── TrackSyncRecord ───────────────────────────────────────────────────────────
+
+/// Slim track record exchanged over the network so the receiving peer can
+/// populate its local `tracks` table after downloading audio blobs.
+/// Does not include `favorited`, `ingested_at`, or `source_url` — those are
+/// local-only fields that should not be overwritten on the receiving side.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TrackSyncRecord {
+    pub hash:         String,
+    pub title:        String,
+    pub artist:       String,
+    pub album:        Option<String>,
+    pub artwork_hash: Option<String>,
+    pub duration_ms:  i64,
+    pub mime_type:    Option<String>,
+}
+
 // ── PlaylistManifest ──────────────────────────────────────────────────────────
 
 /// Manifest entry returned by `GET /manifest` on a peer's sync server.

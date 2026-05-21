@@ -1,6 +1,6 @@
 use crate::{
     KnownDevice, NodeIdentity, PeerInfo, PendingMerge,
-    PlaylistManifest, QrPayload, SyncBridge, SyncError, SyncReport,
+    PlaylistManifest, QrPayload, SyncBridge, SyncError, SyncReport, TrackSyncRecord,
     identity::{TrustList, unix_now},
     merge::diff_trees,
 };
@@ -15,7 +15,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::VerifyingKey;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use melomaniac_storage::{CasStore, CommitRecord, Database, TreeBlob};
+use melomaniac_storage::{CasStore, CommitRecord, Database, TrackRecord, TreeBlob};
 use rand::RngCore;
 use std::{
     collections::HashMap,
@@ -377,7 +377,7 @@ async fn handle_manifest(
     };
 
     let playlists = match db.get_all_playlists().await {
-        Ok(p) => p,
+        Ok(p) => p.into_iter().filter(|pl| pl.name != "DevelopmentOnly").collect::<Vec<_>>(),
         Err(_) => return axum::Json(Vec::<PlaylistManifest>::new()).into_response(),
     };
 
@@ -435,6 +435,37 @@ async fn handle_hashes(
     };
 
     axum::Json(hashes).into_response()
+}
+
+async fn handle_tracks(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(hashes): Json<Vec<String>>,
+) -> impl IntoResponse {
+    if let Err(status) = check_auth(&headers, &state.trust_list).await {
+        return (status, axum::Json(serde_json::Value::Null)).into_response();
+    }
+
+    let Some(db) = state.db.get() else {
+        return axum::Json(Vec::<TrackSyncRecord>::new()).into_response();
+    };
+
+    let mut records = Vec::with_capacity(hashes.len());
+    for hash in &hashes {
+        if let Ok(Some(track)) = db.get_track(hash).await {
+            records.push(TrackSyncRecord {
+                hash: track.hash,
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                artwork_hash: track.artwork_hash,
+                duration_ms: track.duration_ms,
+                mime_type: track.mime_type,
+            });
+        }
+    }
+
+    axum::Json(records).into_response()
 }
 
 async fn handle_blob(
@@ -535,6 +566,7 @@ fn build_router(state: ServerState) -> Router {
         .route("/ping", get(handle_ping))
         .route("/manifest", get(handle_manifest))
         .route("/hashes", get(handle_hashes))
+        .route("/tracks", post(handle_tracks))
         .route("/blob/:hash", get(handle_blob))
         .route("/commits/:playlist_id/:branch_name", get(handle_commits))
         .route("/pair", post(handle_pair))
@@ -627,6 +659,21 @@ impl SyncClient {
             .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
 
         resp.json::<Vec<CommitRecord>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_tracks(&self, hashes: &[String]) -> Result<Vec<TrackSyncRecord>, SyncError> {
+        let resp = self
+            .http
+            .post(format!("{}/tracks", self.base_url))
+            .header("Authorization", self.auth_header())
+            .json(hashes)
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<Vec<TrackSyncRecord>>()
             .await
             .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
     }
@@ -934,6 +981,29 @@ impl SyncBridge for DesktopSyncBridge {
                 bytes_fetched += bytes.len() as u64;
                 cas.write_blob(&bytes).await?;
                 blobs_fetched += 1;
+            }
+
+            // 8b. Fetch track metadata for the HEAD tree and insert into local tracks table.
+            // Required so track_play can resolve hash → title/artist/duration/mime_type.
+            if let Some(head_commit) = peer_commits.first() {
+                if let Ok(tree_bytes) = cas.read_blob(&head_commit.tree_hash).await {
+                    if let Ok(tree) = TreeBlob::from_bytes(&tree_bytes) {
+                        let hashes: Vec<String> = tree.tracks.iter().map(|e| e.hash.clone()).collect();
+                        if !hashes.is_empty() {
+                            if let Ok(sync_records) = client.get_tracks(&hashes).await {
+                                for r in sync_records {
+                                    let record = TrackRecord {
+                                        hash: r.hash, title: r.title, artist: r.artist,
+                                        album: r.album, artwork_hash: r.artwork_hash,
+                                        duration_ms: r.duration_ms, favorited: false,
+                                        mime_type: r.mime_type, ingested_at: 0, source_url: None,
+                                    };
+                                    db.insert_track(&record).await.ok();
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // 9. Import commits into local DAG.
