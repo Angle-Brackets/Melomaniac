@@ -88,6 +88,10 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       resolutions:     [],
       diffViewerOpen:  false,
     })
+    // Reload so the merged result shows up immediately in the playlist view.
+    await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+    set({ syncToast: 'Merge resolved — playlist updated' })
+    setTimeout(() => set({ syncToast: null }), 3000)
   },
 
   // Pairing initial state
@@ -192,15 +196,22 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         : await invoke<SyncReport>('sync_playlist_branches', { playlistId, branchNames })
       set(state => ({ downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId) }))
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
-      const items = report.blobs_fetched
-      set({ syncToast: items > 0
-        ? `Downloaded playlist — ${items} item${items !== 1 ? 's' : ''} synced`
-        : 'Playlist already up to date'
-      })
-    } catch {
+
+      if (report.conflicts.length > 0) {
+        // Surface conflict resolution UI — user must resolve before playlist is updated.
+        get().openDiffViewer(playlistId, report.conflicts)
+        set({ syncToast: `${report.conflicts.length} conflict${report.conflicts.length !== 1 ? 's' : ''} need resolution` })
+      } else {
+        const items = report.blobs_fetched
+        set({ syncToast: items > 0
+          ? `Synced — ${items} item${items !== 1 ? 's' : ''} downloaded`
+          : 'Already up to date'
+        })
+      }
+    } catch (e) {
       set(state => ({
         downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId),
-        syncToast: 'Download failed',
+        syncToast: `Sync failed: ${String(e).slice(0, 60)}`,
       }))
     }
     setTimeout(() => set({ syncToast: null }), 3000)

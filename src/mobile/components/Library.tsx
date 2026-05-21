@@ -914,7 +914,7 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
   const [showSheet, setShowSheet] = useState(false)
 
   const handleTap = () => {
-    if (isLocal || isDownloading) return
+    if (isDownloading) return
     const branches = manifest.branches.length > 0 ? manifest.branches : ['main']
     if (branches.length === 1) {
       onRequestDownload(branches)
@@ -933,7 +933,7 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
           background: isLocal ? 'var(--bg-2)' : 'color-mix(in srgb, var(--bg-2) 60%, transparent)',
           border: isLocal ? '0.5px solid var(--border-1)' : '0.5px dashed var(--border-2)',
           borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
-          cursor: isLocal || isDownloading ? 'default' : 'pointer',
+          cursor: isDownloading ? 'default' : 'pointer',
           opacity: isLocal ? 1 : 0.8,
         }}
       >
@@ -977,18 +977,19 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
             )}
           </div>
         </div>
-        {!isLocal && (
-          isDownloading
-            ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
+        {isDownloading
+          ? <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'mmSpin 0.7s linear infinite', flexShrink: 0 }}/>
+          : isLocal
+            ? <Icons.sync size={16} stroke="var(--text-3)"/>
             : <Icons.download size={17} stroke="var(--text-2)"/>
-        )}
+        }
       </div>
 
       {showSheet && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 80 }}>
           <div onClick={() => setShowSheet(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
           <MMSheet
-            title="Download Branches"
+            title={isLocal ? 'Sync Branches' : 'Download Branches'}
             height="56%"
             animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
             onClose={() => setShowSheet(false)}
