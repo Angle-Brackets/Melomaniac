@@ -123,6 +123,7 @@ export type BranchInfo = {
   track_count:  number
   size_bytes:   number
   track_hashes: string[]
+  head_commit:  string | null
 }
 
 export type PlaylistManifest = {

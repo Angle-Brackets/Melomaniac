@@ -127,6 +127,9 @@ pub struct BranchInfo {
     /// BLAKE3 hashes of every track in this branch's HEAD tree.
     /// Allows the receiver to deduplicate across branch selections.
     pub track_hashes: Vec<String>,
+    /// HEAD commit hash for this branch — used by peers to diff without
+    /// fetching blobs (None for empty branches).
+    pub head_commit: Option<String>,
 }
 
 // ── PlaylistManifest ──────────────────────────────────────────────────────────

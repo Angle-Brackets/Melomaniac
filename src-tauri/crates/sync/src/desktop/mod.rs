@@ -426,6 +426,7 @@ async fn handle_manifest(
                 track_count: tree.tracks.len(),
                 size_bytes: branch_size,
                 track_hashes,
+                head_commit: Some(hc.clone()),
             });
         }
 

@@ -58,9 +58,11 @@ export type SyncSlice = {
   downloadPlaylist:  (playlistId: string, branchNames: string[]) => Promise<void>
 }
 
-// Tracks peers we've already auto-synced this session so we don't re-fire
-// on every poll cycle. Cleared on app restart (module reload).
-const autoSyncedPeers = new Set<string>()
+// Per-peer, per-branch last-known HEAD commit: Map<peerPk, Map<"id:branch", headCommit>>
+// Cleared on app restart (module-level). Acts as the cheap checksum for diffs.
+const lastSeenHeads = new Map<string, Map<string, string>>()
+// Guards against concurrent auto-syncs for the same peer.
+const syncingPeers = new Set<string>()
 
 export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set, get) => {
   const showToast = (msg: string) => {
@@ -69,29 +71,51 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   }
 
   const triggerAutoSync = (peer: PeerInfo) => {
+    if (syncingPeers.has(peer.public_key_b64)) return
+    syncingPeers.add(peer.public_key_b64)
+
     invoke<PlaylistManifest[]>('sync_fetch_peer_manifest', { publicKeyB64: peer.public_key_b64 })
       .then(async manifest => {
         const { playlists } = get()
         const localIds = new Set(playlists.map(p => p.id))
-        const toSync = manifest.filter(m => localIds.has(m.id))
-        if (toSync.length === 0) return
+        const peerLastSeen = lastSeenHeads.get(peer.public_key_b64) ?? new Map<string, string>()
 
-        let synced = 0
-        for (const entry of toSync) {
+        // Update stored HEADs for all branches we received before deciding what to sync,
+        // so the next poll always has fresh data even if we skip syncing.
+        const newLastSeen = new Map(peerLastSeen)
+        for (const entry of manifest) {
+          for (const b of entry.branches) {
+            if (b.head_commit) newLastSeen.set(`${entry.id}:${b.name}`, b.head_commit)
+          }
+        }
+        lastSeenHeads.set(peer.public_key_b64, newLastSeen)
+
+        // Find playlists that exist locally and have at least one changed branch.
+        const toSync: Array<{ id: string; branchNames: string[] }> = []
+        for (const entry of manifest) {
+          if (!localIds.has(entry.id)) continue
           const localBranches = new Set(
             playlists.find(p => p.id === entry.id)?.branches.map(b => b.name) ?? []
           )
-          const branchNames = (entry.branches?.map(b => b.name) ?? ['main'])
-            .filter(name => localBranches.has(name))
-          if (branchNames.length === 0) continue
+          const changedBranches = entry.branches
+            .filter(b => b.head_commit && localBranches.has(b.name))
+            .filter(b => peerLastSeen.get(`${entry.id}:${b.name}`) !== b.head_commit)
+            .map(b => b.name)
+          if (changedBranches.length > 0) toSync.push({ id: entry.id, branchNames: changedBranches })
+        }
+
+        if (toSync.length === 0) return
+
+        let synced = 0
+        for (const { id, branchNames } of toSync) {
           try {
             if (branchNames.length === 1) {
-              await invoke('sync_playlist', { playlistId: entry.id, branchName: branchNames[0] })
+              await invoke('sync_playlist', { playlistId: id, branchName: branchNames[0] })
             } else {
-              await invoke('sync_playlist_branches', { playlistId: entry.id, branchNames })
+              await invoke('sync_playlist_branches', { playlistId: id, branchNames })
             }
             synced++
-          } catch { /* peer went offline mid-sync — skip */ }
+          } catch { /* peer went offline mid-sync */ }
         }
 
         if (synced > 0) {
@@ -99,7 +123,8 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
           showToast(`Auto-synced ${synced} playlist${synced !== 1 ? 's' : ''} with ${peer.display_name}`)
         }
       })
-      .catch(() => { /* peer unreachable — will retry next session */ })
+      .catch(() => {})
+      .finally(() => syncingPeers.delete(peer.public_key_b64))
   }
 
   return ({
@@ -191,12 +216,9 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   refreshLivePeers: async () => {
     const peers = await invoke<PeerInfo[]>('sync_get_peers')
     set({ livePeers: peers })
-    for (const peer of peers) {
-      if (!autoSyncedPeers.has(peer.public_key_b64)) {
-        autoSyncedPeers.add(peer.public_key_b64)
-        triggerAutoSync(peer)
-      }
-    }
+    // triggerAutoSync diffs against lastSeenHeads and skips if nothing changed,
+    // so it's safe to call on every poll — the fast path costs one manifest fetch.
+    for (const peer of peers) triggerAutoSync(peer)
   },
 
   syncWithPeer: async (publicKeyB64) => {
