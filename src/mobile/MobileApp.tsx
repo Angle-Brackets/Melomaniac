@@ -35,6 +35,7 @@ export default function MobileApp() {
   const loadPlaylists        = useStore(s => s.loadPlaylists);
   const syncToast            = useStore(s => s.syncToast);
   const setDownloadProgress  = useStore(s => s.setDownloadProgress);
+  const refreshLivePeers     = useStore(s => s.refreshLivePeers);
 
   useEffect(() => {
     const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
@@ -77,6 +78,14 @@ export default function MobileApp() {
       if (id) localStorage.setItem('mm_last_playlist', id);
     });
   }, []);
+
+  // ── Background peer poll — drives auto-sync when a known device comes online ──
+  useEffect(() => {
+    refreshLivePeers()
+    const id = setInterval(refreshLivePeers, 15_000)
+    return () => clearInterval(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Sync progress listener ────────────────────────────────────────────────────
   useEffect(() => {

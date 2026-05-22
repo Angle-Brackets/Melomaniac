@@ -120,6 +120,7 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 export default function DesktopApp() {
   const openPairingDisplay = useStore(s => s.openPairingDisplay);
   const syncToast          = useStore(s => s.syncToast);
+  const refreshLivePeers   = useStore(s => s.refreshLivePeers);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -260,6 +261,14 @@ export default function DesktopApp() {
   // Sync initial volume to the audio backend on mount
   useEffect(() => {
     invoke('audio_set_volume', { volume }).catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Background peer poll — drives auto-sync when a known device comes online
+  useEffect(() => {
+    refreshLivePeers()
+    const id = setInterval(refreshLivePeers, 15_000)
+    return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -58,10 +58,45 @@ export type SyncSlice = {
   downloadPlaylist:  (playlistId: string, branchNames: string[]) => Promise<void>
 }
 
+// Tracks peers we've already auto-synced this session so we don't re-fire
+// on every poll cycle. Cleared on app restart (module reload).
+const autoSyncedPeers = new Set<string>()
+
 export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set, get) => {
   const showToast = (msg: string) => {
     set({ syncToast: msg })
     setTimeout(() => set({ syncToast: null }), 3000)
+  }
+
+  const triggerAutoSync = (peer: PeerInfo) => {
+    invoke<PlaylistManifest[]>('sync_fetch_peer_manifest', { publicKeyB64: peer.public_key_b64 })
+      .then(async manifest => {
+        const { playlists } = get()
+        const localIds = new Set(playlists.map(p => p.id))
+        const toSync = manifest.filter(m => localIds.has(m.id))
+        if (toSync.length === 0) return
+
+        let synced = 0
+        for (const entry of toSync) {
+          const branchNames = entry.branches?.length > 0
+            ? entry.branches.map(b => b.name)
+            : ['main']
+          try {
+            if (branchNames.length === 1) {
+              await invoke('sync_playlist', { playlistId: entry.id, branchName: branchNames[0] })
+            } else {
+              await invoke('sync_playlist_branches', { playlistId: entry.id, branchNames })
+            }
+            synced++
+          } catch { /* peer went offline mid-sync — skip */ }
+        }
+
+        if (synced > 0) {
+          await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+          showToast(`Auto-synced ${synced} playlist${synced !== 1 ? 's' : ''} with ${peer.display_name}`)
+        }
+      })
+      .catch(() => { /* peer unreachable — will retry next session */ })
   }
 
   return ({
@@ -153,6 +188,12 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   refreshLivePeers: async () => {
     const peers = await invoke<PeerInfo[]>('sync_get_peers')
     set({ livePeers: peers })
+    for (const peer of peers) {
+      if (!autoSyncedPeers.has(peer.public_key_b64)) {
+        autoSyncedPeers.add(peer.public_key_b64)
+        triggerAutoSync(peer)
+      }
+    }
   },
 
   syncWithPeer: async (publicKeyB64) => {
