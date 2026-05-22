@@ -1,5 +1,28 @@
 use std::net::SocketAddr;
 
+/// Typed HTTP route paths for the peer sync server.
+///
+/// Both the Axum router and all `SyncClient` implementations must use these
+/// instead of raw string literals, so typos are caught at compile time.
+pub mod routes {
+    /// Axum path patterns (`:param` syntax) — use these in `Router::route`.
+    pub const PING:            &str = "/ping";
+    pub const MANIFEST:        &str = "/manifest";
+    pub const HASHES:          &str = "/hashes";
+    pub const TRACKS:          &str = "/tracks";
+    pub const PAIR:            &str = "/pair";
+    pub const BLOB:            &str = "/blob/:hash";
+    pub const COMMITS:         &str = "/commits/:playlist_id/:branch_name";
+
+    /// URL builders for HTTP clients — produce concrete paths with values filled in.
+    pub fn blob(hash: &str) -> String {
+        format!("/blob/{hash}")
+    }
+    pub fn commits(playlist_id: &str, branch: &str) -> String {
+        format!("/commits/{playlist_id}/{branch}")
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod desktop;
 

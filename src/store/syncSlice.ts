@@ -58,7 +58,13 @@ export type SyncSlice = {
   downloadPlaylist:  (playlistId: string, branchNames: string[]) => Promise<void>
 }
 
-export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set, get) => ({
+export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set, get) => {
+  const showToast = (msg: string) => {
+    set({ syncToast: msg })
+    setTimeout(() => set({ syncToast: null }), 3000)
+  }
+
+  return ({
   mergeConflicts:  [],
   mergePlaylistId: null,
   currentChunkIdx: 0,
@@ -82,21 +88,14 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
 
   finalizeMerge: async () => {
     const { mergePlaylistId, resolutions } = get()
-    await invoke('resolve_merge_conflict', {
-      playlistId: mergePlaylistId,
-      resolutions,
-    })
-    set({
-      mergeConflicts:  [],
-      mergePlaylistId: null,
-      currentChunkIdx: 0,
-      resolutions:     [],
-      diffViewerOpen:  false,
-    })
-    // Reload so the merged result shows up immediately in the playlist view.
-    await Promise.all([get().loadPlaylists(), get().loadLibrary()])
-    set({ syncToast: 'Merge resolved — playlist updated' })
-    setTimeout(() => set({ syncToast: null }), 3000)
+    try {
+      await invoke('resolve_merge_conflict', { playlistId: mergePlaylistId, resolutions })
+      set({ mergeConflicts: [], mergePlaylistId: null, currentChunkIdx: 0, resolutions: [], diffViewerOpen: false })
+      await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+      showToast('Merge resolved — playlist updated')
+    } catch (e) {
+      showToast(`Merge failed: ${String(e).slice(0, 60)}`)
+    }
   },
 
   // Pairing initial state
@@ -142,8 +141,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   submitScannedQr: async (payload) => {
     await invoke('sync_accept_qr_pairing', { payload })
     await get().refreshKnownDevices()
-    set({ syncToast: `Paired with ${payload.display_name}` })
-    setTimeout(() => set({ syncToast: null }), 3000)
+    showToast(`Paired with ${payload.display_name}`)
     get().closePairing()
   },
 
@@ -163,18 +161,17 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     try {
       const report = await invoke<SyncReport>('sync_with_peer', { publicKeyB64 })
       if (report.conflicts.length > 0) {
-        set({ syncToast: `Synced with ${peerName} — ${report.conflicts.length} conflict(s) to resolve` })
+        showToast(`Synced with ${peerName} — ${report.conflicts.length} conflict(s) to resolve`)
       } else {
         const items = report.blobs_fetched
-        set({ syncToast: items > 0
+        showToast(items > 0
           ? `Synced with ${peerName} — ${items} item${items !== 1 ? 's' : ''} updated`
           : `Up to date with ${peerName}`
-        })
+        )
       }
-    } catch (e) {
-      set({ syncToast: `Sync with ${peerName} failed` })
+    } catch {
+      showToast(`Sync with ${peerName} failed`)
     }
-    setTimeout(() => set({ syncToast: null }), 3000)
   },
 
   dismissSyncToast: () => set({ syncToast: null }),
@@ -192,8 +189,8 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       })
       set({ peerManifest: result, peerManifestLoading: false })
     } catch {
-      set({ peerManifestLoading: false, syncToast: `Could not reach ${peer.display_name}` })
-      setTimeout(() => set({ syncToast: null }), 3000)
+      set({ peerManifestOpen: false, peerManifestLoading: false })
+      showToast(`Could not reach ${peer.display_name}`)
     }
   },
 
@@ -217,15 +214,14 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
 
       if (report.conflicts.length > 0) {
-        // Surface conflict resolution UI — user must resolve before playlist is updated.
         get().openDiffViewer(playlistId, report.conflicts)
-        set({ syncToast: `${report.conflicts.length} conflict${report.conflicts.length !== 1 ? 's' : ''} need resolution` })
+        showToast(`${report.conflicts.length} conflict${report.conflicts.length !== 1 ? 's' : ''} need resolution`)
       } else {
         const items = report.blobs_fetched
-        set({ syncToast: items > 0
+        showToast(items > 0
           ? `Synced — ${items} item${items !== 1 ? 's' : ''} downloaded`
           : 'Already up to date'
-        })
+        )
       }
     } catch (e) {
       set(state => {
@@ -234,10 +230,10 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         return {
           downloadingPlaylists: state.downloadingPlaylists.filter(id => id !== playlistId),
           downloadProgress: dp,
-          syncToast: `Sync failed: ${String(e).slice(0, 60)}`,
         }
       })
+      showToast(`Sync failed: ${String(e).slice(0, 60)}`)
     }
-    setTimeout(() => set({ syncToast: null }), 3000)
   },
-})
+})}
+

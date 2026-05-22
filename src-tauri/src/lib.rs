@@ -16,9 +16,19 @@ use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)] // mut is used by the #[cfg(mobile)] block below
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_dialog::init());
+
+    // The barcode scanner plugin is mobile-only; registering it on desktop
+    // would fail to link since the native camera APIs don't exist there.
+    #[cfg(mobile)]
+    {
+        builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    }
+
+    builder
         .setup(|app| {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<AudioEvent>();
 
@@ -128,6 +138,8 @@ pub fn run() {
                 }
             }
 
+            let db  = Arc::clone(&storage_state.db);
+            let cas = Arc::clone(&storage_state.cas);
             app.manage(storage_state);
 
             {
@@ -149,10 +161,8 @@ pub fn run() {
                     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
                     {
                         use melomaniac_sync::desktop::DesktopSyncBridge;
-                        let b = DesktopSyncBridge::new(identity, sync_data_dir)
+                        let b = DesktopSyncBridge::new(identity, sync_data_dir, db, cas)
                             .expect("failed to create desktop sync bridge");
-                        let ss = app.state::<crate::storage::StorageState>();
-                        b.set_storage(Arc::clone(&ss.db), Arc::clone(&ss.cas));
                         // start_discovery spawns Tokio tasks; block_on establishes
                         // the runtime context needed before the event loop starts.
                         tauri::async_runtime::block_on(async {
@@ -166,10 +176,8 @@ pub fn run() {
                     #[cfg(target_os = "ios")]
                     {
                         use melomaniac_sync::ios::IosSyncBridge;
-                        let b = IosSyncBridge::new(identity, sync_data_dir)
+                        let b = IosSyncBridge::new(identity, sync_data_dir, db, cas)
                             .expect("failed to create iOS sync bridge");
-                        let ss = app.state::<crate::storage::StorageState>();
-                        b.set_storage(Arc::clone(&ss.db), Arc::clone(&ss.cas));
                         b.start_discovery().ok();
                         Arc::new(b) as Arc<dyn SyncBridge>
                     }

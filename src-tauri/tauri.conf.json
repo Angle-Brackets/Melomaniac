@@ -41,7 +41,8 @@
       "icons/icon.ico"
     ],
     "iOS": {
-      "developmentTeam": "76438TBLFL"
+      "developmentTeam": "76438TBLFL",
+      "infoPlist": "Info.plist"
     }
   }
 }

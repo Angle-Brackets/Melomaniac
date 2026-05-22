@@ -22,7 +22,7 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{
-        Arc, OnceLock,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -46,8 +46,8 @@ fn sync_port() -> u16 {
 struct ServerState {
     identity: Arc<NodeIdentity>,
     trust_list: Arc<RwLock<TrustList>>,
-    db: Arc<OnceLock<Arc<Database>>>,
-    cas: Arc<OnceLock<Arc<CasStore>>>,
+    db: Arc<Database>,
+    cas: Arc<CasStore>,
     /// Token stored when we generate a QR code; the scanning device POSTs it
     /// back to /pair so we can add it to our trust list.
     pending_qr_token: Arc<std::sync::Mutex<Option<(String, u64)>>>,
@@ -64,15 +64,20 @@ pub struct DesktopSyncBridge {
     #[allow(dead_code)]
     data_dir: PathBuf,
     mdns: Arc<std::sync::Mutex<Option<ServiceDaemon>>>,
-    db: Arc<OnceLock<Arc<Database>>>,
-    cas: Arc<OnceLock<Arc<CasStore>>>,
+    db: Arc<Database>,
+    cas: Arc<CasStore>,
     pending_merges: Arc<tokio::sync::Mutex<HashMap<String, PendingMerge>>>,
     /// Shared with the Axum ServerState so /pair can verify and consume it.
     pending_qr_token: Arc<std::sync::Mutex<Option<(String, u64)>>>,
 }
 
 impl DesktopSyncBridge {
-    pub fn new(identity: NodeIdentity, data_dir: PathBuf) -> Result<Self, SyncError> {
+    pub fn new(
+        identity: NodeIdentity,
+        data_dir: PathBuf,
+        db: Arc<Database>,
+        cas: Arc<CasStore>,
+    ) -> Result<Self, SyncError> {
         let trust_list_path = data_dir.join("known_devices.json");
         let trust_list = TrustList::load(&trust_list_path)?;
 
@@ -83,16 +88,11 @@ impl DesktopSyncBridge {
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             mdns: Arc::new(std::sync::Mutex::new(None)),
-            db: Arc::new(OnceLock::new()),
-            cas: Arc::new(OnceLock::new()),
+            db,
+            cas,
             pending_merges: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             pending_qr_token: Arc::new(std::sync::Mutex::new(None)),
         })
-    }
-
-    pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {
-        self.db.set(db).ok();
-        self.cas.set(cas).ok();
     }
 
     /// Register (or re-register) the mDNS service with the given `mode` TXT field.
@@ -372,9 +372,7 @@ async fn handle_manifest(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let (Some(db), Some(cas)) = (state.db.get(), state.cas.get()) else {
-        return axum::Json(Vec::<PlaylistManifest>::new()).into_response();
-    };
+    let (db, cas) = (&state.db, &state.cas);
 
     let playlists = match db.get_all_playlists().await {
         Ok(p) => p.into_iter().filter(|pl| pl.name != "DevelopmentOnly").collect::<Vec<_>>(),
@@ -455,10 +453,7 @@ async fn handle_hashes(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let hashes = match state.cas.get() {
-        Some(cas) => cas.list_all_hashes(),
-        None => vec![],
-    };
+    let hashes = state.cas.list_all_hashes();
 
     axum::Json(hashes).into_response()
 }
@@ -472,9 +467,7 @@ async fn handle_tracks(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let Some(db) = state.db.get() else {
-        return axum::Json(Vec::<TrackSyncRecord>::new()).into_response();
-    };
+    let db = &state.db;
 
     let mut records = Vec::with_capacity(hashes.len());
     for hash in &hashes {
@@ -503,9 +496,7 @@ async fn handle_blob(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let Some(cas) = state.cas.get() else {
-        return (StatusCode::NOT_FOUND, axum::Json(serde_json::Value::Null)).into_response();
-    };
+    let cas = &state.cas;
 
     match cas.read_blob(&hash).await {
         Ok(bytes) => (
@@ -527,9 +518,7 @@ async fn handle_commits(
         return (status, axum::Json(serde_json::Value::Null)).into_response();
     }
 
-    let Some(db) = state.db.get() else {
-        return axum::Json(Vec::<CommitRecord>::new()).into_response();
-    };
+    let db = &state.db;
 
     match db.export_commit_chain(&playlist_id, &branch_name).await {
         Ok(commits) => axum::Json(commits).into_response(),
@@ -588,14 +577,15 @@ async fn handle_pair(
 
 fn build_router(state: ServerState) -> Router {
     use axum::routing::post;
+    use super::routes as r;
     Router::new()
-        .route("/ping", get(handle_ping))
-        .route("/manifest", get(handle_manifest))
-        .route("/hashes", get(handle_hashes))
-        .route("/tracks", post(handle_tracks))
-        .route("/blob/:hash", get(handle_blob))
-        .route("/commits/:playlist_id/:branch_name", get(handle_commits))
-        .route("/pair", post(handle_pair))
+        .route(r::PING,    get(handle_ping))
+        .route(r::MANIFEST, get(handle_manifest))
+        .route(r::HASHES,  get(handle_hashes))
+        .route(r::TRACKS,  post(handle_tracks))
+        .route(r::BLOB,    get(handle_blob))
+        .route(r::COMMITS, get(handle_commits))
+        .route(r::PAIR,    post(handle_pair))
         .with_state(state)
 }
 
@@ -616,6 +606,10 @@ impl SyncClient {
         }
     }
 
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
     fn auth_header(&self) -> String {
         let ts = unix_now();
         let sig = self.identity.sign(ts.to_string().as_bytes());
@@ -627,7 +621,7 @@ impl SyncClient {
     async fn get_manifest(&self) -> Result<Vec<PlaylistManifest>, SyncError> {
         let resp = self
             .http
-            .get(format!("{}/manifest", self.base_url))
+            .get(self.url(super::routes::MANIFEST))
             .header("Authorization", self.auth_header())
             .send()
             .await
@@ -638,24 +632,10 @@ impl SyncClient {
             .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
     }
 
-    async fn get_hashes(&self) -> Result<Vec<String>, SyncError> {
-        let resp = self
-            .http
-            .get(format!("{}/hashes", self.base_url))
-            .header("Authorization", self.auth_header())
-            .send()
-            .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
-
-        resp.json::<Vec<String>>()
-            .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
-    }
-
     async fn get_blob(&self, hash: &str) -> Result<Vec<u8>, SyncError> {
         let resp = self
             .http
-            .get(format!("{}/blob/{hash}", self.base_url))
+            .get(self.url(&super::routes::blob(hash)))
             .header("Authorization", self.auth_header())
             .send()
             .await
@@ -678,7 +658,7 @@ impl SyncClient {
     ) -> Result<Vec<CommitRecord>, SyncError> {
         let resp = self
             .http
-            .get(format!("{}/commits/{playlist_id}/{branch}", self.base_url))
+            .get(self.url(&super::routes::commits(playlist_id, branch)))
             .header("Authorization", self.auth_header())
             .send()
             .await
@@ -692,7 +672,7 @@ impl SyncClient {
     async fn get_tracks(&self, hashes: &[String]) -> Result<Vec<TrackSyncRecord>, SyncError> {
         let resp = self
             .http
-            .post(format!("{}/tracks", self.base_url))
+            .post(self.url(super::routes::TRACKS))
             .header("Authorization", self.auth_header())
             .json(hashes)
             .send()
@@ -754,11 +734,11 @@ impl SyncBridge for DesktopSyncBridge {
         );
 
         let server_state = ServerState {
-            identity: Arc::clone(&self.identity),
-            trust_list: Arc::clone(&self.trust_list),
-            db: Arc::clone(&self.db),
-            cas: Arc::clone(&self.cas),
-            pending_qr_token: Arc::clone(&self.pending_qr_token),
+            identity: self.identity.clone(),
+            trust_list: self.trust_list.clone(),
+            db: self.db.clone(),
+            cas: self.cas.clone(),
+            pending_qr_token: self.pending_qr_token.clone(),
         };
         let router = build_router(server_state);
         let bind_addr: SocketAddr =
@@ -911,10 +891,10 @@ impl SyncBridge for DesktopSyncBridge {
         branch_name: &str,
         progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
     ) -> Result<SyncReport, SyncError> {
-        let identity = Arc::clone(&self.identity);
-        let peers = Arc::clone(&self.peers);
-        let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
-        let cas = self.cas.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
+        let identity = self.identity.clone();
+        let peers = self.peers.clone();
+        let db = self.db.clone();
+        let cas = self.cas.clone();
         let playlist_id = playlist_id.to_string();
         let branch_name = branch_name.to_string();
 
@@ -1058,7 +1038,9 @@ impl SyncBridge for DesktopSyncBridge {
                                     ingested_at:  0,
                                     source_url:   None,
                                 };
-                                db.upsert_track_from_sync(&record).await.ok();
+                                if let Err(e) = db.upsert_track_from_sync(&record).await {
+                                    eprintln!("[sync] upsert_track_from_sync: {e}");
+                                }
                             } else {
                                 need_http.push(entry.hash.clone());
                             }
@@ -1082,7 +1064,9 @@ impl SyncBridge for DesktopSyncBridge {
                                     ingested_at:  0,
                                     source_url:   None,
                                 };
-                                db.upsert_track_from_sync(&record).await.ok();
+                                if let Err(e) = db.upsert_track_from_sync(&record).await {
+                                    eprintln!("[sync] upsert_track_from_sync: {e}");
+                                }
                             }
                             // Pass 3: stub record so track_play never fails.
                             for hash in &need_http {
@@ -1099,7 +1083,9 @@ impl SyncBridge for DesktopSyncBridge {
                                         ingested_at:  0,
                                         source_url:   None,
                                     };
-                                    db.upsert_track_from_sync(&stub).await.ok();
+                                    if let Err(e) = db.upsert_track_from_sync(&stub).await {
+                                        eprintln!("[sync] upsert_track_from_sync (stub): {e}");
+                                    }
                                 }
                             }
                         }

@@ -9,7 +9,7 @@ use melomaniac_storage::{CasStore, CommitRecord, Database, TrackRecord, TreeBlob
 use rand::RngCore;
 use rand::rngs::OsRng;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // ── Swift FFI ─────────────────────────────────────────────────────────────────
@@ -131,6 +131,10 @@ struct SyncClient {
 }
 
 impl SyncClient {
+    fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base_url, path)
+    }
+
     fn auth_header(&self) -> String {
         let ts = unix_now();
         let sig = self.identity.sign(ts.to_string().as_bytes());
@@ -142,7 +146,7 @@ impl SyncClient {
     async fn get_manifest(&self) -> Result<Vec<PlaylistManifest>, SyncError> {
         let resp = self
             .http
-            .get(format!("{}/manifest", self.base_url))
+            .get(self.url(super::routes::MANIFEST))
             .header("Authorization", self.auth_header())
             .send()
             .await
@@ -153,24 +157,10 @@ impl SyncClient {
             .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
     }
 
-    async fn get_hashes(&self) -> Result<Vec<String>, SyncError> {
-        let resp = self
-            .http
-            .get(format!("{}/hashes", self.base_url))
-            .header("Authorization", self.auth_header())
-            .send()
-            .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
-
-        resp.json::<Vec<String>>()
-            .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
-    }
-
     async fn get_blob(&self, hash: &str) -> Result<Vec<u8>, SyncError> {
         let resp = self
             .http
-            .get(format!("{}/blob/{hash}", self.base_url))
+            .get(self.url(&super::routes::blob(hash)))
             .header("Authorization", self.auth_header())
             .send()
             .await
@@ -195,7 +185,7 @@ impl SyncClient {
     ) -> Result<Vec<CommitRecord>, SyncError> {
         let resp = self
             .http
-            .get(format!("{}/commits/{playlist_id}/{branch}", self.base_url))
+            .get(self.url(&super::routes::commits(playlist_id, branch)))
             .header("Authorization", self.auth_header())
             .send()
             .await
@@ -209,7 +199,7 @@ impl SyncClient {
     async fn get_tracks(&self, hashes: &[String]) -> Result<Vec<TrackSyncRecord>, SyncError> {
         let resp = self
             .http
-            .post(format!("{}/tracks", self.base_url))
+            .post(self.url(super::routes::TRACKS))
             .header("Authorization", self.auth_header())
             .json(hashes)
             .send()
@@ -230,12 +220,12 @@ pub struct IosSyncBridge {
     discovery_open: Arc<AtomicBool>,
     data_dir: PathBuf,
     trust_list: Arc<RwLock<TrustList>>,
-    db: Arc<OnceLock<Arc<Database>>>,
-    cas: Arc<OnceLock<Arc<CasStore>>>,
+    db: Arc<Database>,
+    cas: Arc<CasStore>,
 }
 
 impl IosSyncBridge {
-    pub fn new(identity: NodeIdentity, data_dir: PathBuf) -> Result<Self, SyncError> {
+    pub fn new(identity: NodeIdentity, data_dir: PathBuf, db: Arc<Database>, cas: Arc<CasStore>) -> Result<Self, SyncError> {
         // Write sync_name.txt from UIDevice.current.name if the file is missing
         // or still contains the generic "Melomaniac" fallback from a previous run.
         let name_file = data_dir.join("sync_name.txt");
@@ -266,20 +256,15 @@ impl IosSyncBridge {
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             trust_list: Arc::new(RwLock::new(trust_list)),
-            db: Arc::new(OnceLock::new()),
-            cas: Arc::new(OnceLock::new()),
+            db,
+            cas,
         };
         // Populate process-globals so the bare `extern "C"` callbacks can reach
         // the peer list and trust list. `.set()` is a no-op if already set,
         // which is fine — there is only one bridge instance per process.
-        PEER_LIST.set(Arc::clone(&instance.peers)).ok();
-        TRUST_LIST.set(Arc::clone(&instance.trust_list)).ok();
+        PEER_LIST.set(instance.peers.clone()).ok();
+        TRUST_LIST.set(instance.trust_list.clone()).ok();
         Ok(instance)
-    }
-
-    pub fn set_storage(&self, db: Arc<Database>, cas: Arc<CasStore>) {
-        self.db.set(db).ok();
-        self.cas.set(cas).ok();
     }
 }
 
@@ -438,10 +423,10 @@ impl SyncBridge for IosSyncBridge {
         branch_name: &str,
         progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
     ) -> Result<SyncReport, SyncError> {
-        let identity = Arc::clone(&self.identity);
-        let peers = Arc::clone(&self.peers);
-        let db = self.db.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
-        let cas = self.cas.get().cloned().ok_or(SyncError::Io(std::io::Error::other("storage not initialised")))?;
+        let identity = self.identity.clone();
+        let peers = self.peers.clone();
+        let db = self.db.clone();
+        let cas = self.cas.clone();
         let playlist_id = playlist_id.to_string();
         let branch_name = branch_name.to_string();
 
@@ -592,7 +577,9 @@ impl SyncBridge for IosSyncBridge {
                                     ingested_at:  0,
                                     source_url:   None,
                                 };
-                                db.upsert_track_from_sync(&record).await.ok();
+                                if let Err(e) = db.upsert_track_from_sync(&record).await {
+                                    eprintln!("[sync] upsert_track_from_sync: {e}");
+                                }
                             } else {
                                 need_http.push(entry.hash.clone());
                             }
@@ -616,7 +603,9 @@ impl SyncBridge for IosSyncBridge {
                                     ingested_at:  0,
                                     source_url:   None,
                                 };
-                                db.upsert_track_from_sync(&record).await.ok();
+                                if let Err(e) = db.upsert_track_from_sync(&record).await {
+                                    eprintln!("[sync] upsert_track_from_sync: {e}");
+                                }
                             }
                             // Pass 3: stub record so track_play never fails.
                             for hash in &need_http {
@@ -633,7 +622,9 @@ impl SyncBridge for IosSyncBridge {
                                         ingested_at:  0,
                                         source_url:   None,
                                     };
-                                    db.upsert_track_from_sync(&stub).await.ok();
+                                    if let Err(e) = db.upsert_track_from_sync(&stub).await {
+                                        eprintln!("[sync] upsert_track_from_sync (stub): {e}");
+                                    }
                                 }
                             }
                         }

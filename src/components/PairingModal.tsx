@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
+import { HiCamera } from 'react-icons/hi'
 import { useStore } from '../store'
 import type { QrPayload } from '../store/types'
 
@@ -68,10 +69,15 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
 
   const copyJson = () => {
     if (!qrPayload) return
-    navigator.clipboard.writeText(JSON.stringify(qrPayload)).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    navigator.clipboard.writeText(JSON.stringify(qrPayload))
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      })
+      .catch(() => {
+        // Clipboard write can be denied (e.g. document not focused, iOS WebView).
+        // Nothing to show — the button just doesn't change state.
+      })
   }
 
   // Poll for live peers while the modal is open
@@ -192,46 +198,102 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
   )
 }
 
-function ScanMode() {
+function isQrPayload(v: unknown): v is QrPayload {
+  return (
+    typeof v === 'object' && v !== null &&
+    'public_key_b64' in v && 'token' in v &&
+    'exp' in v && 'display_name' in v
+  )
+}
+
+function ScanMode({ platform }: { platform: 'desktop' | 'mobile' }) {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [showManual, setShowManual] = useState(platform === 'desktop')
   const submitScannedQr = useStore(s => s.submitScannedQr)
 
-  const handleConfirm = async () => {
+  const parseAndSubmit = async (jsonText: string) => {
     setError(null)
-
     let parsed: unknown
     try {
-      parsed = JSON.parse(text)
+      parsed = JSON.parse(jsonText)
     } catch {
       setError('Could not parse JSON — paste the full QR code text')
       return
     }
-
-    if (
-      typeof parsed !== 'object' || parsed === null ||
-      !('public_key_b64' in parsed) || !('token' in parsed) ||
-      !('exp' in parsed) || !('display_name' in parsed)
-    ) {
+    if (!isQrPayload(parsed)) {
       setError('Invalid QR payload — missing required fields')
       return
     }
-
     setSubmitting(true)
     try {
-      await submitScannedQr(parsed as QrPayload)
+      await submitScannedQr(parsed)
     } catch (e) {
       setError(`Pairing failed: ${e instanceof Error ? e.message : String(e)}`)
       setSubmitting(false)
     }
   }
 
+  const handleCameraScan = async () => {
+    setError(null)
+    setScanning(true)
+    try {
+      const { scan, Format, requestPermissions } = await import('@tauri-apps/plugin-barcode-scanner')
+      await requestPermissions()
+      const result = await scan({ formats: [Format.QRCode] })
+      await parseAndSubmit(result.content)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // Ignore cancellation — user dismissed the scanner intentionally
+      if (!msg.toLowerCase().includes('cancel')) {
+        setError(`Camera scan failed: ${msg}`)
+      }
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  if (platform === 'mobile' && !showManual) {
+    return (
+      <div className="flex flex-col gap-4 w-full">
+        <button
+          className="btn btn-primary w-full gap-2"
+          disabled={scanning || submitting}
+          onClick={handleCameraScan}
+        >
+          {scanning
+            ? <span className="loading loading-spinner loading-sm" />
+            : <HiCamera className="text-xl" />}
+          {scanning ? 'Scanning…' : 'Scan QR Code'}
+        </button>
+
+        {error && <div className="text-xs text-error break-all">{error}</div>}
+
+        <button
+          className="btn btn-ghost btn-xs opacity-50 hover:opacity-80 w-full"
+          disabled={scanning || submitting}
+          onClick={() => setShowManual(true)}
+        >
+          Enter code manually instead
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4 w-full">
-      <div className="rounded-lg bg-base-200 p-4 text-sm text-center opacity-70">
-        Point your camera at the desktop's QR code, then paste the text below
-      </div>
+      {platform === 'mobile' && (
+        <button
+          className="btn btn-outline btn-sm w-full gap-2"
+          disabled={scanning || submitting}
+          onClick={() => setShowManual(false)}
+        >
+          <HiCamera className="text-base" />
+          Use camera instead
+        </button>
+      )}
 
       <textarea
         className="textarea textarea-bordered w-full font-mono text-xs"
@@ -242,14 +304,12 @@ function ScanMode() {
         disabled={submitting}
       />
 
-      {error && (
-        <div className="text-xs text-error break-all">{error}</div>
-      )}
+      {error && <div className="text-xs text-error break-all">{error}</div>}
 
       <button
         className="btn btn-primary btn-sm w-full"
         disabled={text.trim() === '' || submitting}
-        onClick={handleConfirm}
+        onClick={() => parseAndSubmit(text)}
       >
         {submitting
           ? <span className="loading loading-spinner loading-xs" />
@@ -278,7 +338,7 @@ function PairingModalInner({ platform }: { platform: 'desktop' | 'mobile' }) {
 
   const body = pairingMode === 'display'
     ? <DisplayMode platform={platform} />
-    : <ScanMode />
+    : <ScanMode platform={platform} />
 
   if (platform === 'mobile') {
     return (
