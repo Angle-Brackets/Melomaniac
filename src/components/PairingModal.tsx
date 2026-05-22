@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { HiCamera } from 'react-icons/hi'
-import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import { useStore } from '../store'
 import type { QrPayload } from '../store/types'
 
@@ -60,12 +59,8 @@ function QrImage({ payload }: { payload: QrPayload }) {
 function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
   const qrPayload          = useStore(s => s.qrPayload)
   const fingerprint        = useStore(s => s.fingerprint)
-  const knownDevices       = useStore(s => s.knownDevices)
-  const livePeers          = useStore(s => s.livePeers)
   const openPairingDisplay = useStore(s => s.openPairingDisplay)
   const openPairingScanner = useStore(s => s.openPairingScanner)
-  const refreshLivePeers   = useStore(s => s.refreshLivePeers)
-  const openPeerManifest   = useStore(s => s.openPeerManifest)
   const [copied, setCopied] = useState(false)
 
   const copyJson = () => {
@@ -75,18 +70,8 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
       })
-      .catch(() => {
-        // Clipboard write can be denied (e.g. document not focused, iOS WebView).
-        // Nothing to show — the button just doesn't change state.
-      })
+      .catch(() => {})
   }
-
-  // Poll for live peers while the modal is open
-  useEffect(() => {
-    refreshLivePeers()
-    const id = setInterval(refreshLivePeers, 4000)
-    return () => clearInterval(id)
-  }, [refreshLivePeers])
 
   const secondsLeft = useCountdown(
     qrPayload?.exp ?? null,
@@ -127,86 +112,6 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
         >
           Switch to scan mode
         </button>
-      )}
-
-      {platform === 'mobile' && livePeers.length === 0 && knownDevices.length === 0 && (
-        <div className="text-xs opacity-40 text-center leading-relaxed">
-          No devices visible? Make sure <strong>Local Network</strong> is enabled for Melomaniac in{' '}
-          <button
-            className="underline opacity-70"
-            onClick={() => shellOpen('app-settings:').catch(() => {})}
-          >
-            Settings
-          </button>
-          .
-        </div>
-      )}
-
-      {livePeers.length > 0 && (
-        <div className="w-full mt-2">
-          <div className="text-xs font-mono uppercase tracking-widest opacity-40 mb-2">
-            Nearby
-          </div>
-          <div className="flex flex-col gap-1">
-            {livePeers.map(peer => (
-              <div
-                key={peer.public_key_b64}
-                className="flex items-center justify-between bg-base-200 rounded px-3 py-2"
-              >
-                <div>
-                  <div className="text-sm font-medium">{peer.display_name}</div>
-                  {peer.latency_ms != null && (
-                    <div className="text-xs font-mono opacity-40">{peer.latency_ms}ms</div>
-                  )}
-                </div>
-                <button
-                  className="btn btn-xs btn-primary"
-                  onClick={() => openPeerManifest(peer)}
-                >
-                  Sync
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {knownDevices.length > 0 && (
-        <div className="w-full mt-2">
-          <div className="text-xs font-mono uppercase tracking-widest opacity-40 mb-2">
-            Paired devices
-          </div>
-          <div className="flex flex-col gap-1">
-            {knownDevices.map(device => {
-              const livePeer = livePeers.find(p => p.public_key_b64 === device.public_key_b64)
-              return (
-                <div
-                  key={device.public_key_b64}
-                  className="flex items-center justify-between bg-base-200 rounded px-3 py-2 text-sm"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate">{device.display_name}</div>
-                    {livePeer?.latency_ms != null && (
-                      <div className="text-xs font-mono opacity-40">{livePeer.latency_ms}ms</div>
-                    )}
-                  </div>
-                  {livePeer ? (
-                    <button
-                      className="btn btn-xs btn-primary shrink-0 ml-2"
-                      onClick={() => openPeerManifest(livePeer)}
-                    >
-                      Sync
-                    </button>
-                  ) : (
-                    <span className="text-xs font-mono opacity-40 ml-2 shrink-0">
-                      {new Date(device.added_at * 1000).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
       )}
     </div>
   )
