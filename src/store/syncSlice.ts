@@ -30,6 +30,11 @@ export type SyncSlice = {
   // Sync toast message
   syncToast: string | null
 
+  // Incremented whenever sync downloads new artwork blobs. Components that
+  // cache artwork data URLs watch this to know when to bust their cache.
+  artworkVersion: number
+  bumpArtworkVersion: () => void
+
   // Per-playlist download progress (0–1). Present while downloading, absent when idle.
   downloadProgress: Record<string, number>
   setDownloadProgress: (playlistId: string, pct: number) => void
@@ -115,6 +120,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
             }).catch(() => 0)
             if (artDownloaded > 0) {
               await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+              get().bumpArtworkVersion()
             }
           }
           return
@@ -169,11 +175,15 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       await invoke('resolve_merge_conflict', { playlistId: mergePlaylistId, resolutions })
       set({ mergeConflicts: [], mergePlaylistId: null, currentChunkIdx: 0, resolutions: [], diffViewerOpen: false })
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+      get().bumpArtworkVersion()
       showToast('Merge resolved — playlist updated')
     } catch (e) {
       showToast(`Merge failed: ${String(e).slice(0, 60)}`)
     }
   },
+
+  artworkVersion: 0,
+  bumpArtworkVersion: () => set(s => ({ artworkVersion: s.artworkVersion + 1 })),
 
   // Pairing initial state
   pairingOpen:       false,
@@ -292,6 +302,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         downloadProgress: (() => { const n = { ...state.downloadProgress }; delete n[playlistId]; return n })(),
       }))
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+      get().bumpArtworkVersion()
 
       if (report.conflicts.length > 0) {
         get().openDiffViewer(playlistId, report.conflicts)

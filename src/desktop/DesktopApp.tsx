@@ -121,6 +121,7 @@ export default function DesktopApp() {
   const openPairingDisplay = useStore(s => s.openPairingDisplay);
   const syncToast          = useStore(s => s.syncToast);
   const refreshLivePeers   = useStore(s => s.refreshLivePeers);
+  const artworkVersion     = useStore(s => s.artworkVersion);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -530,6 +531,9 @@ export default function DesktopApp() {
   // A ref tracks which hashes have been fetched/in-flight so we never
   const fetchedHashesRef = useRef(new Set<string>());
   useEffect(() => {
+    // When artworkVersion bumps (sync downloaded new artwork), clear the guard
+    // so all tracks get re-fetched with fresh data URLs.
+    if (artworkVersion > 0) fetchedHashesRef.current.clear();
     for (const track of playQueue) {
       if (!track?.artwork_hash) continue;
       if (fetchedHashesRef.current.has(track.hash)) continue;
@@ -541,7 +545,7 @@ export default function DesktopApp() {
         .catch(console.error);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playQueue]);
+  }, [playQueue, artworkVersion]);
 
   // ── Load artwork for the active playlist branch ───────────────────────────
   useEffect(() => {

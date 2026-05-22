@@ -69,6 +69,21 @@ export function subscribePlaylistArtwork(key: string, cb: Listener): () => void 
   return () => playlistListeners.get(key)?.delete(cb);
 }
 
+// ── Cache invalidation ─────────────────────────────────────────────────────────
+// Called by hooks when artworkVersion bumps so the next getTrackArtwork /
+// getPlaylistArtwork call hits Rust instead of returning the stale entry.
+
+export function bustEntry(trackHash: string): void {
+  trackUrlCache.delete(trackHash);
+  inFlight.delete(trackHash);
+}
+
+export function bustPlaylistEntry(playlistId: string, branchName: string = 'main'): void {
+  const key = `${playlistId}::${branchName}`;
+  playlistUrlCache.delete(key);
+  inFlight.delete(key);
+}
+
 // ── Synchronous cache reads (used as useSyncExternalStore snapshots)
 export function getCachedTrackArtwork(trackHash: string): string | null {
   return trackUrlCache.get(trackHash) || null;
