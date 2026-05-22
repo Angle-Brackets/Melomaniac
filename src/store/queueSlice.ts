@@ -1,5 +1,6 @@
 import { StateCreator } from 'zustand'
 import { RepeatMode, ShuffleMode } from './types'
+import type { StoreState } from './index'
 
 // Start topping up before the queue fully drains so the UI always has upcoming tracks to display
 const REFILL_THRESHOLD = 5
@@ -25,7 +26,13 @@ export type QueueSlice = {
   refillShuffleQueue: () => void
 }
 
-export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
+// How many recent artists to consider when penalising same-artist picks
+const ARTIST_LOOKBEHIND = 4
+// Weight multiplier per additional occurrence of the same artist in the lookbehind window.
+// 0.25^1 = 25% weight (75% penalty), 0.25^2 = 6.25% weight (94% penalty), etc.
+const ARTIST_PENALTY = 0.25
+
+export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (set, get) => ({
   queueTracks: [],
   currentIndex: 0,
   shuffle: ShuffleMode.Off,
@@ -87,37 +94,70 @@ export const createQueueSlice: StateCreator<QueueSlice> = (set, get) => ({
   setRepeat: (mode) => set({ repeat: mode }),
 
   refillShuffleQueue: () => {
-    const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead } = get()
+    const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks } = get()
     if (queueTracks.length === 0) return
 
     // Exclude recently played tracks; if history has consumed everything, start a fresh cycle
     const recentSet = new Set(shuffleHistory.slice(-lookahead))
-    let candidates = queueTracks.filter((h) => !recentSet.has(h))
+    let candidates = queueTracks.filter(h => !recentSet.has(h))
     if (candidates.length === 0) candidates = [...queueTracks]
 
     let picks: string[]
 
-    if (shuffle === ShuffleMode.Smart) {
-      // Fisher-Yates over all candidates guarantees no repeats until the full cycle is exhausted
+    if (shuffle === ShuffleMode.Random) {
+      // Fisher-Yates: uniform random permutation, no repeats within a full cycle
       picks = [...candidates]
       for (let i = picks.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1))
         ;[picks[i], picks[j]] = [picks[j], picks[i]]
       }
     } else {
-      // Random: sample without replacement up to `lookahead` picks, but unbounded across cycles
-      const pool = [...candidates]
+      // Smart: weighted selection without replacement that spreads artists across the queue.
+      // Each candidate's weight is penalised by how recently its artist was heard.
+      // weight = ARTIST_PENALTY ^ (# times artist appears in lookbehind window)
+      // e.g. heard once → ×0.25, twice → ×0.0625 — same-artist back-to-back is very unlikely.
+      const hashToArtist = new Map(tracks.map(t => [t.hash, t.artist]))
+
+      type Candidate = { hash: string; artist: string }
+      const pool: Candidate[] = candidates.map(h => ({
+        hash: h,
+        artist: hashToArtist.get(h) ?? '',
+      }))
+
+      // Seed context with the tail of history so the first pick respects what was just heard
+      const recentArtists = shuffleHistory
+        .slice(-ARTIST_LOOKBEHIND)
+        .map(h => hashToArtist.get(h) ?? '')
+
       picks = []
       const count = Math.min(lookahead, pool.length)
+
       for (let i = 0; i < count; i++) {
-        const idx = Math.floor(Math.random() * pool.length)
-        picks.push(pool.splice(idx, 1)[0])
+        // Count how often each artist appears in the current lookbehind window
+        const freq = new Map<string, number>()
+        for (const a of recentArtists.slice(-ARTIST_LOOKBEHIND)) {
+          freq.set(a, (freq.get(a) ?? 0) + 1)
+        }
+
+        // Compute effective weights and total for weighted random draw
+        const weights = pool.map(c => Math.pow(ARTIST_PENALTY, freq.get(c.artist) ?? 0))
+        const total   = weights.reduce((s, w) => s + w, 0)
+
+        let r = Math.random() * total
+        let idx = pool.length - 1
+        for (let j = 0; j < pool.length; j++) {
+          r -= weights[j]
+          if (r <= 0) { idx = j; break }
+        }
+
+        picks.push(pool[idx].hash)
+        recentArtists.push(pool[idx].artist)
+        pool.splice(idx, 1)
       }
     }
 
     set({
       shuffledQueue: [...shuffledQueue, ...picks],
-      // Keep 2× lookahead so the dedup window covers a full refill batch on both sides
       shuffleHistory: [...shuffleHistory, ...picks].slice(-(lookahead * 2)),
     })
   },
