@@ -78,9 +78,12 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
 
         let synced = 0
         for (const entry of toSync) {
-          const branchNames = entry.branches?.length > 0
-            ? entry.branches.map(b => b.name)
-            : ['main']
+          const localBranches = new Set(
+            playlists.find(p => p.id === entry.id)?.branches.map(b => b.name) ?? []
+          )
+          const branchNames = (entry.branches?.map(b => b.name) ?? ['main'])
+            .filter(name => localBranches.has(name))
+          if (branchNames.length === 0) continue
           try {
             if (branchNames.length === 1) {
               await invoke('sync_playlist', { playlistId: entry.id, branchName: branchNames[0] })
