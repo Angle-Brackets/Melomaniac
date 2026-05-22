@@ -104,7 +104,21 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
           if (changedBranches.length > 0) toSync.push({ id: entry.id, branchNames: changedBranches })
         }
 
-        if (toSync.length === 0) return
+        if (toSync.length === 0) {
+          // No structural changes. Still refresh metadata (album edits, artwork
+          // set after tracks were added) so they propagate without a new commit.
+          const sharedIds = manifest.filter(e => localIds.has(e.id)).map(e => e.id)
+          if (sharedIds.length > 0) {
+            const artDownloaded = await invoke<number>('sync_refresh_metadata', {
+              publicKeyB64: peer.public_key_b64,
+              playlistIds: sharedIds,
+            }).catch(() => 0)
+            if (artDownloaded > 0) {
+              await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+            }
+          }
+          return
+        }
 
         let synced = 0
         for (const { id, branchNames } of toSync) {

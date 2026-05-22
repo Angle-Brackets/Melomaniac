@@ -344,6 +344,21 @@ pub trait SyncBridge: Send + Sync {
     /// Returns the list of playlists the peer is serving.
     fn get_peer_manifest(&self, public_key_b64: &str) -> Result<Vec<PlaylistManifest>, SyncError>;
 
+    /// Refresh track metadata for shared playlists from a specific peer.
+    ///
+    /// Reads local branch trees to collect track hashes, POSTs them to the
+    /// peer's `/tracks` endpoint, upserts any changed metadata (album name,
+    /// artwork hash), and downloads artwork blobs not yet in local CAS.
+    /// Returns the number of artwork blobs downloaded.
+    ///
+    /// Called by the auto-sync fast path when no HEAD commit changes are
+    /// detected — ensures metadata-only edits propagate without new commits.
+    fn refresh_peer_metadata(
+        &self,
+        public_key_b64: &str,
+        playlist_ids: &[String],
+    ) -> Result<u32, SyncError>;
+
     /// Returns this node's display fingerprint (e.g. `"AB12·CD34·EF56"`).
     fn fingerprint(&self) -> String;
 

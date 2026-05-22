@@ -281,6 +281,7 @@ pub fn run() {
             sync::sync_playlist_branches,
             sync::sync_with_peer,
             sync::sync_fetch_peer_manifest,
+            sync::sync_refresh_metadata,
             sync::sync_get_fingerprint,
             sync::resolve_merge_conflict,
         ])

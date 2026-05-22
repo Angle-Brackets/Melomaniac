@@ -793,6 +793,14 @@ impl SyncBridge for IosSyncBridge {
         self.identity.fingerprint()
     }
 
+    fn refresh_peer_metadata(
+        &self,
+        _public_key_b64: &str,
+        _playlist_ids: &[String],
+    ) -> Result<u32, SyncError> {
+        Ok(0)
+    }
+
     fn set_pending_merge(&self, _playlist_id: &str, _merge: PendingMerge) {}
     fn pending_merge(&self, _playlist_id: &str) -> Option<PendingMerge> {
         None

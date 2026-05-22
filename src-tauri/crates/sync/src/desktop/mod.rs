@@ -1242,6 +1242,87 @@ impl SyncBridge for DesktopSyncBridge {
         })
     }
 
+    fn refresh_peer_metadata(
+        &self,
+        public_key_b64: &str,
+        playlist_ids: &[String],
+    ) -> Result<u32, SyncError> {
+        let peers = Arc::clone(&self.peers);
+        let identity = Arc::clone(&self.identity);
+        let db = Arc::clone(&self.db);
+        let cas = Arc::clone(&self.cas);
+        let pk = public_key_b64.to_string();
+        let playlist_ids = playlist_ids.to_vec();
+
+        block(async move {
+            let peer = {
+                let map = peers.read().await;
+                map.get(&pk).cloned()
+            };
+            let peer = peer.ok_or(SyncError::PeerUnreachable(pk))?;
+            let client = SyncClient::new(identity, peer.addr);
+            let local_hashes_snap: std::collections::HashSet<String> =
+                cas.list_all_hashes().into_iter().collect();
+            let mut artwork_downloaded: u32 = 0;
+
+            for playlist_id in &playlist_ids {
+                let branches = match db.get_branches(playlist_id).await {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let mut all_hashes: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for branch in &branches {
+                    let Some(ref hc) = branch.head_commit else { continue };
+                    if let Ok(tree) = db.read_tree_for_commit(&*cas, hc).await {
+                        for e in &tree.tracks {
+                            all_hashes.insert(e.hash.clone());
+                        }
+                    }
+                }
+                if all_hashes.is_empty() {
+                    continue;
+                }
+                let hashes_vec: Vec<String> = all_hashes.into_iter().collect();
+                let fetched = match client.get_tracks(&hashes_vec).await {
+                    Ok(f) => f,
+                    Err(_) => continue,
+                };
+                for r in fetched {
+                    if let Some(ref art) = r.artwork_hash {
+                        if !local_hashes_snap.contains(art) {
+                            match client.get_blob(art).await {
+                                Ok(bytes) => {
+                                    if cas.write_blob(&bytes).await.is_ok() {
+                                        artwork_downloaded += 1;
+                                    }
+                                }
+                                Err(e) => eprintln!("[sync] metadata refresh: artwork {art}: {e}"),
+                            }
+                        }
+                    }
+                    let record = TrackRecord {
+                        hash:         r.hash,
+                        title:        r.title,
+                        artist:       r.artist,
+                        album:        r.album,
+                        artwork_hash: r.artwork_hash,
+                        duration_ms:  r.duration_ms,
+                        favorited:    false,
+                        mime_type:    r.mime_type,
+                        ingested_at:  0,
+                        source_url:   None,
+                    };
+                    if let Err(e) = db.upsert_track_from_sync(&record).await {
+                        eprintln!("[sync] metadata refresh upsert: {e}");
+                    }
+                }
+            }
+
+            Ok(artwork_downloaded)
+        })
+    }
+
     fn fingerprint(&self) -> String {
         self.identity.fingerprint()
     }

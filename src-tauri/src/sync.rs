@@ -142,6 +142,22 @@ pub async fn sync_playlist_branches(
 }
 
 #[tauri::command]
+pub async fn sync_refresh_metadata(
+    public_key_b64: String,
+    playlist_ids: Vec<String>,
+    state: State<'_, SyncState>,
+) -> Result<u32, String> {
+    let bridge = Arc::clone(&state.bridge);
+    tokio::task::spawn_blocking(move || {
+        bridge
+            .refresh_peer_metadata(&public_key_b64, &playlist_ids)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn sync_fetch_peer_manifest(
     public_key_b64: String,
     state: State<'_, SyncState>,
