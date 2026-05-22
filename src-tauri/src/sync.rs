@@ -94,16 +94,28 @@ pub async fn sync_playlist(
     playlist_id: String,
     branch_name: Option<String>,
     state: State<'_, SyncState>,
+    storage: State<'_, StorageState>,
     app: AppHandle,
 ) -> Result<SyncReport, String> {
     let branch = branch_name.unwrap_or_else(|| "main".to_string());
     let bridge = Arc::clone(&state.bridge);
     let progress_tx = spawn_progress_forwarder(app);
-    tokio::task::spawn_blocking(move || {
+    let report = tokio::task::spawn_blocking(move || {
         bridge.sync_playlist(&playlist_id, &branch, Some(progress_tx)).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+
+    // Remove orphaned track rows left by metadata edits on the source device.
+    let db  = Arc::clone(&storage.db);
+    let cas = Arc::clone(&storage.cas);
+    tokio::spawn(async move {
+        if let Err(e) = db.prune_orphan_tracks(&cas).await {
+            eprintln!("[sync] prune_orphan_tracks: {e}");
+        }
+    });
+
+    Ok(report)
 }
 
 /// Sync multiple branches of a playlist in sequence.
@@ -113,6 +125,7 @@ pub async fn sync_playlist_branches(
     playlist_id: String,
     branch_names: Vec<String>,
     state: State<'_, SyncState>,
+    storage: State<'_, StorageState>,
     app: AppHandle,
 ) -> Result<SyncReport, String> {
     let mut total_blobs = 0usize;
@@ -133,6 +146,14 @@ pub async fn sync_playlist_branches(
         total_bytes += report.bytes_fetched;
         all_conflicts.extend(report.conflicts);
     }
+
+    let db  = Arc::clone(&storage.db);
+    let cas = Arc::clone(&storage.cas);
+    tokio::spawn(async move {
+        if let Err(e) = db.prune_orphan_tracks(&cas).await {
+            eprintln!("[sync] prune_orphan_tracks: {e}");
+        }
+    });
 
     Ok(SyncReport {
         blobs_fetched: total_blobs,

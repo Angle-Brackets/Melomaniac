@@ -145,6 +145,46 @@ impl Database {
         Ok(())
     }
 
+    /// Delete track rows that arrived via sync (ingested_at = 0) and are no
+    /// longer referenced by any current branch head tree. Called after playlist
+    /// sync to clean up old-hash rows left by metadata edits on the source
+    /// device (library_edit_track rewrites the audio blob → new hash, the old
+    /// hash row is renamed in-place on the source but stays orphaned here).
+    pub async fn prune_orphan_tracks(&self, cas: &crate::CasStore) -> Result<usize, StorageError> {
+        let branches = self.get_all_branches_with_heads().await?;
+        let mut active: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (_, head) in &branches {
+            if let Ok(tree) = self.read_tree_for_commit(cas, head).await {
+                for e in &tree.tracks {
+                    active.insert(e.hash.clone());
+                }
+            }
+        }
+
+        // Fetch all sync-only track hashes then delete in Rust to avoid SQLite
+        // variable-count limits on large NOT IN lists.
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT hash FROM tracks WHERE ingested_at = 0"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut pruned = 0usize;
+        for (hash,) in rows {
+            if !active.contains(&hash) {
+                sqlx::query("DELETE FROM tracks WHERE hash = ?")
+                    .bind(&hash)
+                    .execute(&self.pool)
+                    .await?;
+                pruned += 1;
+            }
+        }
+        if pruned > 0 {
+            eprintln!("[storage] prune_orphan_tracks: removed {pruned} orphaned row(s)");
+        }
+        Ok(pruned)
+    }
+
     pub async fn get_all_tracks(&self) -> Result<Vec<TrackRecord>, StorageError> {
         Ok(sqlx::query_as::<_, TrackRecord>(
             "SELECT * FROM tracks ORDER BY artist, album, title"
