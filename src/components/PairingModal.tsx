@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 import { HiCamera } from 'react-icons/hi'
+import { open as shellOpen } from '@tauri-apps/plugin-shell'
 import { useStore } from '../store'
 import type { QrPayload } from '../store/types'
 
@@ -128,6 +129,19 @@ function DisplayMode({ platform }: { platform: 'desktop' | 'mobile' }) {
         </button>
       )}
 
+      {platform === 'mobile' && livePeers.length === 0 && knownDevices.length === 0 && (
+        <div className="text-xs opacity-40 text-center leading-relaxed">
+          No devices visible? Make sure <strong>Local Network</strong> is enabled for Melomaniac in{' '}
+          <button
+            className="underline opacity-70"
+            onClick={() => shellOpen('app-settings:').catch(() => {})}
+          >
+            Settings
+          </button>
+          .
+        </div>
+      )}
+
       {livePeers.length > 0 && (
         <div className="w-full mt-2">
           <div className="text-xs font-mono uppercase tracking-widest opacity-40 mb-2">
@@ -240,7 +254,7 @@ function ScanMode({ platform }: { platform: 'desktop' | 'mobile' }) {
     setError(null)
     setScanning(true)
     try {
-      const { scan, Format, requestPermissions } = await import('@tauri-apps/plugin-barcode-scanner')
+      const { scan, Format, requestPermissions } = await import(/* @vite-ignore */ '@tauri-apps/plugin-barcode-scanner')
       await requestPermissions()
       const result = await scan({ formats: [Format.QRCode] })
       await parseAndSubmit(result.content)

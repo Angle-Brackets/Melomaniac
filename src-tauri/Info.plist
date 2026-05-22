@@ -4,5 +4,11 @@
 <dict>
   <key>NSCameraUsageDescription</key>
   <string>Used to scan QR codes for device pairing</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Used to discover and sync playlists with nearby devices on your local network</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_melomaniac._tcp</string>
+  </array>
 </dict>
 </plist>
