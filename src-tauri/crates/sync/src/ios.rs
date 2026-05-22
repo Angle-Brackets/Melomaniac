@@ -553,14 +553,17 @@ impl SyncBridge for IosSyncBridge {
             }
 
             // 8b. Insert track metadata into the local tracks table so track_play can find them.
-            // Strategy (in priority order):
-            //   1. Use metadata embedded in the tree blob (new format, zero extra round-trips).
-            //   2. Fetch missing metadata from the peer's /tracks endpoint (old trees).
+            // Strategy:
+            //   1. Use metadata embedded in the tree blob (fast path, zero extra round-trips).
+            //   2. Fetch current metadata for ALL tracks from peer's /tracks endpoint.
+            //      This fills in artwork_hash even when it was absent from the tree blob
+            //      (artwork may have been set on the peer after tracks were added to the playlist).
+            //      Also downloads any artwork blobs not referenced by the tree entries.
             //   3. Insert a stub record (hash only) so track_play never fails with "not found".
             if let Some(head_commit) = peer_commits.first() {
                 if let Ok(tree_bytes) = cas.read_blob(&head_commit.tree_hash).await {
                     if let Ok(tree) = TreeBlob::from_bytes(&tree_bytes) {
-                        let mut need_http: Vec<String> = Vec::new();
+                        let all_hashes: Vec<String> = tree.tracks.iter().map(|e| e.hash.clone()).collect();
 
                         // Pass 1: embedded metadata.
                         for entry in &tree.tracks {
@@ -580,16 +583,35 @@ impl SyncBridge for IosSyncBridge {
                                 if let Err(e) = db.upsert_track_from_sync(&record).await {
                                     eprintln!("[sync] upsert_track_from_sync: {e}");
                                 }
-                            } else {
-                                need_http.push(entry.hash.clone());
                             }
                         }
 
-                        // Pass 2: HTTP fallback for tracks without embedded metadata.
-                        if !need_http.is_empty() {
-                            let fetched = client.get_tracks(&need_http).await.unwrap_or_default();
+                        // Pass 2: fetch current metadata for ALL tracks from peer DB.
+                        // Corrects stale artwork_hash values in tree entries and handles old-format trees.
+                        if !all_hashes.is_empty() {
+                            let fetched = client.get_tracks(&all_hashes).await.unwrap_or_default();
                             let fetched_hashes: std::collections::HashSet<String> =
                                 fetched.iter().map(|r| r.hash.clone()).collect();
+
+                            // Download artwork blobs the peer knows about that weren't in any tree entry.
+                            let local_hashes_now: std::collections::HashSet<String> =
+                                cas.list_all_hashes().into_iter().collect();
+                            for r in &fetched {
+                                if let Some(ref art) = r.artwork_hash {
+                                    if !local_hashes_now.contains(art) {
+                                        match client.get_blob(art).await {
+                                            Ok(bytes) => {
+                                                bytes_fetched += bytes.len() as u64;
+                                                if cas.write_blob(&bytes).await.is_ok() {
+                                                    blobs_fetched += 1;
+                                                }
+                                            }
+                                            Err(e) => eprintln!("[sync] artwork blob {art}: {e}"),
+                                        }
+                                    }
+                                }
+                            }
+
                             for r in fetched {
                                 let record = TrackRecord {
                                     hash:         r.hash,
@@ -607,8 +629,9 @@ impl SyncBridge for IosSyncBridge {
                                     eprintln!("[sync] upsert_track_from_sync: {e}");
                                 }
                             }
-                            // Pass 3: stub record so track_play never fails.
-                            for hash in &need_http {
+
+                            // Pass 3: stub record so track_play never fails with "not found".
+                            for hash in &all_hashes {
                                 if !fetched_hashes.contains(hash) {
                                     let stub = TrackRecord {
                                         hash:         hash.clone(),

@@ -254,7 +254,7 @@ function ScanMode({ platform }: { platform: 'desktop' | 'mobile' }) {
     setError(null)
     setScanning(true)
     try {
-      const { scan, Format, requestPermissions } = await import(/* @vite-ignore */ '@tauri-apps/plugin-barcode-scanner')
+      const { scan, Format, requestPermissions } = await import('@tauri-apps/plugin-barcode-scanner')
       await requestPermissions()
       const result = await scan({ formats: [Format.QRCode] })
       await parseAndSubmit(result.content)

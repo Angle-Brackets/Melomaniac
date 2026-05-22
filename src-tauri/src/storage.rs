@@ -131,7 +131,8 @@ pub async fn library_remove_track(
 }
 
 /// Return a base64 data URL for the artwork of a track.
-/// Returns an error if the track has no artwork or if it hasn't been ingested yet.
+/// Reads from the CAS via artwork_hash — never from the audio file itself.
+/// See CLAUDE.md "Storage & artwork architecture" for why.
 #[tauri::command]
 pub async fn track_get_artwork(
     hash: String,

@@ -60,6 +60,14 @@ Desktop implementation is in `crates/audio/src/desktop/` (gated on `cfg(any(targ
 
 Styling uses **Tailwind CSS** + **DaisyUI** component classes. Icons come from **react-icons**.
 
+### Storage & artwork architecture
+Tracks are stored in a **content-addressed store (CAS)** under `app_data_dir/cas/` as BLAKE3-hashed blobs. The SQLite DB (`tracks` table) records metadata including `artwork_hash: Option<String>`.
+
+Artwork is extracted from audio files at ingest time and stored as a **separate CAS blob** — it is never read back from the audio file at runtime. `track_get_artwork` goes DB → `artwork_hash` → CAS blob → base64 data URL. This means:
+- Multiple tracks on the same album share one artwork blob (deduplication).
+- Artwork can be changed independently of the audio file (`library_set_artwork`).
+- During sync, both the audio blob **and** the artwork blob must be transferred explicitly — syncing the MP3 does not automatically make artwork available, because the app never parses ID3 tags at display time.
+
 ### Key config files
 - `src-tauri/tauri.conf.json` — window size (800×600), app identifier, before-dev/build commands
 - `vite.config.ts` — locked to port 1420; excludes `src-tauri/` from HMR watch
