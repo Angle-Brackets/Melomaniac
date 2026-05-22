@@ -222,22 +222,30 @@ public func meloSyncStopDiscovery() {
 
 @_cdecl("melo_sync_register_service")
 public func meloSyncRegisterService(
-    _ pk:   UnsafePointer<CChar>,
-    _ name: UnsafePointer<CChar>,
-    _ port: UInt16
+    _ pk:        UnsafePointer<CChar>,
+    _ name:      UnsafePointer<CChar>,
+    _ port:      UInt16,
+    _ addr_hint: UnsafePointer<CChar>
 ) {
     _listener?.cancel()
     _listener = nil
 
-    let pkStr   = String(cString: pk)
-    let nameStr = String(cString: name)
-    let txt     = NWTXTRecord(["v": "1", "pk": pkStr, "name": nameStr, "mode": "closed"])
+    let pkStr    = String(cString: pk)
+    let nameStr  = String(cString: name)
+    let addrStr  = String(cString: addr_hint)
 
+    // Include the addr TXT field so peers can connect directly to the Axum HTTP server.
+    var txtDict: [String: String] = ["v": "1", "pk": pkStr, "name": nameStr, "mode": "closed"]
+    if !addrStr.isEmpty { txtDict["addr"] = addrStr }
+    let txt = NWTXTRecord(txtDict)
+
+    // Use a random port for the NWListener — its only purpose is mDNS advertisement.
+    // The actual HTTP server (Axum, on `port`) handles connections.
     let params = NWParameters.tcp
     params.includePeerToPeer = true
 
-    guard let listener = try? NWListener(using: params, on: NWEndpoint.Port(rawValue: port) ?? 7700) else {
-        meloLog("NWListener init failed on port \(port)")
+    guard let listener = try? NWListener(using: params) else {
+        meloLog("NWListener init failed")
         return
     }
     listener.service = NWListener.Service(
@@ -248,11 +256,12 @@ public func meloSyncRegisterService(
     )
     listener.stateUpdateHandler = { state in
         switch state {
-        case .ready:   meloLog("NWListener ready on port \(port) — advertising as '\(nameStr)'")
+        case .ready:   meloLog("NWListener ready — advertising '\(nameStr)' addr=\(addrStr)")
         case .failed(let e): meloLog("NWListener failed: \(e)")
         default: break
         }
     }
+    // All real HTTP is handled by Axum; reject NWListener connections immediately.
     listener.newConnectionHandler = { conn in conn.cancel() }
     listener.start(queue: _mdnsQueue)
     _listener = listener

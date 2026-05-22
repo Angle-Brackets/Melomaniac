@@ -210,6 +210,16 @@ pub async fn sync_get_fingerprint(state: State<'_, SyncState>) -> Result<String,
     Ok(state.bridge.fingerprint())
 }
 
+#[tauri::command]
+pub async fn sync_get_pending_conflicts(
+    playlist_id: String,
+    state: State<'_, SyncState>,
+) -> Result<Vec<melomaniac_sync::ConflictChunk>, String> {
+    Ok(state.bridge.pending_merge(&playlist_id)
+        .map(|m| m.conflicts)
+        .unwrap_or_default())
+}
+
 /// Choice the user made for one conflict chunk.
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct ConflictResolution {

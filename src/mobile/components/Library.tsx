@@ -778,16 +778,17 @@ function PlaylistArt({ playlistId, branch }: { playlistId: string; branch: strin
   return <MMArt src={url ?? undefined} size={54} radius={9}/>;
 }
 
-function PlaylistCard({ name, desc, branch, commit, branches, playlistId, pinned, pull, uncommitted, indent, onPress }: {
+function PlaylistCard({ name, desc, branch, commit, branches, playlistId, pinned, pull, uncommitted, indent, hasConflict, onPress, onConflict }: {
   name: string; desc: string; branch: string; commit: string;
   branches: number; playlistId: string; pinned?: boolean; pull?: boolean;
-  uncommitted?: boolean; indent?: boolean; onPress?: () => void;
+  uncommitted?: boolean; indent?: boolean; hasConflict?: boolean;
+  onPress?: () => void; onConflict?: () => void;
 }) {
   return (
     <div onClick={onPress} style={{
       margin: `4px ${indent ? '36px' : '16px'} 4px ${indent ? '36px' : '16px'}`,
       padding: '10px 12px',
-      background: 'var(--bg-2)', border: '0.5px solid var(--border-1)',
+      background: 'var(--bg-2)', border: `0.5px solid ${hasConflict ? 'var(--yellow, #f59e0b)' : 'var(--border-1)'}`,
       borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
       cursor: 'pointer',
     }}>
@@ -804,6 +805,14 @@ function PlaylistCard({ name, desc, branch, commit, branches, playlistId, pinned
           {branches > 1 && <MMHash color="var(--text-3)">+{branches - 1}</MMHash>}
           {uncommitted && <span style={{ fontSize: 10.5, color: 'var(--accent-light)', fontFamily: 'JetBrains Mono, monospace' }}>● changes</span>}
           {pull && <span style={{ fontSize: 10.5, color: 'var(--blue)', fontFamily: 'JetBrains Mono, monospace' }}>↓ pull</span>}
+          {hasConflict && (
+            <span
+              onClick={e => { e.stopPropagation(); onConflict?.() }}
+              style={{ fontSize: 10.5, color: '#f59e0b', fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer' }}
+            >
+              ⚡ merge conflict
+            </span>
+          )}
         </div>
       </div>
       <Icons.chevRight size={14} stroke="var(--text-3)"/>
@@ -1072,10 +1081,12 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
   const downloadingPlaylists = useStore(s => s.downloadingPlaylists);
   const downloadPlaylist     = useStore(s => s.downloadPlaylist);
   const downloadProgress     = useStore(s => s.downloadProgress);
-  const livePeers            = useStore(s => s.livePeers);
-  const knownDevices         = useStore(s => s.knownDevices);
-  const openPeerManifest     = useStore(s => s.openPeerManifest);
-  const [query, setQuery]    = useState('');
+  const livePeers               = useStore(s => s.livePeers);
+  const knownDevices            = useStore(s => s.knownDevices);
+  const openPeerManifest        = useStore(s => s.openPeerManifest);
+  const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
+  const reopenConflict          = useStore(s => s.reopenConflict);
+  const [query, setQuery]       = useState('');
 
   // Auto-fetch the manifest from the first trusted live peer so ghost cards
   // appear without the user having to navigate to Settings first.
@@ -1152,7 +1163,9 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
                   branch={activeBranch?.name ?? selectedBranchName}
                   commit={commit}
                   branches={p.branches.length}
+                  hasConflict={pendingConflictPlaylists.includes(p.id)}
                   onPress={() => { setCurrentPlaylist(p.id); onPlaylistDetail(); }}
+                  onConflict={() => reopenConflict(p.id)}
                 />
               );
             })}

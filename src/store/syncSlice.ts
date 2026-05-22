@@ -11,11 +11,15 @@ export type SyncSlice = {
   resolutions: ConflictResolution[]
 
   diffViewerOpen: boolean
+  // Playlists that have unresolved merge conflicts stored in Rust's pending_merges.
+  // Persists through closeDiffViewer so a badge remains until the user finalizes.
+  pendingConflictPlaylists: string[]
 
-  openDiffViewer:   (playlistId: string, conflicts: ConflictChunk[]) => void
-  closeDiffViewer:  () => void
-  submitResolution: (resolution: ConflictResolution) => void
-  finalizeMerge:    () => Promise<void>
+  openDiffViewer:    (playlistId: string, conflicts: ConflictChunk[]) => void
+  closeDiffViewer:   () => void
+  submitResolution:  (resolution: ConflictResolution) => void
+  finalizeMerge:     () => Promise<void>
+  reopenConflict:    (playlistId: string) => Promise<void>
 
   // Pairing UI state
   pairingOpen:   boolean
@@ -127,20 +131,28 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         }
 
         let synced = 0
+        let conflicted = 0
         for (const { id, branchNames } of toSync) {
           try {
-            if (branchNames.length === 1) {
-              await invoke('sync_playlist', { playlistId: id, branchName: branchNames[0] })
+            const report: SyncReport = branchNames.length === 1
+              ? await invoke('sync_playlist', { playlistId: id, branchName: branchNames[0] })
+              : await invoke('sync_playlist_branches', { playlistId: id, branchNames })
+            if (report.conflicts.length > 0) {
+              get().openDiffViewer(id, report.conflicts)
+              conflicted++
             } else {
-              await invoke('sync_playlist_branches', { playlistId: id, branchNames })
+              synced++
             }
-            synced++
           } catch { /* peer went offline mid-sync */ }
         }
 
-        if (synced > 0) {
+        if (synced > 0 || conflicted > 0) {
           await Promise.all([get().loadPlaylists(), get().loadLibrary()])
-          showToast(`Auto-synced ${synced} playlist${synced !== 1 ? 's' : ''} with ${peer.display_name}`)
+          if (conflicted > 0) {
+            showToast(`Synced with ${peer.display_name} — ${conflicted} conflict${conflicted !== 1 ? 's' : ''} need resolution`)
+          } else {
+            showToast(`Auto-synced ${synced} playlist${synced !== 1 ? 's' : ''} with ${peer.display_name}`)
+          }
         }
       })
       .catch(() => {})
@@ -148,19 +160,23 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   }
 
   return ({
-  mergeConflicts:  [],
-  mergePlaylistId: null,
-  currentChunkIdx: 0,
-  resolutions:     [],
-  diffViewerOpen:  false,
+  mergeConflicts:           [],
+  mergePlaylistId:          null,
+  currentChunkIdx:          0,
+  resolutions:              [],
+  diffViewerOpen:           false,
+  pendingConflictPlaylists: [],
 
-  openDiffViewer: (playlistId, conflicts) => set({
-    mergePlaylistId: playlistId,
-    mergeConflicts:  conflicts,
-    currentChunkIdx: 0,
-    resolutions:     [],
-    diffViewerOpen:  true,
-  }),
+  openDiffViewer: (playlistId, conflicts) => set(s => ({
+    mergePlaylistId:          playlistId,
+    mergeConflicts:           conflicts,
+    currentChunkIdx:          0,
+    resolutions:              [],
+    diffViewerOpen:           true,
+    pendingConflictPlaylists: s.pendingConflictPlaylists.includes(playlistId)
+      ? s.pendingConflictPlaylists
+      : [...s.pendingConflictPlaylists, playlistId],
+  })),
 
   closeDiffViewer: () => set({ diffViewerOpen: false }),
 
@@ -173,12 +189,41 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     const { mergePlaylistId, resolutions } = get()
     try {
       await invoke('resolve_merge_conflict', { playlistId: mergePlaylistId, resolutions })
-      set({ mergeConflicts: [], mergePlaylistId: null, currentChunkIdx: 0, resolutions: [], diffViewerOpen: false })
+      set(s => ({
+        mergeConflicts:           [],
+        mergePlaylistId:          null,
+        currentChunkIdx:          0,
+        resolutions:              [],
+        diffViewerOpen:           false,
+        pendingConflictPlaylists: s.pendingConflictPlaylists.filter(id => id !== mergePlaylistId),
+      }))
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
       get().bumpArtworkVersion()
       showToast('Merge resolved — playlist updated')
     } catch (e) {
       showToast(`Merge failed: ${String(e).slice(0, 60)}`)
+    }
+  },
+
+  reopenConflict: async (playlistId) => {
+    try {
+      const conflicts = await invoke<ConflictChunk[]>('sync_get_pending_conflicts', { playlistId })
+      if (conflicts.length > 0) {
+        get().openDiffViewer(playlistId, conflicts)
+      } else {
+        // Pending merge cleared (app restarted). Remove stale badge.
+        set(s => ({ pendingConflictPlaylists: s.pendingConflictPlaylists.filter(id => id !== playlistId) }))
+        // If the last known conflicts are still in memory for this playlist, reuse them.
+        const { mergeConflicts, mergePlaylistId } = get()
+        if (mergePlaylistId === playlistId && mergeConflicts.length > 0) {
+          set({ diffViewerOpen: true })
+        }
+      }
+    } catch {
+      const { mergeConflicts, mergePlaylistId } = get()
+      if (mergePlaylistId === playlistId && mergeConflicts.length > 0) {
+        set({ diffViewerOpen: true })
+      }
     }
   },
 

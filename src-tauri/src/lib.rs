@@ -280,6 +280,7 @@ pub fn run() {
             sync::sync_fetch_peer_manifest,
             sync::sync_refresh_metadata,
             sync::sync_get_fingerprint,
+            sync::sync_get_pending_conflicts,
             sync::resolve_merge_conflict,
         ])
         .run(tauri::generate_context!())

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useStore } from '../../store';
 import type { Playlist } from '../data';
 import {
   IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoGit, IcoSync,
@@ -167,6 +168,9 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
   const isActive    = item.id === activeId;
   const isPinned    = pinnedIds.has(item.id);
   const hasChildren = !!item.children?.length;
+  const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
+  const reopenConflict           = useStore(s => s.reopenConflict);
+  const hasConflict = pendingConflictPlaylists.includes(item.id);
 
   return (
     <div onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
@@ -227,6 +231,14 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
           )}
           {item.pull && (
             <span className="font-mono text-[9px] bg-mm-accent-dim text-mm-accent-lit px-1 py-px rounded-sm">pull?</span>
+          )}
+          {hasConflict && (
+            <span
+              onClick={e => { e.stopPropagation(); reopenConflict(item.id) }}
+              className="font-mono text-[9px] px-1 py-px rounded-sm cursor-pointer"
+              style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}
+              title="Merge conflict — click to resolve"
+            >⚡</span>
           )}
           {(hov || isPinned) && <PinButton pinned={isPinned} onToggle={() => onTogglePin(item.id)} />}
           {hov && (

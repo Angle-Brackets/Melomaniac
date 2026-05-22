@@ -3,11 +3,14 @@ use crate::merge::diff_trees;
 use crate::{
     KnownDevice, NodeIdentity, PeerInfo, PendingMerge, PlaylistManifest, QrPayload, SyncBridge,
     SyncError, SyncReport, TrackSyncRecord,
+    http_server::{ServerState, build_router},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use melomaniac_storage::{CasStore, CommitRecord, Database, TrackRecord, TreeBlob};
 use rand::RngCore;
 use rand::rngs::OsRng;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,7 +23,7 @@ unsafe extern "C" {
         on_lost: extern "C" fn(*const std::ffi::c_char),
     );
     fn melo_sync_stop_discovery();
-    fn melo_sync_register_service(pk: *const std::ffi::c_char, name: *const std::ffi::c_char, port: u16);
+    fn melo_sync_register_service(pk: *const std::ffi::c_char, name: *const std::ffi::c_char, port: u16, addr_hint: *const std::ffi::c_char);
     fn melo_sync_unregister_service();
     fn melo_get_device_name(buf: *mut std::ffi::c_char, len: usize);
 }
@@ -120,6 +123,47 @@ extern "C" fn on_peer_lost(pk_ptr: *const std::ffi::c_char) {
     let Some(peers) = PEER_LIST.get() else { return };
     let Ok(mut list) = peers.write() else { return };
     list.retain(|p| p.public_key_b64 != pk);
+}
+
+// ── Network helpers ───────────────────────────────────────────────────────────
+
+fn local_ip() -> Option<std::net::IpAddr> {
+    use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("8.8.8.8:80").is_ok() {
+            if let Some(ip @ IpAddr::V4(v4)) = socket.local_addr().ok().map(|a| a.ip()) {
+                if v4 != Ipv4Addr::LOCALHOST {
+                    return Some(ip);
+                }
+            }
+        }
+    }
+    // Fallback: enumerate network interfaces (iOS is Unix).
+    unsafe {
+        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
+        if libc::getifaddrs(&mut ifap) != 0 {
+            return None;
+        }
+        let mut result = None;
+        let mut ifa = ifap;
+        while !ifa.is_null() {
+            let addr_ptr = (*ifa).ifa_addr;
+            if !addr_ptr.is_null()
+                && (*addr_ptr).sa_family as libc::c_int == libc::AF_INET
+            {
+                use std::net::Ipv4Addr;
+                let sin = &*(addr_ptr as *const libc::sockaddr_in);
+                let ip = Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
+                if !ip.is_loopback() && !ip.is_link_local() {
+                    result = Some(std::net::IpAddr::V4(ip));
+                    break;
+                }
+            }
+            ifa = (*ifa).ifa_next;
+        }
+        libc::freeifaddrs(ifap);
+        result
+    }
 }
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
@@ -222,6 +266,8 @@ pub struct IosSyncBridge {
     trust_list: Arc<RwLock<TrustList>>,
     db: Arc<Database>,
     cas: Arc<CasStore>,
+    pending_merges: Arc<std::sync::Mutex<HashMap<String, PendingMerge>>>,
+    pending_qr_token: Arc<std::sync::Mutex<Option<(String, u64)>>>,
 }
 
 impl IosSyncBridge {
@@ -258,6 +304,8 @@ impl IosSyncBridge {
             trust_list: Arc::new(RwLock::new(trust_list)),
             db,
             cas,
+            pending_merges: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            pending_qr_token: Arc::new(std::sync::Mutex::new(None)),
         };
         // Populate process-globals so the bare `extern "C"` callbacks can reach
         // the peer list and trust list. `.set()` is a no-op if already set,
@@ -270,13 +318,51 @@ impl IosSyncBridge {
 
 impl SyncBridge for IosSyncBridge {
     fn start_discovery(&self) -> Result<(), SyncError> {
-        eprintln!("[sync] iOS start_discovery: name='{}' pk={}…",
+        let port = std::env::var("MELO_SYNC_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(7700);
+
+        eprintln!("[sync] iOS start_discovery: name='{}' pk={}… port={port}",
             self.identity.display_name,
             &self.identity.public_key_b64()[..8]);
-        let pk   = std::ffi::CString::new(self.identity.public_key_b64()).unwrap_or_default();
-        let name = std::ffi::CString::new(self.identity.display_name.clone()).unwrap_or_default();
+
+        // Start the Axum HTTP server so Desktop can pull from iOS.
+        let server_state = ServerState {
+            identity:         self.identity.clone(),
+            trust_list:       Arc::new(tokio::sync::RwLock::new(
+                self.trust_list.read().map_err(|_| SyncError::IdentityError("trust list lock".into()))?.clone()
+            )),
+            db:               self.db.clone(),
+            cas:              self.cas.clone(),
+            pending_qr_token: self.pending_qr_token.clone(),
+        };
+        let router = build_router(server_state);
+        let bind_addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("valid bind address");
+
+        tokio::spawn(async move {
+            match tokio::net::TcpListener::bind(bind_addr).await {
+                Ok(listener) => {
+                    eprintln!("[sync] iOS HTTP server listening on {bind_addr}");
+                    if let Err(e) = axum::serve(listener, router).await {
+                        eprintln!("[sync] iOS HTTP server error: {e}");
+                    }
+                }
+                Err(e) => eprintln!("[sync] iOS HTTP server bind error: {e}"),
+            }
+        });
+
+        // Determine the local IP for the mDNS TXT addr field so peers can reach our server.
+        let local_addr = local_ip()
+            .map(|ip| format!("{ip}:{port}"))
+            .unwrap_or_default();
+
+        let pk      = std::ffi::CString::new(self.identity.public_key_b64()).unwrap_or_default();
+        let name    = std::ffi::CString::new(self.identity.display_name.clone()).unwrap_or_default();
+        let addr_c  = std::ffi::CString::new(local_addr.clone()).unwrap_or_default();
+        eprintln!("[sync] iOS start_discovery: advertising addr={local_addr}");
         unsafe {
-            melo_sync_register_service(pk.as_ptr(), name.as_ptr(), 7700);
+            melo_sync_register_service(pk.as_ptr(), name.as_ptr(), port, addr_c.as_ptr());
             melo_sync_start_discovery(on_peer_discovered, on_peer_lost);
         }
         eprintln!("[sync] iOS start_discovery: NWBrowser and NWListener started");
@@ -314,12 +400,21 @@ impl SyncBridge for IosSyncBridge {
         let mut token_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut token_bytes);
         let token = B64.encode(token_bytes);
-        let exp = unix_now() + 60;
+        let exp = unix_now() + 600;
+
+        // Store token so /pair can verify it when Desktop scans this QR.
+        *self.pending_qr_token.lock().unwrap() = Some((token.clone(), exp));
+
+        let port = std::env::var("MELO_SYNC_PORT")
+            .ok()
+            .and_then(|v| v.parse::<u16>().ok())
+            .unwrap_or(7700);
+        let addr = local_ip().map(|ip| format!("{ip}:{port}"));
 
         Ok(QrPayload {
             public_key_b64: self.identity.public_key_b64(),
             display_name: self.identity.display_name.clone(),
-            addr: None,
+            addr,
             token,
             exp,
         })
@@ -801,9 +896,15 @@ impl SyncBridge for IosSyncBridge {
         Ok(0)
     }
 
-    fn set_pending_merge(&self, _playlist_id: &str, _merge: PendingMerge) {}
-    fn pending_merge(&self, _playlist_id: &str) -> Option<PendingMerge> {
-        None
+    fn set_pending_merge(&self, playlist_id: &str, merge: PendingMerge) {
+        self.pending_merges.lock().unwrap().insert(playlist_id.to_string(), merge);
     }
-    fn clear_pending_merge(&self, _playlist_id: &str) {}
+
+    fn pending_merge(&self, playlist_id: &str) -> Option<PendingMerge> {
+        self.pending_merges.lock().unwrap().get(playlist_id).cloned()
+    }
+
+    fn clear_pending_merge(&self, playlist_id: &str) {
+        self.pending_merges.lock().unwrap().remove(playlist_id);
+    }
 }
