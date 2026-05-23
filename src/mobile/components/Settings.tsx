@@ -99,11 +99,14 @@ const THEME_PILLS: { id: ThemeName; label: string }[] = [
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
-  const openPairingDisplay  = useStore(s => s.openPairingDisplay);
-  const livePeers           = useStore(s => s.livePeers);
-  const refreshLivePeers    = useStore(s => s.refreshLivePeers);
-  const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
-  const openPeerManifest    = useStore(s => s.openPeerManifest);
+  const openPairingDisplay      = useStore(s => s.openPairingDisplay);
+  const livePeers               = useStore(s => s.livePeers);
+  const refreshLivePeers        = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices     = useStore(s => s.refreshKnownDevices);
+  const openPeerManifest        = useStore(s => s.openPeerManifest);
+  const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
+  const playlists               = useStore(s => s.playlists);
+  const reopenConflict          = useStore(s => s.reopenConflict);
   const handleRefresh       = useCallback(async () => {
     await Promise.all([refreshLivePeers(), refreshKnownDevices()]);
   }, [refreshLivePeers, refreshKnownDevices]);
@@ -216,6 +219,31 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           <h1 style={{ fontSize: 30, fontWeight: 700, letterSpacing: -0.5 }}>Settings</h1>
           <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v0.1 alpha · mobile</div>
         </div>
+
+        {/* Conflict resolution banner — shown when any playlist has an unresolved merge */}
+        {pendingConflictPlaylists.length > 0 && (
+          <div style={{ margin: '6px 16px 0', padding: '12px 14px', borderRadius: 14, background: 'oklch(0.35 0.1 50 / 0.35)', border: '0.5px solid oklch(0.65 0.15 50 / 0.6)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'oklch(0.85 0.12 50)' }}>
+                {pendingConflictPlaylists.length === 1
+                  ? 'Merge conflict needs resolution'
+                  : `${pendingConflictPlaylists.length} playlists have merge conflicts`}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 2 }}>
+                {pendingConflictPlaylists
+                  .map(id => playlists.find(p => p.id === id)?.name ?? id.slice(0, 8))
+                  .join(', ')}
+              </div>
+            </div>
+            <button
+              onClick={() => reopenConflict(pendingConflictPlaylists[0])}
+              style={{ padding: '6px 12px', borderRadius: 99, background: 'oklch(0.65 0.15 50)', color: 'var(--bg-0)', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
+            >
+              Resolve
+            </button>
+          </div>
+        )}
 
         {/* Identity card — inline editable */}
         <div style={{ margin: '12px 16px 4px', padding: '12px', borderRadius: 14, background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', display: 'flex', alignItems: 'center', gap: 12 }}>

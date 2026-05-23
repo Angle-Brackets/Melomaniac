@@ -286,8 +286,31 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     const peerName = peer?.display_name ?? 'device'
     try {
       const report = await invoke<SyncReport>('sync_with_peer', { publicKeyB64 })
+      await Promise.all([get().loadPlaylists(), get().loadLibrary()])
       if (report.conflicts.length > 0) {
-        showToast(`Synced with ${peerName} — ${report.conflicts.length} conflict(s) to resolve`)
+        // The aggregate report has conflicts from multiple playlists merged together.
+        // Each one is stored as a pending merge in Rust keyed by playlist_id.
+        // Scan all local playlists to find which ones have pending merges and open
+        // the diff viewer for the first one found (subsequent ones get a badge).
+        const { playlists } = get()
+        let opened = false
+        for (const pl of playlists) {
+          const conflicts = await invoke<ConflictChunk[]>('sync_get_pending_conflicts', { playlistId: pl.id }).catch(() => [] as ConflictChunk[])
+          if (conflicts.length > 0) {
+            if (!opened) {
+              get().openDiffViewer(pl.id, conflicts)
+              opened = true
+            } else {
+              // Register badge for remaining conflicted playlists
+              set(s => ({
+                pendingConflictPlaylists: s.pendingConflictPlaylists.includes(pl.id)
+                  ? s.pendingConflictPlaylists
+                  : [...s.pendingConflictPlaylists, pl.id],
+              }))
+            }
+          }
+        }
+        showToast(`Synced with ${peerName} — ${report.conflicts.length} conflict${report.conflicts.length !== 1 ? 's' : ''} need resolution`)
       } else {
         const items = report.blobs_fetched
         showToast(items > 0

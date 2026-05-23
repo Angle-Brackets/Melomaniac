@@ -15,6 +15,19 @@ function ColHeader({ label }: { label: string }) {
   )
 }
 
+/** Resolve a BLAKE3 track hash to a human-readable label.
+ *  Falls back to the first 12 hex chars if the hash is not in the local library.
+ */
+function useTrackLabel(): (hash: string | undefined) => string {
+  const tracks = useStore(s => s.tracks)
+  return (hash) => {
+    if (!hash) return '—'
+    const t = tracks.find(tr => tr.hash === hash)
+    if (t) return t.artist ? `${t.title} — ${t.artist}` : t.title
+    return hash.slice(0, 12)
+  }
+}
+
 function TrackOrderConflict({
   chunk,
   onChoice,
@@ -22,9 +35,10 @@ function TrackOrderConflict({
   chunk: ConflictChunk
   onChoice: (choice: ConflictResolution['choice']) => void
 }) {
-  const ours   = Array.isArray(chunk.ours)   ? (chunk.ours   as string[]) : []
-  const theirs = Array.isArray(chunk.theirs) ? (chunk.theirs as string[]) : []
-  const max    = Math.max(ours.length, theirs.length)
+  const ours      = Array.isArray(chunk.ours)   ? (chunk.ours   as string[]) : []
+  const theirs    = Array.isArray(chunk.theirs) ? (chunk.theirs as string[]) : []
+  const max       = Math.max(ours.length, theirs.length)
+  const trackLabel = useTrackLabel()
 
   return (
     <div className="flex flex-col gap-4">
@@ -41,7 +55,7 @@ function TrackOrderConflict({
                   className={`flex items-center gap-2 px-2 py-1 rounded text-xs font-mono ${differs ? 'bg-amber-500/15 text-amber-300' : 'bg-base-200'}`}
                 >
                   <span className="opacity-40 w-5 text-right shrink-0">{i + 1}</span>
-                  <span className="truncate">{hash ? hash.slice(0, 12) : '—'}</span>
+                  <span className="truncate">{trackLabel(hash)}</span>
                 </div>
               )
             })}
@@ -59,7 +73,7 @@ function TrackOrderConflict({
                   className={`flex items-center gap-2 px-2 py-1 rounded text-xs font-mono ${differs ? 'bg-amber-500/15 text-amber-300' : 'bg-base-200'}`}
                 >
                   <span className="opacity-40 w-5 text-right shrink-0">{i + 1}</span>
-                  <span className="truncate">{hash ? hash.slice(0, 12) : '—'}</span>
+                  <span className="truncate">{trackLabel(hash)}</span>
                 </div>
               )
             })}
@@ -89,9 +103,20 @@ function TrackDeletedConflict({
 }) {
   const oursIsNull   = chunk.ours === null
   const theirsIsNull = chunk.theirs === null
+  const trackLabel   = useTrackLabel()
+
+  // context carries { hash: "..." } so we can show the track name
+  const ctxHash = typeof chunk.context === 'object' && chunk.context !== null && 'hash' in chunk.context
+    ? String((chunk.context as Record<string, unknown>).hash)
+    : undefined
 
   return (
     <div className="flex flex-col gap-4">
+      {ctxHash && (
+        <div className="text-xs font-mono opacity-60 truncate">
+          Track: <span className="text-base-content">{trackLabel(ctxHash)}</span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <ColHeader label="Your Version" />
@@ -186,9 +211,22 @@ function AbLoopConflict({
 }) {
   const oursPoints   = isAbPoints(chunk.ours)   ? chunk.ours   : null
   const theirsPoints = isAbPoints(chunk.theirs) ? chunk.theirs : null
+  const trackLabel   = useTrackLabel()
+
+  // theirs carries { hash, ab_start_ms, ab_end_ms } per the Rust resolution handler
+  const trackHash = typeof chunk.theirs === 'object' && chunk.theirs !== null && 'hash' in chunk.theirs
+    ? String((chunk.theirs as Record<string, unknown>).hash)
+    : typeof chunk.ours === 'object' && chunk.ours !== null && 'hash' in chunk.ours
+      ? String((chunk.ours as Record<string, unknown>).hash)
+      : undefined
 
   return (
     <div className="flex flex-col gap-4">
+      {trackHash && (
+        <div className="text-xs font-mono opacity-60 truncate">
+          Track: <span className="text-base-content">{trackLabel(trackHash)}</span>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <ColHeader label="Your Version" />
