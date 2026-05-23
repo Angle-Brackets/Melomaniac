@@ -191,7 +191,7 @@ export default function DesktopApp(): JSX.Element {
   const [manualQueue, setManualQueue] = useState<Track[]>([]);
   const [showQueue, setShowQueue] = useState(false);
   const [vibeText, setVibeText] = useState('chill ambient music for focus');
-  const [gitToast, setGitToast] = useState<string | null>(null);
+  const [meloToast, setMeloToast] = useState<string | null>(null);
   const [commitRefreshKey, setCommitRefreshKey] = useState(0);
   const [showStats, setShowStats] = useState(false);
   const [appStats, setAppStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
@@ -403,8 +403,8 @@ export default function DesktopApp(): JSX.Element {
             setActivePlaylistId(null);
             setPlaylistTracks(null);
             setPendingChanges([]);
-            setGitToast('Dev reset: all playlists cleared');
-            setTimeout(() => setGitToast(null), 2400);
+            setMeloToast('Dev reset: all playlists cleared');
+            setTimeout(() => setMeloToast(null), 2400);
           })
           .catch(console.error);
       }
@@ -644,8 +644,8 @@ export default function DesktopApp(): JSX.Element {
   };
 
   const toast = (msg: string, ms = 1800) => {
-    setGitToast(msg);
-    setTimeout(() => setGitToast(null), ms);
+    setMeloToast(msg);
+    setTimeout(() => setMeloToast(null), ms);
   };
 
   // off → fisher-yates → balanced → random → off
@@ -680,7 +680,7 @@ export default function DesktopApp(): JSX.Element {
   };
 
   const handleCommitReorder = () => {
-    handleGitAction('commit');
+    handleMeloAction('commit');
     setHasUncommitted(false);
   };
 
@@ -707,8 +707,8 @@ export default function DesktopApp(): JSX.Element {
       await invoke('playlist_remove_track', { playlistId: activePlaylistId, branchName: activeBranch, hash, message: `Remove: ${title}` });
       setPlaylistTracks(prev => prev ? prev.filter(t => t.hash !== hash) : null);
       setCommitRefreshKey(k => k + 1);
-      setGitToast(`Removed "${title}"`);
-      setTimeout(() => setGitToast(null), 2400);
+      setMeloToast(`Removed "${title}"`);
+      setTimeout(() => setMeloToast(null), 2400);
     } catch (e) { console.error(e); }
   }, [activePlaylistId, activeBranch, playlistTracks]);
 
@@ -721,8 +721,8 @@ export default function DesktopApp(): JSX.Element {
       setActivePlaylistId(null);
       setPlaylistTracks(null);
       setActiveTab('Tracks');
-      setGitToast(`Deleted "${name}"`);
-      setTimeout(() => setGitToast(null), 2400);
+      setMeloToast(`Deleted "${name}"`);
+      setTimeout(() => setMeloToast(null), 2400);
     } catch (e) { console.error(e); }
   }, [activePlaylistId, playlistRecords]);
 
@@ -732,8 +732,8 @@ export default function DesktopApp(): JSX.Element {
       await invoke('playlist_rename', { playlistId: activePlaylistId, branchName: activeBranch, newName, message: '' });
       reloadPlaylists();
       setCommitRefreshKey(k => k + 1);
-      setGitToast(`Renamed to "${newName}"`);
-      setTimeout(() => setGitToast(null), 2400);
+      setMeloToast(`Renamed to "${newName}"`);
+      setTimeout(() => setMeloToast(null), 2400);
     } catch (e) { console.error(e); }
   }, [activePlaylistId, activeBranch, reloadPlaylists]);
 
@@ -744,8 +744,8 @@ export default function DesktopApp(): JSX.Element {
       setBranchMeta({ description: desc });
       reloadPlaylists();
       setCommitRefreshKey(k => k + 1);
-      setGitToast(desc ? 'Description updated' : 'Description cleared');
-      setTimeout(() => setGitToast(null), 2400);
+      setMeloToast(desc ? 'Description updated' : 'Description cleared');
+      setTimeout(() => setMeloToast(null), 2400);
     } catch (e) { console.error(e); }
   }, [activePlaylistId, activeBranch, reloadPlaylists]);
 
@@ -787,11 +787,11 @@ export default function DesktopApp(): JSX.Element {
           setCommitRefreshKey(k => k + 1);
           if (isFullRange) {
             setTrackAbPoints(p => { const next = { ...p }; delete next[hash]; return next; });
-            setGitToast('A/B loop cleared');
+            setMeloToast('A/B loop cleared');
           } else {
-            setGitToast('A/B loop saved');
+            setMeloToast('A/B loop saved');
           }
-          setTimeout(() => setGitToast(null), 2400);
+          setTimeout(() => setMeloToast(null), 2400);
         }).catch(console.error);
       }, 1500);
     }
@@ -819,7 +819,7 @@ export default function DesktopApp(): JSX.Element {
     }
   };
 
-  const handleGitAction = (action: string) => {
+  const handleMeloAction = (action: string) => {
     const msgs: Record<string, string> = {
       commit: 'Committed snapshot → a3f891',
       push: 'Pushed to upstream/study-beats ✓',
@@ -827,13 +827,13 @@ export default function DesktopApp(): JSX.Element {
       shuffle: 'Shuffled queue',
       branch: 'Branch created',
     };
-    setGitToast(msgs[action] ?? action);
-    setTimeout(() => setGitToast(null), 2400);
+    setMeloToast(msgs[action] ?? action);
+    setTimeout(() => setMeloToast(null), 2400);
   };
 
   const handleRailChange = (item: string) => {
     setRailItem(item);
-    if (item === 'git') setShowCommitGraph(true);
+    if (item === 'melo') setShowCommitGraph(true);
     if (item === 'editor') setActiveTab('Tracks');
   };
 
@@ -1001,8 +1001,8 @@ export default function DesktopApp(): JSX.Element {
                 defaultBranchName={activeBranch}
                 onTracksAddedToPlaylist={(playlistId, branchName, count) => {
                   const plName = playlistRecords.find(p => p.id === playlistId)?.name ?? 'playlist';
-                  setGitToast(`Added ${count} ${count === 1 ? 'track' : 'tracks'} to "${plName}"`);
-                  setTimeout(() => setGitToast(null), 2400);
+                  setMeloToast(`Added ${count} ${count === 1 ? 'track' : 'tracks'} to "${plName}"`);
+                  setTimeout(() => setMeloToast(null), 2400);
                   if (playlistId === activePlaylistId && branchName === activeBranch) {
                     invoke<TrackRecord[]>('playlist_get_tracks', { playlistId, branchName })
                       .then(r => setPlaylistTracks(r.map(trackRecordToTrack)))
@@ -1035,8 +1035,8 @@ export default function DesktopApp(): JSX.Element {
                   fetchedHashesRef.current.add(newHash);
                   fetchedHashesRef.current.delete(oldHash);
                   if (loadedHash === oldHash) setLoadedHash(newHash);
-                  setGitToast('Metadata saved · committed to all branches');
-                  setTimeout(() => setGitToast(null), 3000);
+                  setMeloToast('Metadata saved · committed to all branches');
+                  setTimeout(() => setMeloToast(null), 3000);
                   setCommitRefreshKey(k => k + 1);
                 }}
                 onArtworkUpdated={(affectedHashes, newUrl) => {
@@ -1049,8 +1049,8 @@ export default function DesktopApp(): JSX.Element {
                   const msg = n === 1
                     ? `Artwork updated · ${trackOrder.find(t => t.hash === affectedHashes[0])?.title ?? affectedHashes[0].slice(0, 6)}`
                     : `Artwork updated · ${n} tracks`;
-                  setGitToast(msg);
-                  setTimeout(() => setGitToast(null), 3000);
+                  setMeloToast(msg);
+                  setTimeout(() => setMeloToast(null), 3000);
                   setCommitRefreshKey(k => k + 1);
                 }}
                 onTrackDeleted={hash => setTrackOrder(prev => prev.filter(t => t.hash !== hash))}
@@ -1132,8 +1132,8 @@ export default function DesktopApp(): JSX.Element {
                       onRemoveTrack={playlistTracks ? handleRemoveFromPlaylist : undefined}
                       onAddTracks={playlistTracks ? () => {
                         setRailItem('library');
-                        setGitToast('Select tracks in the library, then use "Add to Playlist"');
-                        setTimeout(() => setGitToast(null), 3000);
+                        setMeloToast('Select tracks in the library, then use "Add to Playlist"');
+                        setTimeout(() => setMeloToast(null), 3000);
                       } : undefined}
                       onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
                       onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
@@ -1322,20 +1322,20 @@ export default function DesktopApp(): JSX.Element {
             onClose={() => setFolderPopupItem(null)}
             onAddToFolder={(itemId, folderId) => {
               setFolderAssignments(prev => ({ ...prev, [itemId]: folderId }));
-              setGitToast(`Added to ${folders.find(f => f.id === folderId)?.name ?? 'folder'}`);
-              setTimeout(() => setGitToast(null), 2400);
+              setMeloToast(`Added to ${folders.find(f => f.id === folderId)?.name ?? 'folder'}`);
+              setTimeout(() => setMeloToast(null), 2400);
             }}
             onCreateFolder={(name, itemId) => {
               const id = Date.now();
               setFolders(f => [...f, { id, name }]);
               setFolderAssignments(prev => ({ ...prev, [itemId]: id }));
-              setGitToast(`Folder "${name}" created`);
-              setTimeout(() => setGitToast(null), 2400);
+              setMeloToast(`Folder "${name}" created`);
+              setTimeout(() => setMeloToast(null), 2400);
             }}
             onRemoveFromFolder={itemId => {
               removeFromFolder(itemId);
-              setGitToast('Removed from folder');
-              setTimeout(() => setGitToast(null), 2400);
+              setMeloToast('Removed from folder');
+              setTimeout(() => setMeloToast(null), 2400);
             }}
           />
         )}
@@ -1350,8 +1350,8 @@ export default function DesktopApp(): JSX.Element {
               setArtworkUrls(prev => ({ ...prev, [key]: newUrl }));
               reloadPlaylists();
               setShowArtworkModal(false);
-              setGitToast('Playlist artwork updated');
-              setTimeout(() => setGitToast(null), 2400);
+              setMeloToast('Playlist artwork updated');
+              setTimeout(() => setMeloToast(null), 2400);
             }}
             onClose={() => setShowArtworkModal(false)}
           />
@@ -1405,8 +1405,8 @@ export default function DesktopApp(): JSX.Element {
                 playlistId: activePlaylist.id, branchName: activeBranch,
               }).then(m => setBranchMeta({ description: m.description })).catch(console.error);
               setCommitRefreshKey(k => k + 1);
-              setGitToast(`Merged into '${activeBranch}' · ${commitHash.slice(0, 7)}`);
-              setTimeout(() => setGitToast(null), 2800);
+              setMeloToast(`Merged into '${activeBranch}' · ${commitHash.slice(0, 7)}`);
+              setTimeout(() => setMeloToast(null), 2800);
             }}
           />
         )}
@@ -1421,8 +1421,8 @@ export default function DesktopApp(): JSX.Element {
               reloadPlaylists();
               setActivePlaylistId(newPlaylist.id);
               setActiveBranch('main');
-              setGitToast(`Forked to '${newPlaylist.name}'`);
-              setTimeout(() => setGitToast(null), 2400);
+              setMeloToast(`Forked to '${newPlaylist.name}'`);
+              setTimeout(() => setMeloToast(null), 2400);
             }}
           />
         )}
@@ -1438,8 +1438,8 @@ export default function DesktopApp(): JSX.Element {
               reloadPlaylists();
               setActiveBranch(name);
               setCommitRefreshKey(k => k + 1);
-              setGitToast(`Branch '${name}' created`);
-              setTimeout(() => setGitToast(null), 2400);
+              setMeloToast(`Branch '${name}' created`);
+              setTimeout(() => setMeloToast(null), 2400);
             }}
           />
         )}
@@ -1466,7 +1466,7 @@ export default function DesktopApp(): JSX.Element {
         <PairingModal platform="desktop" />
         <PeerPlaylistsModal platform="desktop" />
 
-        {/* Git operation toast */}
+        {/* Melo operation toast */}
         {syncToast && (
           <div style={{
             position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)',
@@ -1480,7 +1480,7 @@ export default function DesktopApp(): JSX.Element {
           }}>{syncToast}</div>
         )}
 
-        {gitToast && (
+        {meloToast && (
           <div style={{
             position: 'absolute', bottom: loadedHash ? 92 : 30, left: '50%', transform: 'translateX(-50%)',
             background: 'var(--bg-5)', border: '1px solid var(--border-2)',
@@ -1490,7 +1490,7 @@ export default function DesktopApp(): JSX.Element {
             boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
             pointerEvents: 'none', zIndex: 100,
             animation: 'fadeIn 0.2s ease',
-          }}>{gitToast}</div>
+          }}>{meloToast}</div>
         )}
       </div>
     </div>

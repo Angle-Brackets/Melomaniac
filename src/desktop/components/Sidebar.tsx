@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../../store';
 import type { Playlist } from '../data';
 import {
-  IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoGit, IcoSync,
+  IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoBranch, IcoSync,
   IcoEditor, IcoDownload, IcoMetrics, IcoSettings, IcoPin, IcoChevron,
 } from '../icons';
 
@@ -389,7 +389,7 @@ export default function LibrarySidebar({
         <RailIcon icon={<IcoLibrary size={14} />}   active={activeRailItem === 'playlists'} onClick={() => onRailChange('playlists')} title="Playlists — browse playlists & tracks" />
         <RailIcon icon={<IcoMusicLib size={14} />}  active={activeRailItem === 'library'}   onClick={() => onRailChange('library')}   title="Library — all tracks on this machine" />
         <RailIcon icon={<IcoHistory size={14} />}  active={activeRailItem === 'history'} onClick={() => onRailChange('history')} title="Listening History — play log & skip stats" />
-        <RailIcon icon={<IcoGit size={14} />}      active={activeRailItem === 'git'}     onClick={() => onRailChange('git')}     title="Commit Graph — playlist version history" />
+        <RailIcon icon={<IcoBranch size={14} />}    active={activeRailItem === 'melo'}    onClick={() => onRailChange('melo')}    title="Commit Graph — playlist version history" />
         <RailIcon icon={<IcoSync size={14} />}     active={activeRailItem === 'sync'}    onClick={() => onRailChange('sync')}    title="Sync — push/pull with upstream remote" />
         <RailIcon icon={<IcoEditor size={14} />}   active={activeRailItem === 'editor'}  onClick={() => onRailChange('editor')} title="Editor — modify track metadata & MP3 tags" />
         <div style={{ flex: 1 }} />

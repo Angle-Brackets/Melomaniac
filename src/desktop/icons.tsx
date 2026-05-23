@@ -1,12 +1,12 @@
 // Shared icon library.
 // react-icons/fi (Feather) for standard UI actions; custom SVGs for
-// music/git-specific shapes that have no Feather equivalent.
+// music/melo-specific shapes that have no Feather equivalent.
 export {
   FiMenu        as IcoMenu,
   FiDisc        as IcoLibrary,
   FiMusic       as IcoMusicLib,
   FiClock       as IcoHistory,
-  FiGitBranch   as IcoGit,
+  FiGitBranch   as IcoBranch,
   FiDownload    as IcoDownload,
   FiBarChart2   as IcoMetrics,
   FiSettings    as IcoSettings,
