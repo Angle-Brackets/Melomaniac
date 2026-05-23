@@ -70,11 +70,13 @@ export default function DownloadModal({ onClose }: Props) {
         ));
       }),
     ];
+    // listen() returns a Promise<UnlistenFn> — must resolve each before calling to unsubscribe
     return () => { subs.forEach(p => p.then(fn => fn())); };
   }, []);
 
   const enqueue = useCallback(async () => {
     const trimmed = url.trim();
+    // Spotify is blocked: requires librespot bridge not yet implemented
     if (!trimmed || source?.label === 'Spotify') return;
     const id: string = await invoke('download_enqueue', { url: trimmed });
     setQueue(q => [...q, { id, url: trimmed, status: 'queued', progress: 0, title: null, error: null }]);

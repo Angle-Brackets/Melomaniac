@@ -13,6 +13,7 @@ interface Edge {
   style: React.CSSProperties;
 }
 
+// Straight edges are inset by THICKNESS on each end so the corner squares don't overlap them
 const EDGES: Edge[] = [
   { dir: 'North',     cursor: 'n-resize',  style: { top: 0, left: THICKNESS, right: THICKNESS, height: THICKNESS } },
   { dir: 'South',     cursor: 's-resize',  style: { bottom: 0, left: THICKNESS, right: THICKNESS, height: THICKNESS } },

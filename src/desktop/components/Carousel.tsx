@@ -193,13 +193,14 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
     animateTo(t);
   };
 
-  // How many cards can fit on one side of centre — determines visibility cutoff
   const slot        = size + SLOT_GAP;
+  // Half the number of cards that fit across the container — anything beyond this is invisible
   const halfVisible = containerWidth / (2 * slot);
 
   const getCardProps = (index: number) => {
     const offset = index - position;
     const abs    = Math.abs(offset);
+    // +0.4 margin prevents a card from popping out when it's almost entirely off-screen
     if (abs > halfVisible + 0.4) return null;
     const tx      = offset * slot;
     const scale   = 1 - Math.min(abs, 2) * 0.19;
@@ -219,6 +220,8 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
     <div style={{
       position: 'relative', width: '100%', height: carouselHeight,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
+      // translateZ(0) + contain promote the carousel to its own compositor layer, preventing
+      // repaints from propagating up during rAF-driven position updates
       willChange: 'transform', transform: 'translateZ(0)',
       contain: 'layout style paint',
     }}>

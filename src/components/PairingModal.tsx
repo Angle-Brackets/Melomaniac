@@ -159,6 +159,7 @@ function ScanMode({ platform }: { platform: 'desktop' | 'mobile' }) {
     setError(null)
     setScanning(true)
     try {
+      // Dynamic import: plugin is only bundled on iOS; desktop build never reaches this path
       const { scan, Format, requestPermissions } = await import('@tauri-apps/plugin-barcode-scanner')
       await requestPermissions()
       const result = await scan({ formats: [Format.QRCode] })

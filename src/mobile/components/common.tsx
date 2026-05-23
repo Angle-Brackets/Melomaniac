@@ -332,7 +332,7 @@ export function MMBranchPill({ branch, color = 'var(--accent)', size = 'sm' }: {
   );
 }
 
-// ── Icon button helper
+// ── Icon button helper — returns inline styles, not a component
 export function iconBtn(s = 32): React.CSSProperties {
   return {
     width: s, height: s, borderRadius: s / 2,
@@ -419,7 +419,7 @@ export function MarqueeText({ text, active, style, textStyle }: {
 
 const PTR_THRESHOLD = 64;
 
-export function usePullToRefresh(onRefresh: () => Promise<void>) {
+export function usePullToRefresh(onRefresh: () => Promise<void>): { scrollRef: React.MutableRefObject<HTMLDivElement | null>; pullY: number; refreshing: boolean } {
   const scrollRef     = useRef<HTMLDivElement>(null);
   const startY        = useRef(0);
   const pullYRef      = useRef(0);

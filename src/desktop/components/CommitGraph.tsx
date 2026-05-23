@@ -74,10 +74,11 @@ function computeLayout(commits: GraphNode[]): RowLayout[] {
   const colors: string[] = [];
   const HALF = NODE_H / 2;
 
-  // Reserve lane 0 for the main branch tip so it keeps the primary color even
-  // when a newer branch tip appears first in timestamp order. Only applies in
-  // true fork scenarios — if main's HEAD is the direct first-parent of another
-  // commit it's a linear history and no reservation is needed.
+  // Reserve lane 0 for the main branch tip so the primary palette color always
+  // corresponds to main. Without this, a feature branch with a newer timestamp
+  // would claim lane 0 first and steal the accent color.
+  // The reservation is skipped for linear histories (main is a direct parent of
+  // the first commit) because alloc order is already correct.
   const mainTip = commits.find(c => c.refs.includes('main'));
   const mainTipHash = mainTip?.hash ?? null;
   const mainIsDirect = mainTipHash !== null &&
@@ -113,11 +114,10 @@ function computeLayout(commits: GraphNode[]): RowLayout[] {
 
     const myColor = colors[myLane];
 
-    // Snapshot before clearing
+    // Snapshot with this commit placed (for drawing the incoming line), then free
+    // the slot so parents can reclaim or inherit it below.
     const before = [...lanes];
     before[myLane] = commit.hash;
-
-    // Free this slot
     lanes[myLane] = null;
 
     // Assign parent lanes
@@ -156,9 +156,9 @@ function computeLayout(commits: GraphNode[]): RowLayout[] {
     // Incoming line to circle (top half)
     if (!isNew) lines.push({ x1: lx(myLane), y1: 0, x2: lx(myLane), y2: HALF, col: myColor, lane: myLane });
 
-    // Outgoing lines to parents (bottom half).
-    // First parent continues in this commit's color; additional parents (merge sources)
-    // use the source lane's color so the branch line stays its own color up to the diamond.
+    // First parent continues in this commit's lane color (straight line to main ancestry).
+    // Merge parents use the source lane's own color so each branch visually "arrives"
+    // at the merge diamond in its own hue.
     for (let pi = 0; pi < parentLanes.length; pi++) {
       const p = parentLanes[pi];
       const lineCol = pi === 0 ? myColor : (colors[p.lane] ?? myColor);
@@ -580,7 +580,7 @@ export interface CommitGraphInlineProps {
   onRevertTo:      (hash: string, playlistId: string) => void;
 }
 
-export function CommitGraphInline({ playlistId, branchName, refreshKey, onBranchCreated, onRevertTo }: CommitGraphInlineProps) {
+export function CommitGraphInline({ playlistId, branchName, refreshKey, onBranchCreated, onRevertTo }: CommitGraphInlineProps): JSX.Element {
   return (
     <GraphPanel
       initPlaylistId={playlistId}
@@ -592,7 +592,7 @@ export function CommitGraphInline({ playlistId, branchName, refreshKey, onBranch
   );
 }
 
-export function CommitGraph({ onClose, closing }: { onClose: () => void; closing?: boolean }) {
+export function CommitGraph({ onClose, closing }: { onClose: () => void; closing?: boolean }): JSX.Element {
   return (
     <div
       className={closing ? 'mm-backdrop-exit' : 'mm-backdrop'}

@@ -97,6 +97,8 @@ export function getCachedPlaylistArtwork(playlistId: string, branchName: string 
 // getTrackArtwork / getPlaylistArtwork are idempotent: calling them a second time
 // returns the cached value immediately (or the same in-flight Promise if still
 // pending).  They are safe to call from render paths, effects, or prefetch loops.
+// _artworkHash is accepted for call-site symmetry but the Rust command looks it
+// up internally — passing it here would create a redundant round-trip.
 export function getTrackArtwork(trackHash: string, _artworkHash: string): Promise<string | null> {
   const cached = trackUrlCache.get(trackHash);
   if (cached !== undefined) return Promise.resolve(cached || null);

@@ -49,6 +49,7 @@ function shiftHue(hex: string, deg: number): string {
 // Sample a 48×48 downscale, bucket by hue (30° buckets), weight toward saturated
 // mid-light pixels, return the top-2 distinct colors (at least 60° apart in hue).
 // Falls back to hue-shifting primary by 150° when the image is monochromatic.
+// Keyed on the data-URL string — same artwork shared across albums hits the cache.
 async function extractAccents(src: string): Promise<[string, string]> {
   if (inflight.has(src)) return inflight.get(src)!;
   const p = (async (): Promise<[string, string]> => {

@@ -189,7 +189,7 @@ export default function PlaylistArtworkModal({ playlistId, branchName, currentAr
     loadImage(url);
   }, [imgUrl, loadImage]);
 
-  // Load current artwork on mount if one exists
+  // Load current artwork exactly once on mount — intentionally ignores prop changes after open
   useEffect(() => {
     if (currentArtworkUrl) loadImage(currentArtworkUrl);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,6 +253,7 @@ export default function PlaylistArtworkModal({ playlistId, branchName, currentAr
     off.height = OUT_SIZE;
     off.getContext('2d')!.drawImage(nativeImg, srcX, srcY, srcS, srcS, 0, 0, OUT_SIZE, OUT_SIZE);
 
+    // Always encode as JPEG at 0.92 — PNG would be 3–5× larger with no perceptible benefit for artwork
     const blob = await new Promise<Blob>((res, rej) =>
       off.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/jpeg', 0.92)
     );

@@ -3,8 +3,8 @@
 
 export enum ShuffleMode {
   Off    = 'Off',
-  Random = 'Random', // random picks each refill, history-deduped
-  Smart  = 'Smart',  // pre-computed Fisher-Yates permutation; no repeats until the full cycle is exhausted
+  Random = 'Random', // Fisher-Yates permutation over the candidate pool; no repeats until the cycle exhausts
+  Smart  = 'Smart',  // weighted selection that penalises same-artist back-to-back picks
 }
 
 export enum RepeatMode {

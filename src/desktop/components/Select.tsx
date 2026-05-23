@@ -123,6 +123,7 @@ export function Select({
                   if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent';
                 }}
                 onMouseDown={e => {
+                  // preventDefault stops the trigger button from firing onBlur before onChange runs
                   e.preventDefault();
                   onChange(opt.value);
                   setOpen(false);

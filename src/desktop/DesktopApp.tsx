@@ -51,8 +51,8 @@ function fisherYates<T>(arr: T[]): T[] {
   return a;
 }
 
-function balancedShuffle(tracks: import('./data').Track[]): import('./data').Track[] {
-  const groups = new Map<string, import('./data').Track[]>();
+function balancedShuffle(tracks: Track[]): Track[] {
+  const groups = new Map<string, Track[]>();
   for (const t of tracks) {
     const key = t.artist || '?';
     if (!groups.has(key)) groups.set(key, []);
@@ -60,7 +60,7 @@ function balancedShuffle(tracks: import('./data').Track[]): import('./data').Tra
   }
   const shuffledGroups = [...groups.values()].map(g => fisherYates(g));
   const n = tracks.length;
-  const result: { track: import('./data').Track; pos: number }[] = [];
+  const result: { track: Track; pos: number }[] = [];
   for (const group of shuffledGroups) {
     const spacing = n / group.length;
     const offset = Math.random() * spacing;
@@ -72,7 +72,7 @@ function balancedShuffle(tracks: import('./data').Track[]): import('./data').Tra
   return result.map(r => r.track);
 }
 
-function buildShuffledQueue(tracks: import('./data').Track[], mode: ShuffleMode): import('./data').Track[] {
+function buildShuffledQueue(tracks: Track[], mode: ShuffleMode): Track[] {
   if (mode === 'balanced') return balancedShuffle(tracks);
   return fisherYates(tracks); // fisher-yates and random both produce a permutation; random re-rolls on every advance
 }
@@ -117,7 +117,7 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 }
 
 // ── Root App ──────────────────────────────────────────────────────────────────
-export default function DesktopApp() {
+export default function DesktopApp(): JSX.Element {
   const openPairingDisplay = useStore(s => s.openPairingDisplay);
   const syncToast          = useStore(s => s.syncToast);
   const refreshLivePeers   = useStore(s => s.refreshLivePeers);
@@ -158,7 +158,7 @@ export default function DesktopApp() {
   const [abA, setAbA] = useState(0);
   const [abB, setAbB] = useState(1);
   const [loopMode, setLoopMode] = useState<LoopMode>('off');
-  // Keyed by track hash so points survive DB re-indexes and cross-device imports
+  // Keyed by track hash so points survive DB re-indexes and cross-device imports.
   const [trackAbPoints, setTrackAbPoints] = useState<Record<string, { a: number; b: number }>>(() => {
     try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
   });
@@ -223,8 +223,8 @@ export default function DesktopApp() {
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
 
-  // ── Stale-closure ref — updated synchronously each render so event handlers
-  //    always read current values without being recreated.
+  // Stale-closure ref — updated synchronously each render so the audio event
+  // listener (which is registered once) always reads the latest values.
   const sr = useRef({
     loopMode, playQueue, activeQueue, loadedHash, manualQueue,
     abA, abB, durationMs, positionMs, activeTrackId,
@@ -453,13 +453,15 @@ export default function DesktopApp() {
         const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
         if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
           const aMs = Math.round(a * dur);
-          lastSeekTime.current = Date.now(); // throttle visual updates during seek
+          // Stamp lastSeekTime so the 600 ms debounce below doesn't overwrite livePositionMsRef.
+          lastSeekTime.current = Date.now();
           livePositionMsRef.current = aMs;
           sr.current.positionMs = aMs;
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
           return; // skip visual update below — we already set livePositionMsRef
         }
-        // Update the live ref — no React re-render; rAF in seek components reads it
+        // 600 ms guard: skip live position updates immediately after a seek to
+        // avoid the seek bar snapping backward before the backend catches up.
         if (Date.now() - lastSeekTime.current > 600) {
           livePositionMsRef.current = posMs;
           sr.current.positionMs = posMs;
@@ -506,6 +508,7 @@ export default function DesktopApp() {
           // End of queue — reshuffle or wrap
           if (shuffle && aq.length > 0) {
             const newQ = buildShuffledQueue(aq, sm);
+            // Avoid immediately repeating the just-finished track at position 0.
             if (newQ.length > 1 && newQ[0].hash === lh) [newQ[0], newQ[1]] = [newQ[1], newQ[0]];
             setShuffledQueue(newQ);
             loadTrack(newQ[0]);
@@ -528,7 +531,7 @@ export default function DesktopApp() {
   }, []);
 
   // ── Artwork prefetch — loads a window around the current carousel position ──
-  // A ref tracks which hashes have been fetched/in-flight so we never
+  // Tracks which hashes have been fetched/in-flight so we never duplicate requests.
   const fetchedHashesRef = useRef(new Set<string>());
   useEffect(() => {
     // When artworkVersion bumps (sync downloaded new artwork), clear the guard
@@ -764,8 +767,8 @@ export default function DesktopApp() {
       if (abCommitRef.current) clearTimeout(abCommitRef.current);
       const playlistId = activePlaylistId;
       const branchName = activeBranch;
-      // Capture whether this track has committed A/B points at drag-start so
-      // returning to full-range can send null to clear them from the tree.
+      // Capture hadPoints at drag-start: returning to full-range sends null to clear
+      // the tree entry only when points were previously committed.
       const hadPoints = hash in trackAbPoints;
       abCommitRef.current = setTimeout(() => {
         const a = sr.current.abA;
@@ -1059,7 +1062,6 @@ export default function DesktopApp() {
                   artworkUrl={artworkUrls[`pl_${activePlaylist?.id}::${activeBranch}`] || null}
                   activeBranch={activeBranch}
                   onBranchChange={name => { setActiveBranch(name); setCommitRefreshKey(k => k + 1); }}
-                  onGitAction={handleGitAction}
                   activeTab={activeTab}
                   onTabChange={setActiveTab}
                   isPinned={activePlaylistId ? pinnedIds.has(activePlaylistId) : false}

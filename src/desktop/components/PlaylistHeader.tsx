@@ -11,7 +11,6 @@ interface PlaylistHeaderProps {
   artworkUrl:    string | null;
   activeBranch:  string;
   onBranchChange:(name: string) => void;
-  onGitAction:   (action: string) => void;
   activeTab:     string;
   onTabChange:   (tab: string) => void;
   isPinned:      boolean;
@@ -218,7 +217,7 @@ const iconBtn: React.CSSProperties = {
 export default function PlaylistHeader({
   playlist, artworkUrl, activeBranch, onBranchChange, activeTab,
   onTabChange, isPinned, onTogglePin, onNewBranch, onMerge, onFork, onEditArtwork, onBranchesChanged,
-}: PlaylistHeaderProps) {
+}: PlaylistHeaderProps): JSX.Element {
   const name = playlist?.name ?? 'No playlist selected';
   const branch = playlist?.branches.find(b => b.name === activeBranch) ?? playlist?.branches[0];
   const commitShort = branch?.head_commit?.slice(0, 7) ?? null;

@@ -61,7 +61,7 @@ export default function PlayerControls({
   onSkipNext, onSkipPrev,
   onSeek, volume, onVolume,
   abA, abB, onAbChange,
-}: PlayerControlsProps) {
+}: PlayerControlsProps): JSX.Element {
   const seekRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
   // DOM refs for rAF-driven updates (no React re-render needed)
@@ -102,6 +102,7 @@ export default function PlayerControls({
     const onMove = (e: MouseEvent) => {
       if (seekingRef.current) onSeek(getPct(e, seekRef));
       if (volumingRef.current) onVolume(getPct(e, volRef));
+      // 0.02 minimum gap prevents A and B from collapsing to the same point.
       if (abDragging.current === 'A') onAbChange('A', Math.min(getPct(e, seekRef), abB - 0.02));
       if (abDragging.current === 'B') onAbChange('B', Math.max(getPct(e, seekRef), abA + 0.02));
     };
@@ -198,6 +199,7 @@ export default function PlayerControls({
             if (!seekRef.current) return;
             const r = seekRef.current.getBoundingClientRect();
             const pct = (e.clientX - r.left) / r.width;
+            // 4% hit-target keeps the handles pickable even at small seek-bar widths.
             if (abActive && Math.abs(pct - abA) < 0.04) abDragging.current = 'A';
             else if (abActive && Math.abs(pct - abB) < 0.04) abDragging.current = 'B';
             else { seekingRef.current = true; onSeek(pct); }

@@ -1,3 +1,5 @@
+import type React from 'react';
+
 interface ResizeHandleProps {
   direction: 'h' | 'v';
   onDelta: (delta: number) => void;
@@ -20,6 +22,7 @@ export default function ResizeHandle({ direction, onDelta }: ResizeHandleProps) 
       window.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
     };
+    // Override body cursor so the resize cursor persists when the pointer outruns the handle element
     document.body.style.cursor = isH ? 'col-resize' : 'row-resize';
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);

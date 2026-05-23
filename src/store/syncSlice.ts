@@ -21,17 +21,13 @@ export type SyncSlice = {
   finalizeMerge:     () => Promise<void>
   reopenConflict:    (playlistId: string) => Promise<void>
 
-  // Pairing UI state
   pairingOpen:   boolean
   pairingMode:   'display' | 'scan' | null
   qrPayload:     QrPayload | null
   knownDevices:  KnownDevice[]
   fingerprint:   string
 
-  // Live peers (discovered on LAN)
   livePeers: PeerInfo[]
-
-  // Sync toast message
   syncToast: string | null
 
   // Incremented whenever sync downloads new artwork blobs. Components that
@@ -44,14 +40,12 @@ export type SyncSlice = {
   setDownloadProgress: (playlistId: string, pct: number) => void
   clearDownloadProgress: (playlistId: string) => void
 
-  // Peer playlist browser state
   peerManifestOpen:     boolean
   peerManifestPeer:     PeerInfo | null
   peerManifest:         PlaylistManifest[] | null
   peerManifestLoading:  boolean
   downloadingPlaylists: string[]
 
-  // Pairing actions
   openPairingDisplay:  () => Promise<void>
   openPairingScanner:  () => void
   closePairing:        () => void
@@ -61,7 +55,6 @@ export type SyncSlice = {
   syncWithPeer:        (publicKeyB64: string) => Promise<void>
   dismissSyncToast:    () => void
 
-  // Peer manifest actions
   openPeerManifest:  (peer: PeerInfo) => Promise<void>
   closePeerManifest: () => void
   downloadPlaylist:  (playlistId: string, branchNames: string[]) => Promise<void>
@@ -230,7 +223,6 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   artworkVersion: 0,
   bumpArtworkVersion: () => set(s => ({ artworkVersion: s.artworkVersion + 1 })),
 
-  // Pairing initial state
   pairingOpen:       false,
   pairingMode:       null,
   qrPayload:         null,
@@ -250,7 +242,6 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     return { downloadProgress: next }
   }),
 
-  // Peer manifest initial state
   peerManifestOpen:     false,
   peerManifestPeer:     null,
   peerManifest:         null,

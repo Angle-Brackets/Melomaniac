@@ -77,7 +77,7 @@ interface AddToFolderPopupProps {
   onRemoveFromFolder?: (itemId: string) => void;
 }
 
-export function AddToFolderPopup({ item, folders, currentFolderId, onClose, onAddToFolder, onCreateFolder, onRemoveFromFolder }: AddToFolderPopupProps) {
+export function AddToFolderPopup({ item, folders, currentFolderId, onClose, onAddToFolder, onCreateFolder, onRemoveFromFolder }: AddToFolderPopupProps): JSX.Element {
   const [newName,  setNewName]  = useState('');
   const [creating, setCreating] = useState(false);
   const currentFolder = folders.find(f => f.id === currentFolderId);
@@ -366,7 +366,7 @@ export default function LibrarySidebar({
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
   pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder, onDeleteFolder,
   onOpenSettings, onAddToFolderClick, onNewPlaylist,
-}: LibrarySidebarProps) {
+}: LibrarySidebarProps): JSX.Element {
   const [isDragging,    setIsDragging]    = useState(false);
   const [noFolderCount, setNoFolderCount] = useState(0);
 

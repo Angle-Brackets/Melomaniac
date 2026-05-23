@@ -8,8 +8,7 @@ export type LibrarySlice = {
 
   loadLibrary: () => Promise<void>
   toggleFavorite: (hash: string) => void
-  /** Merge playlist track metadata into the global tracks array without a DB round-trip.
-   *  Used to make synced tracks visible to the player before loadLibrary() completes. */
+  // Avoids a DB round-trip: makes synced tracks visible to the player before loadLibrary() completes.
   hydrateTracksFromPlaylist: (playlistTracks: TrackRecord[]) => void
 }
 

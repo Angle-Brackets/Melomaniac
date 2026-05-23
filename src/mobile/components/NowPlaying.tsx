@@ -178,6 +178,8 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
   const hadTracksRef = useRef(tracks.length > 0);
 
   useLayoutEffect(() => {
+    // justLoaded: first time tracks become available after mount (e.g. library loaded async).
+    // Resets all position refs so the coverflow snaps to the right card without animation.
     const justLoaded = !hadTracksRef.current && tracks.length > 0;
     hadTracksRef.current = hadTracksRef.current || tracks.length > 0;
     if (justLoaded) {
@@ -363,10 +365,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const dragGhostRef       = useRef<HTMLDivElement>(null);
   // Refs mirror latest state so the imperative event listeners (registered once)
   // always see the current queue without being re-attached on every render.
-  const queueRecordsRef    = useRef<TrackRecord[]>([]);
-  const queueTracksRef     = useRef<string[]>([]);
+  const queueRecordsRef      = useRef<TrackRecord[]>([]);
+  const queueTracksRef       = useRef<string[]>([]);
   const currentPlaylistIdRef = useRef<string | null>(null);
-  const loadQueueRef       = useRef(loadQueue);
+  const loadQueueRef         = useRef(loadQueue);
 
   const handleToggleQueue = useCallback(() => {
     setQueueExpanded(e => {
@@ -439,7 +441,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const currentTrack = tracks.find(t => t.hash === loadedTrackHash) ?? null;
   const browseTrack  = queueRecords[browseIndex] ?? currentTrack;
   const isBrowsing   = browseTrack !== null && browseTrack.hash !== (loadedTrackHash ?? '');
-  // Prefetch current track artwork into the shared cache; CoverflowCard will pick it up instantly
+  // Call useTrackArtwork here purely as a prefetch — the return value is intentionally ignored;
+  // CoverflowCard picks up the result from the shared cache with zero additional IPC.
   useTrackArtwork(loadedTrackHash ?? '', currentTrack?.artwork_hash ?? null);
 
   // ── Seek bar DOM refs ──────────────────────────────────────────────────────
@@ -651,7 +654,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // ── Accent color ───────────────────────────────────────────────────────────
   // Derived from the browsed (or playing) track's artwork via color extraction.
   // accent1/accent2 drive: halo gradient, seek bar fill, play button glow.
-  // The browsed track's artwork is used so the colors preview before playback.
+  // Uses the browsed (not playing) track so colors update live during coverflow swipe.
   const [accent1, accent2] = useTrackAccents(
     browseTrack?.hash ?? loadedTrackHash,
     browseTrack?.artwork_hash ?? currentTrack?.artwork_hash ?? null,
@@ -774,6 +777,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       document.removeEventListener('mouseup',   onMouseUp);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Re-register listeners only when queue goes from empty to non-empty (or vice versa),
+  // not on every queue mutation — the listeners read refs, not closed-over values.
   }, [queueRecords.length > 0]);
 
   return (

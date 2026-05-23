@@ -60,7 +60,7 @@ interface RightPanelProps {
   onCollapse: () => void;
 }
 
-export default function RightPanel({ vibeText, onVibeChange, onCollapse }: RightPanelProps) {
+export default function RightPanel({ vibeText, onVibeChange, onCollapse }: RightPanelProps): JSX.Element {
   const [generating, setGenerating] = useState(false);
   const [aiResult,   setAiResult]   = useState<string | null>(null);
 

@@ -85,7 +85,7 @@ function TrackRow({
 export default function QueuePanel({
   playQueue, manualQueue, loadedHash,
   artworkUrls, onRemoveManual, onClearManual, onClose,
-}: QueuePanelProps) {
+}: QueuePanelProps): JSX.Element {
   const panelRef   = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
 

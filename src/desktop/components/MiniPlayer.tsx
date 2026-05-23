@@ -29,7 +29,7 @@ export default function MiniPlayer({
   track, artworkUrl, isPlaying, positionMsRef, durationMs,
   loopMode, abA, abB, volume, onPlayPause, onSkipNext, onSkipPrev,
   onLoopCycle, onSeek, onVolume, showQueue, onQueueToggle, onCollapse, onStop,
-}: MiniPlayerProps) {
+}: MiniPlayerProps): JSX.Element {
   const seekBarRef  = useRef<HTMLDivElement>(null);
   const seekFillRef = useRef<HTMLDivElement>(null);
   const seekingRef  = useRef(false);

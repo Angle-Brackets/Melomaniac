@@ -26,6 +26,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
 
   useEffect(() => {
     refreshLivePeers();
+    // Poll aggressively while the settings modal is open so peer status feels live
     const id = setInterval(refreshLivePeers, 4000);
     return () => clearInterval(id);
   }, [refreshLivePeers]);

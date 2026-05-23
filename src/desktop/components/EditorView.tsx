@@ -445,7 +445,7 @@ function DownloadRow({ job, onCancel }: { job: DownloadJob; onCancel: () => void
 
 export default function EditorView({
   track, tracks = [], artworkUrls = {}, onTrackUpdated, onArtworkUpdated, onTrackDeleted,
-}: EditorViewProps) {
+}: EditorViewProps): JSX.Element {
 
   // ── Metadata editor state
   const [loadedPath,   setLoadedPath]   = useState<string | null>(null);
@@ -564,7 +564,6 @@ export default function EditorView({
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  // prefill: optional Track for instant badge + basic fields before the invoke resolves
   const loadFromHash = useCallback(async (hash: string) => {
     if (!hash) return;
     const myId = ++loadIdRef.current;

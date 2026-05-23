@@ -35,7 +35,7 @@ export default function TrackList({
   tracks, activeTrackId, loadedHash, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
   onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = 'relaxed', favorites,
-}: TrackListProps) {
+}: TrackListProps): JSX.Element {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [menuTrackId, setMenuTrackId] = useState<number | null>(null);

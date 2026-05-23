@@ -199,6 +199,7 @@ export default function ArtworkModal({ trackHash, trackPath, tracks = [], onSave
         })
         .catch(console.error);
     }
+  // thumbUrls intentionally omitted: including it would re-fire on every newly-loaded thumb
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artLibrary]);
 
@@ -377,6 +378,7 @@ export default function ArtworkModal({ trackHash, trackPath, tracks = [], onSave
     off.height = OUT_SIZE;
     off.getContext('2d')!.drawImage(nativeImg, srcX, srcY, srcS, srcS, 0, 0, OUT_SIZE, OUT_SIZE);
 
+    // Always encode as JPEG at 0.92 — PNG would be 3–5× larger with no perceptible benefit for artwork
     const blob = await new Promise<Blob>((res, rej) =>
       off.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/jpeg', 0.92)
     );

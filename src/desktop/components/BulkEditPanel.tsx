@@ -36,6 +36,7 @@ export default function BulkEditPanel({ selected, onDone, onCancel }: Props) {
   const [error,        setError]        = useState<string | null>(null);
 
   // Compute placeholder text: show "(N values)" when tracks differ on a field
+  // Note: only 'artist' and 'album' are mapped — other fields always return '' and never show a multi-value hint
   useEffect(() => {
     const ph: Partial<BulkForm> = {};
     for (const { key } of BULK_FIELDS) {

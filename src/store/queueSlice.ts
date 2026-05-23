@@ -133,13 +133,11 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
       const count = Math.min(lookahead, pool.length)
 
       for (let i = 0; i < count; i++) {
-        // Count how often each artist appears in the current lookbehind window
         const freq = new Map<string, number>()
         for (const a of recentArtists.slice(-ARTIST_LOOKBEHIND)) {
           freq.set(a, (freq.get(a) ?? 0) + 1)
         }
 
-        // Compute effective weights and total for weighted random draw
         const weights = pool.map(c => Math.pow(ARTIST_PENALTY, freq.get(c.artist) ?? 0))
         const total   = weights.reduce((s, w) => s + w, 0)
 

@@ -123,6 +123,7 @@ function PeerPlaylistsModalInner({ platform }: { platform: 'desktop' | 'mobile' 
             peerAddr={peerAddr}
             isLocal={localIds.has(manifest.id)}
             isDownloading={downloadingPlaylists.includes(manifest.id)}
+            // Fall back to ['main'] when the peer sent no branch list (older protocol version)
             onDownload={() => downloadPlaylist(manifest.id, manifest.branches?.length > 0 ? manifest.branches.map(b => b.name) : ['main'])}
           />
         ))}

@@ -148,7 +148,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
     if (editingAuthor) authorInputRef.current?.focus();
   }, [editingAuthor]);
 
-  // Poll for live peers while Settings is mounted
+  // 5 s poll while Settings is visible — faster than MobileApp's 15 s background poll
+  // so the peer list feels responsive when the user is actively on this screen.
   useEffect(() => {
     refreshLivePeers();
     const id = setInterval(refreshLivePeers, 5000);

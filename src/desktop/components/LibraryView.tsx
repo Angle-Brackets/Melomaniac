@@ -69,7 +69,7 @@ interface LibraryViewProps {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName, favorites }: LibraryViewProps) {
+export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName, favorites }: LibraryViewProps): JSX.Element {
   const [records,           setRecords]           = useState<TrackRecord[]>([]);
   const [strayHashes,       setStrayHashes]       = useState<Set<string>>(new Set());
   const [search,            setSearch]            = useState('');
@@ -92,6 +92,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
+  // onTracksChanged is intentionally omitted from deps: it is a stable callback
+  // from DesktopApp and adding it would cause re-registration on every render.
   const load = useCallback(async () => {
     const [recs, stray] = await Promise.all([
       invoke<TrackRecord[]>('library_get_all'),
@@ -100,7 +102,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
     setRecords(recs);
     setStrayHashes(new Set(stray));
     onTracksChanged(recs.map(trackRecordToTrack));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, []);
 
@@ -122,9 +124,9 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   // ── Audio events ──────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const unsub = listen('audio://event', (e: any) => {
+    const unsub = listen<string | Record<string, unknown>>('audio://event', (e) => {
       const p = e.payload;
-      if (p === 'TrackEnded' || p?.TrackEnded !== undefined) setPlayingHash(null);
+      if (p === 'TrackEnded' || (typeof p === 'object' && 'TrackEnded' in p)) setPlayingHash(null);
     });
     return () => { unsub.then(fn => fn()); };
   }, []);
@@ -239,9 +241,10 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    // Tauri injects `.path` on the web File object; it is not in the browser spec.
     const audioPaths = Array.from(e.dataTransfer.files)
       .filter(f => /\.(mp3|flac|ogg|wav|m4a|aac|opus)$/i.test(f.name))
-      .map(f => (f as any).path as string)
+      .map(f => (f as File & { path?: string }).path ?? '')
       .filter(Boolean);
     if (audioPaths.length === 0) return;
     setIsImporting(true);

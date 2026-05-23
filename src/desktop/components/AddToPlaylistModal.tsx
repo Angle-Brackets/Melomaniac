@@ -13,19 +13,15 @@ interface Props {
   defaultBranchName?: string;
 }
 
-interface PlaylistWithBranches extends PlaylistRecord {
-  branches: PlaylistRecord['branches'];
-}
-
 export default function AddToPlaylistModal({ count, hashes, onDone, onCancel, defaultPlaylistId, defaultBranchName }: Props) {
-  const [playlists,     setPlaylists]     = useState<PlaylistWithBranches[]>([]);
+  const [playlists,     setPlaylists]     = useState<PlaylistRecord[]>([]);
   const [selectedPl,    setSelectedPl]    = useState<string | null>(null);
   const [selectedBr,    setSelectedBr]    = useState<string>(defaultBranchName ?? 'main');
   const [isSubmitting,  setIsSubmitting]  = useState(false);
   const [error,         setError]         = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<PlaylistWithBranches[]>('playlist_get_all').then(pl => {
+    invoke<PlaylistRecord[]>('playlist_get_all').then(pl => {
       setPlaylists(pl);
       const initial = defaultPlaylistId && pl.find(p => p.id === defaultPlaylistId);
       setSelectedPl(initial ? initial.id : (pl[0]?.id ?? null));

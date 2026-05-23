@@ -303,9 +303,8 @@ function SectionHead({ label, trailing }: { label: string; trailing?: string }) 
   );
 }
 
-// Module-level variable shared across all MiniPlayer instances (Library + PlaylistsList).
-// Initialized once from localStorage so it survives app restarts.
-// This avoids any timing gap between one instance writing localStorage and another reading it.
+// Module-level so both MiniPlayer instances (Library + PlaylistsList tabs) share the same flag;
+// if it were per-instance state, dismissing on one tab would silently restore on the other.
 let _miniPlayerDismissed = localStorage.getItem('mm_miniplayer_dismissed') === '1';
 
 export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) => void; bottomOffset?: number }) {
