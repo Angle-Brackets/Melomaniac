@@ -2,7 +2,7 @@ use crate::{ConflictChunk, ConflictKind};
 use melomaniac_storage::TreeBlob;
 
 /// Compare three tree versions and return conflicts plus an auto-merged tree if there are none.
-pub(crate) fn diff_trees(
+pub fn diff_trees(
     base: &TreeBlob,
     ours: &TreeBlob,
     theirs: &TreeBlob,

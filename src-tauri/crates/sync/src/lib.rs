@@ -56,6 +56,8 @@ pub mod ios;
 
 pub mod identity;
 pub(crate) mod merge;
+
+pub use merge::diff_trees;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "ios"))]
 pub(crate) mod http_server;
 
