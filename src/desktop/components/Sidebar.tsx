@@ -238,7 +238,7 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
               className="font-mono text-[9px] px-1 py-px rounded-sm cursor-pointer"
               style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}
               title="Merge conflict — click to resolve"
-            >⚡</span>
+            >⚠️</span>
           )}
           {(hov || isPinned) && <PinButton pinned={isPinned} onToggle={() => onTogglePin(item.id)} />}
           {hov && (

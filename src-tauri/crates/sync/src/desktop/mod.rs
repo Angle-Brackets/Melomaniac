@@ -399,6 +399,263 @@ where
     })
 }
 
+// ── Per-branch sync helper ────────────────────────────────────────────────────
+
+/// Pull one playlist branch from `client` and merge it into the local DAG.
+/// Shared by `sync_playlist` (single branch) and `sync_with_peer` (all changed
+/// branches across the peer's full manifest).
+async fn sync_one_branch_async(
+    client: &SyncClient,
+    identity: Arc<NodeIdentity>,
+    db: Arc<Database>,
+    cas: Arc<CasStore>,
+    peer_entry: &PlaylistManifest,
+    branch_name: &str,
+    pending_merges: Arc<tokio::sync::Mutex<HashMap<String, PendingMerge>>>,
+    progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
+) -> Result<SyncReport, SyncError> {
+    let playlist_id = peer_entry.id.clone();
+    let local_branch_name = branch_name;
+
+    let local_branches = db.get_branches(&playlist_id).await?;
+    let local_head = local_branches.iter()
+        .find(|b| b.name == branch_name)
+        .and_then(|b| b.head_commit.clone());
+
+    // Early-exit for the main branch when heads already match.
+    if branch_name == "main" && local_head.as_deref() == Some(&peer_entry.head_commit) {
+        return Ok(SyncReport { blobs_fetched: 0, bytes_fetched: 0, conflicts: vec![] });
+    }
+
+    let peer_commits = client.get_commits(&playlist_id, branch_name).await?;
+
+    let local_hashes: std::collections::HashSet<String> =
+        cas.list_all_hashes().into_iter().collect();
+    let mut needed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut blobs_fetched: usize = 0;
+    let mut bytes_fetched: u64 = 0;
+
+    for commit in &peer_commits {
+        if local_hashes.contains(&commit.tree_hash) {
+            if let Ok(bytes) = cas.read_blob(&commit.tree_hash).await {
+                if let Ok(tree) = TreeBlob::from_bytes(&bytes) {
+                    for track in &tree.tracks {
+                        if !local_hashes.contains(&track.hash) {
+                            needed.insert(track.hash.clone());
+                        }
+                        if let Some(ref art) = track.artwork_hash {
+                            if !local_hashes.contains(art) {
+                                needed.insert(art.clone());
+                            }
+                        }
+                    }
+                    if let Some(ref art) = tree.meta.artwork_hash {
+                        if !local_hashes.contains(art) {
+                            needed.insert(art.clone());
+                        }
+                    }
+                }
+            }
+        } else {
+            let bytes = client.get_blob(&commit.tree_hash).await?;
+            bytes_fetched += bytes.len() as u64;
+            if let Ok(tree) = TreeBlob::from_bytes(&bytes) {
+                for track in &tree.tracks {
+                    if !local_hashes.contains(&track.hash) {
+                        needed.insert(track.hash.clone());
+                    }
+                    if let Some(ref art) = track.artwork_hash {
+                        if !local_hashes.contains(art) {
+                            needed.insert(art.clone());
+                        }
+                    }
+                }
+                if let Some(ref art) = tree.meta.artwork_hash {
+                    if !local_hashes.contains(art) {
+                        needed.insert(art.clone());
+                    }
+                }
+            }
+            cas.write_blob(&bytes).await?;
+            blobs_fetched += 1;
+        }
+    }
+
+    let total_needed = needed.len();
+    let mut done_needed: usize = 0;
+    for hash in &needed {
+        let bytes = client.get_blob(hash).await?;
+        bytes_fetched += bytes.len() as u64;
+        cas.write_blob(&bytes).await?;
+        blobs_fetched += 1;
+        done_needed += 1;
+        if let Some(ref tx) = progress_tx {
+            tx.try_send(super::SyncProgress {
+                playlist_id: playlist_id.clone(),
+                done: done_needed,
+                total: total_needed.max(1),
+            }).ok();
+        }
+    }
+
+    // Insert track metadata so track_play can find records after download.
+    if let Some(head_commit) = peer_commits.first() {
+        if let Ok(tree_bytes) = cas.read_blob(&head_commit.tree_hash).await {
+            if let Ok(tree) = TreeBlob::from_bytes(&tree_bytes) {
+                let all_hashes: Vec<String> =
+                    tree.tracks.iter().map(|e| e.hash.clone()).collect();
+
+                for entry in &tree.tracks {
+                    if entry.title.is_some() {
+                        let record = TrackRecord {
+                            hash:         entry.hash.clone(),
+                            title:        entry.title.clone().unwrap_or_default(),
+                            artist:       entry.artist.clone().unwrap_or_default(),
+                            album:        entry.album.clone(),
+                            artwork_hash: entry.artwork_hash.clone(),
+                            duration_ms:  entry.duration_ms.unwrap_or(0),
+                            favorited:    false,
+                            mime_type:    entry.mime_type.clone(),
+                            ingested_at:  0,
+                            source_url:   None,
+                        };
+                        if let Err(e) = db.upsert_track_from_sync(&record).await {
+                            eprintln!("[sync] upsert_track_from_sync: {e}");
+                        }
+                    }
+                }
+
+                if !all_hashes.is_empty() {
+                    let fetched = client.get_tracks(&all_hashes).await.unwrap_or_default();
+                    let fetched_hashes: std::collections::HashSet<String> =
+                        fetched.iter().map(|r| r.hash.clone()).collect();
+
+                    let local_hashes_now: std::collections::HashSet<String> =
+                        cas.list_all_hashes().into_iter().collect();
+                    for r in &fetched {
+                        if let Some(ref art) = r.artwork_hash {
+                            if !local_hashes_now.contains(art) {
+                                match client.get_blob(art).await {
+                                    Ok(bytes) => {
+                                        bytes_fetched += bytes.len() as u64;
+                                        if cas.write_blob(&bytes).await.is_ok() {
+                                            blobs_fetched += 1;
+                                        }
+                                    }
+                                    Err(e) => eprintln!("[sync] artwork blob {art}: {e}"),
+                                }
+                            }
+                        }
+                    }
+
+                    for r in fetched {
+                        let record = TrackRecord {
+                            hash:         r.hash,
+                            title:        r.title,
+                            artist:       r.artist,
+                            album:        r.album,
+                            artwork_hash: r.artwork_hash,
+                            duration_ms:  r.duration_ms,
+                            favorited:    false,
+                            mime_type:    r.mime_type,
+                            ingested_at:  0,
+                            source_url:   None,
+                        };
+                        if let Err(e) = db.upsert_track_from_sync(&record).await {
+                            eprintln!("[sync] upsert_track_from_sync: {e}");
+                        }
+                    }
+
+                    for hash in &all_hashes {
+                        if !fetched_hashes.contains(hash) {
+                            let stub = TrackRecord {
+                                hash:         hash.clone(),
+                                title:        String::new(),
+                                artist:       String::new(),
+                                album:        None,
+                                artwork_hash: None,
+                                duration_ms:  0,
+                                favorited:    false,
+                                mime_type:    None,
+                                ingested_at:  0,
+                                source_url:   None,
+                            };
+                            if let Err(e) = db.upsert_track_from_sync(&stub).await {
+                                eprintln!("[sync] upsert_track_from_sync (stub): {e}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    db.import_commit_chain(&peer_commits).await?;
+
+    let peer_head_owned = peer_commits.first()
+        .map(|c| c.hash.clone())
+        .unwrap_or_else(|| peer_entry.head_commit.clone());
+    let peer_head = &peer_head_owned;
+
+    let ancestor = match &local_head {
+        None => {
+            db.ensure_playlist_and_branch(&playlist_id, &peer_entry.name, local_branch_name).await?;
+            db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
+            return Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts: vec![] });
+        }
+        Some(lh) => db.find_common_ancestor(lh, peer_head).await?,
+    };
+
+    let local_head_str = local_head.as_deref().expect("checked above");
+
+    if ancestor.as_deref() == Some(peer_head) {
+        return Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts: vec![] });
+    }
+
+    if ancestor.as_deref() == Some(local_head_str) {
+        db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
+        return Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts: vec![] });
+    }
+
+    let our_tree   = db.read_tree_for_commit(&*cas, local_head_str).await?;
+    let their_tree = db.read_tree_for_commit(&*cas, peer_head).await?;
+    let base_tree  = match &ancestor {
+        Some(h) => db.read_tree_for_commit(&*cas, h).await?,
+        None    => TreeBlob::new(""),
+    };
+
+    let (conflicts, merged_tree) = diff_trees(&base_tree, &our_tree, &their_tree);
+
+    if !conflicts.is_empty() {
+        let pending = PendingMerge {
+            local_head:    local_head_str.to_string(),
+            peer_head:     peer_head.to_string(),
+            ancestor_hash: ancestor.clone(),
+            branch_name:   local_branch_name.to_string(),
+            conflicts:     conflicts.clone(),
+        };
+        pending_merges.lock().await.insert(playlist_id.to_string(), pending);
+        return Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts });
+    }
+
+    if let Some(tree) = merged_tree {
+        let json = tree.to_json()
+            .map_err(|e| SyncError::Io(std::io::Error::other(e.to_string())))?;
+        let tree_hash = cas.write_blob(json.as_bytes()).await?;
+        let merge_commit = CommitRecord {
+            hash:      uuid::Uuid::new_v4().to_string(),
+            tree_hash,
+            timestamp: unix_now() as i64,
+            device_id: identity.public_key_b64(),
+            message:   Some("auto-merge".into()),
+        };
+        db.insert_commit(&merge_commit, &[local_head_str, peer_head]).await?;
+        db.update_branch_head(&playlist_id, local_branch_name, &merge_commit.hash).await?;
+    }
+
+    Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts: vec![] })
+}
+
 // ── SyncBridge impl ───────────────────────────────────────────────────────────
 
 impl SyncBridge for DesktopSyncBridge {
@@ -591,333 +848,79 @@ impl SyncBridge for DesktopSyncBridge {
         let peers = self.peers.clone();
         let db = self.db.clone();
         let cas = self.cas.clone();
+        let pending_merges = self.pending_merges.clone();
         let playlist_id = playlist_id.to_string();
         let branch_name = branch_name.to_string();
 
         block(async move {
-            // 1. Pick best peer.
-            let peer = {
-                let map = peers.read().await;
-                map.values().next().cloned()
-            };
-            let peer = peer.ok_or(SyncError::NotPaired)?;
-
-            // 2. Build client.
+            let peer = peers.read().await.values().next().cloned()
+                .ok_or(SyncError::NotPaired)?;
             let client = SyncClient::new(identity.clone(), peer.addr);
 
-            // 3. GET manifest from peer.
             let manifest = client.get_manifest().await?;
             let peer_entry = match manifest.into_iter().find(|m| m.id == playlist_id) {
                 Some(m) => m,
-                None => {
-                    return Ok(SyncReport {
-                        blobs_fetched: 0,
-                        bytes_fetched: 0,
-                        conflicts: vec![],
-                    });
-                }
+                None => return Ok(SyncReport { blobs_fetched: 0, bytes_fetched: 0, conflicts: vec![] }),
             };
 
-
-            // 4. Read local branch state for the requested branch.
-            let local_branches = db.get_branches(&playlist_id).await?;
-            let local_branch = local_branches.iter().find(|b| b.name == branch_name);
-            let local_branch_name = branch_name.as_str();
-            let local_head = local_branch.and_then(|b| b.head_commit.clone());
-
-            // 5. Compare heads — only meaningful for the "main" branch since that's what
-            // the manifest's head_commit reflects.
-            if branch_name == "main" && local_head.as_deref() == Some(&peer_entry.head_commit) {
-                return Ok(SyncReport {
-                    blobs_fetched: 0,
-                    bytes_fetched: 0,
-                    conflicts: vec![],
-                });
-            }
-
-            // 6. Fetch commit chain for the requested branch.
-            let peer_commits = client.get_commits(&playlist_id, &branch_name).await?;
-
-            // 7. Walk each commit's tree: fetch missing tree blobs, collect track/artwork hashes.
-            let local_hashes: std::collections::HashSet<String> =
-                cas.list_all_hashes().into_iter().collect();
-            let mut needed: std::collections::HashSet<String> = std::collections::HashSet::new();
-            let mut blobs_fetched: usize = 0;
-            let mut bytes_fetched: u64 = 0;
-
-            for commit in &peer_commits {
-                if local_hashes.contains(&commit.tree_hash) {
-                    if let Ok(bytes) = cas.read_blob(&commit.tree_hash).await {
-                        if let Ok(tree) = TreeBlob::from_bytes(&bytes) {
-                            for track in &tree.tracks {
-                                if !local_hashes.contains(&track.hash) {
-                                    needed.insert(track.hash.clone());
-                                }
-                                if let Some(ref art) = track.artwork_hash {
-                                    if !local_hashes.contains(art) {
-                                        needed.insert(art.clone());
-                                    }
-                                }
-                            }
-                            if let Some(ref art) = tree.meta.artwork_hash {
-                                if !local_hashes.contains(art) {
-                                    needed.insert(art.clone());
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    let bytes = client.get_blob(&commit.tree_hash).await?;
-                    bytes_fetched += bytes.len() as u64;
-                    if let Ok(tree) = TreeBlob::from_bytes(&bytes) {
-                        for track in &tree.tracks {
-                            if !local_hashes.contains(&track.hash) {
-                                needed.insert(track.hash.clone());
-                            }
-                            if let Some(ref art) = track.artwork_hash {
-                                if !local_hashes.contains(art) {
-                                    needed.insert(art.clone());
-                                }
-                            }
-                        }
-                        if let Some(ref art) = tree.meta.artwork_hash {
-                            if !local_hashes.contains(art) {
-                                needed.insert(art.clone());
-                            }
-                        }
-                    }
-                    cas.write_blob(&bytes).await?;
-                    blobs_fetched += 1;
-                }
-            }
-
-            // 8. Download missing track + artwork blobs (only what this playlist needs).
-            let total_needed = needed.len();
-            let mut done_needed: usize = 0;
-            for hash in &needed {
-                let bytes = client.get_blob(hash).await?;
-                bytes_fetched += bytes.len() as u64;
-                cas.write_blob(&bytes).await?;
-                blobs_fetched += 1;
-                done_needed += 1;
-                if let Some(ref tx) = progress_tx {
-                    tx.try_send(super::SyncProgress {
-                        playlist_id: playlist_id.clone(),
-                        done: done_needed,
-                        total: total_needed.max(1),
-                    }).ok();
-                }
-            }
-
-            // 8b. Insert track metadata into the local tracks table so track_play can find them.
-            // Strategy:
-            //   1. Use metadata embedded in the tree blob (fast path, zero extra round-trips).
-            //   2. Fetch current metadata for ALL tracks from peer's /tracks endpoint.
-            //      This fills in artwork_hash even when it was absent from the tree blob
-            //      (artwork may have been set on the peer after tracks were added to the playlist).
-            //      Also downloads any artwork blobs not referenced by the tree entries.
-            //   3. Insert a stub record (hash only) so track_play never fails with "not found".
-            if let Some(head_commit) = peer_commits.first() {
-                if let Ok(tree_bytes) = cas.read_blob(&head_commit.tree_hash).await {
-                    if let Ok(tree) = TreeBlob::from_bytes(&tree_bytes) {
-                        let all_hashes: Vec<String> = tree.tracks.iter().map(|e| e.hash.clone()).collect();
-
-                        // Pass 1: embedded metadata.
-                        for entry in &tree.tracks {
-                            if entry.title.is_some() {
-                                let record = TrackRecord {
-                                    hash:         entry.hash.clone(),
-                                    title:        entry.title.clone().unwrap_or_default(),
-                                    artist:       entry.artist.clone().unwrap_or_default(),
-                                    album:        entry.album.clone(),
-                                    artwork_hash: entry.artwork_hash.clone(),
-                                    duration_ms:  entry.duration_ms.unwrap_or(0),
-                                    favorited:    false,
-                                    mime_type:    entry.mime_type.clone(),
-                                    ingested_at:  0,
-                                    source_url:   None,
-                                };
-                                if let Err(e) = db.upsert_track_from_sync(&record).await {
-                                    eprintln!("[sync] upsert_track_from_sync: {e}");
-                                }
-                            }
-                        }
-
-                        // Pass 2: fetch current metadata for ALL tracks from peer DB.
-                        // Corrects stale artwork_hash values in tree entries and handles old-format trees.
-                        if !all_hashes.is_empty() {
-                            let fetched = client.get_tracks(&all_hashes).await.unwrap_or_default();
-                            let fetched_hashes: std::collections::HashSet<String> =
-                                fetched.iter().map(|r| r.hash.clone()).collect();
-
-                            // Download artwork blobs the peer knows about that weren't in any tree entry.
-                            let local_hashes_now: std::collections::HashSet<String> =
-                                cas.list_all_hashes().into_iter().collect();
-                            for r in &fetched {
-                                if let Some(ref art) = r.artwork_hash {
-                                    if !local_hashes_now.contains(art) {
-                                        match client.get_blob(art).await {
-                                            Ok(bytes) => {
-                                                bytes_fetched += bytes.len() as u64;
-                                                if cas.write_blob(&bytes).await.is_ok() {
-                                                    blobs_fetched += 1;
-                                                }
-                                            }
-                                            Err(e) => eprintln!("[sync] artwork blob {art}: {e}"),
-                                        }
-                                    }
-                                }
-                            }
-
-                            for r in fetched {
-                                let record = TrackRecord {
-                                    hash:         r.hash,
-                                    title:        r.title,
-                                    artist:       r.artist,
-                                    album:        r.album,
-                                    artwork_hash: r.artwork_hash,
-                                    duration_ms:  r.duration_ms,
-                                    favorited:    false,
-                                    mime_type:    r.mime_type,
-                                    ingested_at:  0,
-                                    source_url:   None,
-                                };
-                                if let Err(e) = db.upsert_track_from_sync(&record).await {
-                                    eprintln!("[sync] upsert_track_from_sync: {e}");
-                                }
-                            }
-
-                            // Pass 3: stub record so track_play never fails with "not found".
-                            for hash in &all_hashes {
-                                if !fetched_hashes.contains(hash) {
-                                    let stub = TrackRecord {
-                                        hash:         hash.clone(),
-                                        title:        String::new(),
-                                        artist:       String::new(),
-                                        album:        None,
-                                        artwork_hash: None,
-                                        duration_ms:  0,
-                                        favorited:    false,
-                                        mime_type:    None,
-                                        ingested_at:  0,
-                                        source_url:   None,
-                                    };
-                                    if let Err(e) = db.upsert_track_from_sync(&stub).await {
-                                        eprintln!("[sync] upsert_track_from_sync (stub): {e}");
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 9. Import commits into local DAG.
-            db.import_commit_chain(&peer_commits).await?;
-
-            // 11. DAG merge.
-            // peer_commits[0] is the branch HEAD (export_commit_chain starts from HEAD).
-            // Fall back to peer_entry.head_commit only for the main branch.
-            let peer_head_owned = peer_commits.first()
-                .map(|c| c.hash.clone())
-                .unwrap_or_else(|| peer_entry.head_commit.clone());
-            let peer_head = &peer_head_owned;
-
-            let ancestor = match &local_head {
-                None => {
-                    // New playlist — create the playlist and branch rows before updating head.
-                    db.ensure_playlist_and_branch(&playlist_id, &peer_entry.name, local_branch_name).await?;
-                    db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
-                    return Ok(SyncReport {
-                        blobs_fetched,
-                        bytes_fetched,
-                        conflicts: vec![],
-                    });
-                }
-                Some(lh) => db.find_common_ancestor(lh, peer_head).await?,
-            };
-
-            let local_head = local_head.as_deref().expect("checked above");
-
-            // b. We're ahead — nothing to do.
-            if ancestor.as_deref() == Some(peer_head) {
-                return Ok(SyncReport {
-                    blobs_fetched,
-                    bytes_fetched,
-                    conflicts: vec![],
-                });
-            }
-
-            // c. Fast-forward: our head is the ancestor.
-            if ancestor.as_deref() == Some(local_head) {
-                db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
-                return Ok(SyncReport {
-                    blobs_fetched,
-                    bytes_fetched,
-                    conflicts: vec![],
-                });
-            }
-
-            // d. True merge.
-            let our_tree = db.read_tree_for_commit(&*cas, local_head).await?;
-            let their_tree = db.read_tree_for_commit(&*cas, peer_head).await?;
-
-            let base_tree = match &ancestor {
-                Some(ancestor_hash) => db.read_tree_for_commit(&*cas, ancestor_hash).await?,
-                None => TreeBlob::new(""),
-            };
-
-            let (conflicts, merged_tree) = diff_trees(&base_tree, &our_tree, &their_tree);
-
-            if !conflicts.is_empty() {
-                let pending = PendingMerge {
-                    local_head:    local_head.to_string(),
-                    peer_head:     peer_head.to_string(),
-                    ancestor_hash: ancestor.clone(),
-                    branch_name:   local_branch_name.to_string(),
-                    conflicts:     conflicts.clone(),
-                };
-                self.pending_merges.blocking_lock().insert(playlist_id.to_string(), pending);
-                return Ok(SyncReport {
-                    blobs_fetched,
-                    bytes_fetched,
-                    conflicts,
-                });
-            }
-
-            // Auto-merge: write merged tree and create merge commit.
-            if let Some(tree) = merged_tree {
-                let json = tree.to_json().map_err(|e| {
-                    SyncError::Io(std::io::Error::other(e.to_string()))
-                })?;
-                let tree_hash = cas.write_blob(json.as_bytes()).await?;
-
-                let merge_commit = CommitRecord {
-                    hash: uuid::Uuid::new_v4().to_string(),
-                    tree_hash,
-                    timestamp: unix_now() as i64,
-                    device_id: identity.public_key_b64(),
-                    message: Some("auto-merge".into()),
-                };
-                db.insert_commit(&merge_commit, &[local_head, peer_head]).await?;
-                db.update_branch_head(&playlist_id, local_branch_name, &merge_commit.hash).await?;
-            }
-
-            Ok(SyncReport {
-                blobs_fetched,
-                bytes_fetched,
-                conflicts: vec![],
-            })
+            sync_one_branch_async(
+                &client, identity, db, cas,
+                &peer_entry, &branch_name,
+                pending_merges, progress_tx,
+            ).await
         })
     }
 
-    #[allow(dead_code)]
-    fn sync_with_peer(&self, _public_key_b64: &str) -> Result<SyncReport, SyncError> {
-        // TODO Phase 1: implement pull protocol
-        Ok(SyncReport {
-            blobs_fetched: 0,
-            bytes_fetched: 0,
-            conflicts: vec![],
+    fn sync_with_peer(&self, public_key_b64: &str) -> Result<SyncReport, SyncError> {
+        let identity = self.identity.clone();
+        let peers = self.peers.clone();
+        let db = self.db.clone();
+        let cas = self.cas.clone();
+        let pending_merges = self.pending_merges.clone();
+        let pk = public_key_b64.to_string();
+
+        block(async move {
+            let peer = peers.read().await.get(&pk).cloned()
+                .ok_or_else(|| SyncError::PeerUnreachable(pk.clone()))?;
+            let client = SyncClient::new(identity.clone(), peer.addr);
+
+            let manifest = client.get_manifest().await?;
+            let local_ids: std::collections::HashSet<String> = db
+                .get_all_playlists().await?
+                .into_iter()
+                .map(|p| p.id)
+                .collect();
+
+            let mut total = SyncReport { blobs_fetched: 0, bytes_fetched: 0, conflicts: vec![] };
+
+            for entry in manifest {
+                if !local_ids.contains(&entry.id) {
+                    continue;
+                }
+                let local_branches = db.get_branches(&entry.id).await?;
+                let changed: Vec<String> = entry.branches.iter()
+                    .filter(|pb| {
+                        let local_head = local_branches.iter()
+                            .find(|lb| lb.name == pb.name)
+                            .and_then(|lb| lb.head_commit.clone());
+                        local_head.as_deref() != pb.head_commit.as_deref()
+                    })
+                    .map(|pb| pb.name.clone())
+                    .collect();
+
+                for branch_name in changed {
+                    let report = sync_one_branch_async(
+                        &client, identity.clone(), db.clone(), cas.clone(),
+                        &entry, &branch_name,
+                        pending_merges.clone(), None,
+                    ).await?;
+                    total.blobs_fetched += report.blobs_fetched;
+                    total.bytes_fetched  += report.bytes_fetched;
+                    total.conflicts.extend(report.conflicts);
+                }
+            }
+
+            Ok(total)
         })
     }
 

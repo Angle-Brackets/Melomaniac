@@ -195,14 +195,27 @@ pub async fn sync_fetch_peer_manifest(
 pub async fn sync_with_peer(
     public_key_b64: String,
     state: State<'_, SyncState>,
+    storage: State<'_, StorageState>,
 ) -> Result<SyncReport, String> {
     eprintln!("[sync] sync_with_peer: {}…", &public_key_b64[..8.min(public_key_b64.len())]);
-    let result = state.bridge.sync_with_peer(&public_key_b64).map_err(|e| e.to_string());
-    match &result {
-        Ok(r) => eprintln!("[sync] sync_with_peer ok: blobs={} conflicts={}", r.blobs_fetched, r.conflicts.len()),
-        Err(e) => eprintln!("[sync] sync_with_peer error: {e}"),
-    }
-    result
+    let bridge = Arc::clone(&state.bridge);
+    let report = tokio::task::spawn_blocking(move || {
+        bridge.sync_with_peer(&public_key_b64).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    eprintln!("[sync] sync_with_peer ok: blobs={} conflicts={}", report.blobs_fetched, report.conflicts.len());
+
+    let db  = Arc::clone(&storage.db);
+    let cas = Arc::clone(&storage.cas);
+    tokio::spawn(async move {
+        if let Err(e) = db.prune_orphan_tracks(&cas).await {
+            eprintln!("[sync] sync_with_peer prune_orphan_tracks: {e}");
+        }
+    });
+
+    Ok(report)
 }
 
 #[tauri::command]

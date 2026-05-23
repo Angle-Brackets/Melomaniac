@@ -810,7 +810,7 @@ function PlaylistCard({ name, desc, branch, commit, branches, playlistId, pinned
               onClick={e => { e.stopPropagation(); onConflict?.() }}
               style={{ fontSize: 10.5, color: '#f59e0b', fontFamily: 'JetBrains Mono, monospace', cursor: 'pointer' }}
             >
-              ⚡ merge conflict
+              ⚠️ merge conflict
             </span>
           )}
         </div>

@@ -90,15 +90,42 @@
 - [x] Display extracted metadata in tracklist and player UI — title, artist, album, duration, artwork all live from SQLite/CAS
 
 ### P2P Sync (LAN-First)
-- [ ] Integrate `mdns-sd` for local device discovery
-- [ ] Broadcast Melomaniac peer presence on app focus
-- [ ] Detect recognised peers on the local network
-- [ ] Integrate `quinn` (QUIC) for high-speed local data transfer
-- [ ] Implement diff logic: compare local commit chain against peer's chain
-- [ ] Implement blob/tree/commit transfer over QUIC
-- [ ] Integrate `automerge` CRDTs for divergent offline playlist conflict resolution
-- [ ] Test sync scenario: track added on device A offline, playlist reordered on device B offline, both come online
-- [ ] Fall back to Axum HTTPS sync when no LAN peer is found
+
+#### Discovery & transport
+- [x] Integrate `mdns-sd` for local peer discovery — `_melomaniac._tcp.local.` service type; desktop in `crates/sync/src/desktop/mod.rs`
+- [x] iOS discovery via Swift FFI — `melo_sync_start_discovery` / `melo_sync_stop_discovery` / `melo_sync_register_service` callbacks (`crates/sync/src/ios.rs`)
+- [x] Axum HTTP server on port 7700 on both desktop and iOS; server code extracted to shared `crates/sync/src/http_server.rs`
+- [x] HTTP endpoints: `GET /ping`, `GET /manifest`, `GET /hashes`, `POST /tracks`, `GET /blob/:hash`, `GET /commits/:playlist_id/:branch_name`, `POST /pair`
+- [x] Ed25519 signed `Authorization: Melomaniac <pk_b64> <sig_b64>` header on every authenticated request; ±30 s clock-skew tolerance
+
+#### Pairing
+- [x] QR pairing — both directions (desktop shows QR → iOS scans; iOS shows QR → desktop scans)
+- [x] `generate_qr_payload` / `accept_qr_pairing` — 32-byte random token, 600 s expiry, `/pair` endpoint verifies and adds to trust list
+- [x] Known devices management — `sync_known_devices`, `sync_remove_device` Tauri commands; trust list persisted to `known_devices.json` and signed
+
+#### Sync operations
+- [x] `sync_playlist` — pull a single branch from the best available trusted peer: manifest fetch → commit-chain fetch → missing blob download → 3-way DAG merge; `prune_orphan_tracks` runs as a background task after each sync
+- [x] `sync_playlist_branches` — pull multiple branches in sequence and aggregate results
+- [x] `sync_refresh_metadata` — metadata-only sync (album name, artwork blobs) when HEAD commits are unchanged; called on every `refreshLivePeers` poll when no structural changes are detected
+- [x] 3-way DAG merge via `diff_trees` (`crates/sync/src/merge.rs`) — fast-forward, already-ahead, and true-merge cases handled; auto-merge written as a merge commit when no conflicts
+- [x] `PendingMerge` stored in memory when conflicts are detected; retrievable across UI re-opens via `sync_get_pending_conflicts`
+- [x] `resolve_merge_conflict` — applies user resolutions chunk-by-chunk and writes a merge commit
+- [x] Auto-sync in `triggerAutoSync` (frontend) — diffs `lastSeenHeads` against live manifest on every `refreshLivePeers` call; syncs changed branches, surfaces conflicts
+
+#### Conflict UI
+- [x] `DiffViewer` component — chunk-by-chunk resolution; works as a modal on desktop and a bottom sheet on mobile
+- [x] `pendingConflictPlaylists` Zustand state — persists across `closeDiffViewer` so a ⚠️ badge remains on playlist cards (mobile row + desktop sidebar) until the merge is finalized
+- [x] `reopenConflict` — re-fetches stored conflict chunks via `sync_get_pending_conflicts` so the badge can reopen the DiffViewer
+
+#### Library experience
+- [x] `artworkVersion` counter + cache busting — desktop carousel and mobile artwork hooks watch this to reload artwork after sync downloads new blobs
+- [x] `PeerPlaylistsModal` — browse and download playlists from a live peer; uses `sync_fetch_peer_manifest` + `sync_playlist` / `sync_playlist_branches`
+
+#### Stubs / not yet implemented
+- [ ] `sync_with_peer` — registered as a Tauri command but the `DesktopSyncBridge` implementation returns an empty `SyncReport` (`#[allow(dead_code)]`); intended to be a full bidirectional "sync everything with this peer now" action
+- [ ] Push mechanism — sync is pull-only; each side polls the other; no active "push my local changes" path exists
+- [ ] Internet/cloud fallback when no LAN peer is reachable (see Axum Self-Hosted Sync Server in P0)
+- [ ] Android sync — no `AndroidSyncBridge` implementation
 
 ### UI Polish
 - [x] Implement carousel view for albums / playlists — custom coverflow with cubic easing + 3D tilt
@@ -129,6 +156,17 @@
 - [x] Merge commits rendered as diamond nodes; source branch lines flow in their own colour up to the merge point, then target colour continues
 - [x] Allow playlist reversion to any prior commit — `branch_revert_to` command + UI button in commit detail panel
 - [x] Build developer mode toggle in settings
+
+### Dynamic Island / Live Activity Plugin
+- [ ] Create `tauri-plugin-live-activity` as a first-party Tauri v2 iOS plugin crate inside the workspace
+- [ ] Define `BranchStatusAttributes` (ActivityAttributes) + `ContentState` in Swift — branch name + CAS artwork path via App Group shared container
+- [ ] Implement Swift plugin class (extends Tauri `Plugin`) with `startActivity`, `updateActivity`, `endActivity` handlers
+- [ ] Add Widget Extension target to the Xcode project; share `BranchStatusAttributes` type between app and extension
+- [ ] Configure App Group entitlement on both the main app and widget extension targets; write artwork blobs to the shared container before each update
+- [ ] Implement Rust plugin API: `start_activity(branch, artwork_hash)`, `update_activity(branch, artwork_hash)`, `end_activity()` — resolves CAS blob path and copies to App Group container
+- [ ] Wire frontend: call `updateActivity` on track change and branch change; `endActivity` on audio stop
+- [ ] Design compact island layout: album art circle (leading) + branch name pill (trailing); expanded: album art + branch name bottom bar
+- [ ] Add `NSSupportsLiveActivities` to `Info.ios.plist` and `com.apple.developer.live-activities` entitlement
 
 ### Telemetry (Local Only)
 - [ ] Track play counts per track in SQLite
@@ -301,5 +339,9 @@ The tree schema has an `includes` array (reserved field). After design review, p
 ### Next steps (priority order)
 
 1. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
+2. **`sync_with_peer` implementation** — complete the bidirectional full-sync command (currently a stub returning an empty `SyncReport`)
+3. **Push mechanism** — active "push my local changes to peer" path so sync is no longer poll-only
+4. **Android sync bridge** — `AndroidSyncBridge` implementation (mDNS + HTTP server)
+5. **Internet/cloud fallback** — Axum self-hosted server for sync when no LAN peer is reachable
 
-*Last updated: 2026-05-09.*
+*Last updated: 2026-05-22.*
