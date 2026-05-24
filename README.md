@@ -1,97 +1,271 @@
 # Melomaniac
 
 [![CI](https://github.com/Angle-Brackets/Melomaniac/actions/workflows/ci.yml/badge.svg)](https://github.com/Angle-Brackets/Melomaniac/actions/workflows/ci.yml)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-blue?logo=tauri)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)
+![Rust](https://img.shields.io/badge/Rust-1.87+-orange?logo=rust)
+![iOS](https://img.shields.io/badge/iOS-17%2B-black?logo=apple)
+![License](https://img.shields.io/badge/License-GPLv3-green)
 
-A cross-platform desktop music player built with **Tauri 2** + **React / TypeScript**, designed around a git-style content-addressable library — every track, playlist snapshot, and artwork is a BLAKE3-hashed blob. Playlists are repositories. Branches are subplaylists. Forks are forks.
+A local-first, cross-platform music player with **git-style playlist versioning**. Every track, artwork, and playlist snapshot is a BLAKE3-hashed blob. Playlists are repositories. Branches are sub-playlists. Forks are forks. Devices sync over LAN the same way developers sync code — by diffing commits and merging changes.
+
+**Platforms:** macOS · Linux · Windows · iOS (real device + simulator)
 
 ---
 
-## Alpha 0.0.1 Roadmap
+## Features
 
-### Core Engine
+### Playback
+- Desktop audio via **rodio** (MP3, FLAC, OGG, WAV, M4A/AAC, ALAC, Opus)
+- iOS audio via **AVFoundation** — background audio session, lock screen controls, Now Playing widget
+- **Shuffle modes**: Random (Fisher-Yates) and Smart (artist-spread weighted, avoids consecutive same-artist)
+- **AB loop** with per-track A/B timestamps persisted across restarts
+- Queue management with drag-to-reorder
+- Discord Rich Presence (desktop)
 
-- [x] **Desktop audio playback** (Linux · macOS · Windows) — rodio 0.22 + symphonia (`symphonia-all`), dedicated audio thread, atomic position tracking; supported formats: MP3, FLAC, OGG/Vorbis, WAV, M4A/AAC, ALAC, Opus, MKV/WebM
-- [x] **Content-addressable storage (CAS)** — BLAKE3 hashing, `objects/<xx>/<remaining-62>` layout, atomic blob writes, deduplication
-- [x] **SQLite library database** — tracks, plays/skips, playlists, branches, commits, commit parents; WAL mode + foreign keys; migrations via sqlx
-- [x] **Git-style playlist versioning** — playlists as repositories, branches as subplaylists, fork support, commit history walk
-- [x] **Zustand state store** — playback, queue, library, and playlist slices; ShuffleMode (Off / Random / Smart with Fisher-Yates lookahead); RepeatMode; optimistic favorite toggling
-- [ ] **File ingest** — import local audio files into CAS, extract metadata tags via symphonia/id3
-- [ ] **yt-dlp download ingest** — download from URL directly into CAS + metadata
-- [ ] **Library UI** — browse tracks, toggle favorite, search and filter
-- [ ] **Playback controls** — play/pause, seek bar, volume, skip, shuffle, repeat wired to Tauri commands
-- [ ] **Playlist UI** — create, fork, browse tracks on a branch
+### Library
+- **Content-addressed storage** — files stored by BLAKE3 hash; zero duplication
+- **yt-dlp ingestion** — paste any URL, audio downloads to CAS with metadata; background queue with progress ring
+- **Metadata editor** — read/write MP3/FLAC/OGG tags via `lofty`; bulk edit; artwork library
+- Listening statistics — play counts, skip counts, per-track history
 
-### Platform
+### Playlist Versioning
+- Every change creates a **commit** (author, timestamp, parent hash)
+- **Branches** — multiple named branches per playlist; create, switch, delete inline
+- **Fork** — branch a playlist into a new independent playlist at any commit
+- **3-way DAG merge** — fast-forward, auto-merge, or conflict resolution
+- **Conflict UI** — amber badge + diff viewer shows exactly which tracks conflict and lets you pick a resolution
+- **Commit graph** visualisation (desktop)
 
-- [x] Linux (tested)
-- [ ] macOS (audio architecture ready, untested)
-- [ ] Windows (audio architecture ready, untested)
-- [ ] iOS (AVPlayer bridge — P1)
-- [ ] Android (ExoPlayer / Media3 bridge — P1)
+### LAN Sync
+- **Zero-config discovery** via mDNS-SD (`_melomaniac._tcp.local.`)
+- **QR pairing** — scan from desktop to iOS, keys exchanged once, persisted to trust list
+- **Ed25519 signed requests** — all sync HTTP calls carry a signed timestamp; replays rejected
+- **Auto-sync** — silently fast-forwards branches when a peer comes online
+- Transfers audio blobs and artwork blobs; per-track download progress ring
+- Peer latency display, known device management
+
+### Desktop UI
+- Three-column layout: sidebar rail · main panel · right panel (queue / info)
+- Playlist sidebar with folders, drag-to-reorder, pin-to-top, conflict badges
+- Coverflow album carousel
+- Frameless custom titlebar
+- Theme system: Warm · Cool · Dark · Custom hue (oklch)
+- Track list density: compact · normal · relaxed
+
+### Mobile UI (iOS)
+- Tab navigation: Library · Discover · Now Playing · Settings
+- `PlaylistDetail` slide overlay with branch picker, fork, edit, merge sheets
+- Swipe-to-delete with vertical-scroll cancel guard
+- Pull-to-refresh, swipe-back gesture
+- In-app browser (SFSafariViewController)
 
 ---
 
 ## Architecture
 
 ```
-Frontend (React + TypeScript + Zustand)
-    │  invoke() / listen()
-    ▼
-Tauri command layer  (src-tauri/src/)
-    ├── audio.rs     — 7 playback commands
-    └── storage.rs   — 7 library/playlist commands
-    │
-    ├── crates/audio/    (melomaniac-audio)
-    │     AudioBridge trait → DesktopBridge (rodio + symphonia)
-    │
-    └── crates/storage/  (melomaniac-storage)
-          CasStore  — BLAKE3, blob read/write
-          Database  — sqlx SQLite pool, migrations, CRUD
-          Indexer   — startup reconciliation
+┌──────────────────────────────────────────────────────────────────────┐
+│                        React 18 / TypeScript                         │
+│                                                                      │
+│   DesktopApp (3-column)          MobileApp (tab nav)                 │
+│   ├─ Sidebar (rail + tree)       ├─ Library / PlaylistsList          │
+│   ├─ LibraryView / EditorView    ├─ PlaylistDetail (slide overlay)   │
+│   ├─ RightPanel / Queue          ├─ NowPlaying / Discover            │
+│   └─ PlayerControls              └─ Settings                         │
+│                                                                      │
+│   Shared: DiffViewer · PairingModal · PeerPlaylistsModal · MusicCard │
+│                                                                      │
+│   Zustand Store                                                      │
+│   ├─ librarySlice   tracks, artwork cache, library status            │
+│   ├─ playbackSlice  currentTrack, isPlaying, volume, AB loop         │
+│   ├─ playlistSlice  active playlist, branches, commit history         │
+│   ├─ queueSlice     queue, shuffle (Random/Smart), advance           │
+│   └─ syncSlice      livePeers, knownDevices, conflicts, progress      │
+└──────────────┬───────────────────────────────┬──────────────────────┘
+               │  invoke() / listen()           │
+               │  @tauri-apps/api/core          │
+┌──────────────▼───────────────────────────────▼──────────────────────┐
+│                   Tauri 2 Command Layer  (src-tauri/src/)            │
+│                                                                      │
+│  audio.rs      audio_load · audio_play · audio_pause · audio_seek   │
+│                audio_stop · audio_set_volume · audio_position        │
+│  storage.rs    playlist_get_all · playlist_get_tracks · track_ingest │
+│                track_get_artwork · library_remove_tracks · …         │
+│  sync.rs       sync_get_peers · sync_with_peer · sync_playlist       │
+│                sync_generate_qr_payload · sync_accept_qr_pairing …  │
+│  editor.rs     editor_read_tags · editor_write_tags · …             │
+│  stats.rs      get_system_stats · open_url_in_app                   │
+│  downloader.rs download_enqueue · download_queue                     │
+└──────────┬──────────────────────┬───────────────────┬───────────────┘
+           │                      │                   │
+    ┌──────▼──────┐        ┌──────▼──────┐    ┌──────▼──────┐
+    │ melomaniac  │        │ melomaniac  │    │ melomaniac  │
+    │   -audio    │        │  -storage   │    │   -sync     │
+    │             │        │             │    │             │
+    │ AudioBridge │        │ CasStore    │    │ SyncBridge  │
+    │ trait       │        │ (BLAKE3)    │    │ trait       │
+    │             │        │             │    │             │
+    │ Desktop:    │        │ Database    │    │ Desktop:    │
+    │ DesktopBridge│       │ (SQLite/WAL)│    │ DesktopSync │
+    │ rodio 0.22  │        │             │    │ Bridge      │
+    │ MixerDevice │        │ Indexer     │    │ (mdns-sd)   │
+    │ Sink        │        │ (startup    │    │             │
+    │ + OS thread │        │  reconcile) │    │ iOS:        │
+    │             │        │             │    │ IosSyncBridge│
+    │ iOS:        │        │ merge.rs    │    │ (NWBrowser  │
+    │ IosBridge   │        │ 3-way DAG   │    │  NWListener │
+    │ Swift FFI ──┼──┐     │ merge engine│    │  Swift FFI) │
+    └─────────────┘  │     └─────────────┘    └──────┬──────┘
+                     │                               │
+    ┌────────────────▼─────┐              ┌──────────▼────────────┐
+    │  MelomaniacPlayer    │              │   MelomaniacSync      │
+    │  (Swift static lib)  │              │   (Swift static lib)  │
+    │                      │              │                       │
+    │  AVAudioPlayer       │              │  NWBrowser  (discover)│
+    │  AVAudioSession      │              │  NWListener (advertise)│
+    │  MPNowPlaying        │              │  @_cdecl FFI exports  │
+    │  MPRemoteCommand     │              │                       │
+    │  SFSafariViewController│            │  Axum HTTP server     │
+    │  @_cdecl FFI exports │              │  (shared with desktop)│
+    └──────────────────────┘              └───────────────────────┘
+           │                                        │
+    ┌──────▼──────────────────────────────────────▼───────┐
+    │               OS / Hardware                          │
+    │                                                      │
+    │  Desktop: cpal audio device, mDNS socket, TCP/7700  │
+    │  iOS:     AVFoundation, Network.framework, TCP/7700  │
+    └──────────────────────────────────────────────────────┘
 ```
 
-Audio events flow back via `AppHandle::emit("audio://event")` → Tauri → frontend listener.
+### Communication Bridges
 
-Storage lives at the platform `app_data_dir`:
+| Direction | Mechanism | Used for |
+|---|---|---|
+| Frontend → Rust | `invoke()` from `@tauri-apps/api/core` | All commands |
+| Rust → Frontend | `AppHandle::emit("event://name", payload)` | Audio events, sync progress |
+| Rust → Swift (audio) | C FFI via `@_cdecl` exports in `MelomaniacPlayer.swift` | Play, pause, seek, volume, Now Playing |
+| Rust → Swift (sync) | C FFI via `@_cdecl` exports in `MelomaniacSync.swift` | mDNS register/browse |
+| Peer → Peer (sync) | Axum HTTP on port 7700, Ed25519-signed headers | Manifest, blob transfer, pairing |
+
+### Crate Workspace (`src-tauri/crates/`)
+
+| Crate | Purpose |
+|---|---|
+| `melomaniac-audio` | `AudioBridge` trait + platform implementations (rodio desktop, AVFoundation iOS) |
+| `melomaniac-storage` | SQLite database, BLAKE3 CAS blob store, playlist DAG, indexer |
+| `melomaniac-sync` | mDNS-SD discovery, Axum HTTP sync server/client, 3-way merge engine |
+
+### Storage Layout
 
 | Platform | Path |
 |---|---|
-| Linux   | `~/.local/share/melomaniac/` |
-| macOS   | `~/Library/Application Support/com.melomaniac.app/` |
-| Windows | `%APPDATA%\melomaniac\` |
+| Linux | `~/.local/share/com.melomaniac.app/` |
+| macOS | `~/Library/Application Support/com.melomaniac.app/` |
+| Windows | `%APPDATA%\com.melomaniac.app\` |
+| iOS | App sandbox `Application Support/` |
+
+Within the app data directory:
+```
+melomaniac.db          SQLite database
+cas/
+  <xx>/
+    <remaining-62>     BLAKE3-hashed audio + artwork blobs
+```
 
 ---
 
 ## Development
 
-```bash
-# Frontend dev server only (http://localhost:1420)
-npm run dev
+### Prerequisites
 
-# Full Tauri desktop app in dev mode
+- [Rust](https://rustup.rs/) 1.87+
+- [Node.js](https://nodejs.org/) 20+
+- [Tauri CLI](https://tauri.app/): `cargo install tauri-cli`
+- **iOS only**: Xcode 15+, Apple Developer account, `npm install -g ios-deploy`
+
+### Commands
+
+```bash
+# Desktop dev (Vite HMR + Tauri)
 npm run tauri dev
 
-# TypeScript type-check + production build
+# Frontend only — hot-reload at http://localhost:1420 (no Rust needed)
+npm run dev
+
+# Desktop UI in a mobile-sized window (no Rust needed, for mobile UI work)
+npm run dev:mobile
+
+# iOS simulator
+npm run ios:sim
+
+# iOS on a real device
+npm run ios:dev
+
+# Type-check + production build
 npm run build
 
-# Run all tests
-npm test                                        # TypeScript (Vitest)
-cd src-tauri && cargo test -p melomaniac-storage -p melomaniac-audio
+# Run tests (Vitest)
+npm test
+
+# Run Rust tests
+cd src-tauri && cargo test --workspace
 ```
 
-**Audio device tests** (5 tests) require a real or virtual audio output and are skipped by default. Run locally with:
+### Project Structure
 
-```bash
-cd src-tauri && cargo test -p melomaniac-audio -- --include-ignored
+```
+src/
+  App.tsx                    Platform router (VITE_PLATFORM → DesktopApp | MobileApp)
+  desktop/
+    DesktopApp.tsx           Root desktop component — all state lives here
+    components/              Sidebar, LibraryView, EditorView, PlayerControls, …
+    icons.tsx                Shared icon library (react-icons/fi + custom SVGs)
+    types.ts                 Desktop-specific TypeScript types
+  mobile/
+    MobileApp.tsx            Root mobile component
+    components/              Library, PlaylistDetail, NowPlaying, Settings, …
+    icons.tsx                Mobile icon set (custom SVGs, stroke-based)
+  components/                Shared: DiffViewer, PairingModal, PeerPlaylistsModal
+  store/
+    index.ts                 Zustand store — assembles all slices
+    librarySlice.ts
+    playbackSlice.ts
+    playlistSlice.ts
+    queueSlice.ts
+    syncSlice.ts
+    types.ts                 Shared store types
+  shared/
+    themes.ts                Named themes + oklch custom hue system
+
+src-tauri/
+  src/                       Tauri command handlers (audio, storage, sync, editor, …)
+  crates/
+    audio/                   melomaniac-audio crate
+      ios/                   MelomaniacPlayer Swift package (AVFoundation FFI)
+    storage/                 melomaniac-storage crate
+    sync/                    melomaniac-sync crate
+      ios/                   MelomaniacSync Swift package (NWBrowser/NWListener FFI)
+  capabilities/
+    default.json             Desktop capabilities
+    mobile.json              iOS capabilities
+  tauri.conf.json
 ```
 
 ---
 
-## Planned (Post-Alpha)
+## Sync Protocol
 
-- **Smart Loop** — per-track A/B timestamps stored in the tree manifest
-- **LAN P2P sync** — mDNS device discovery → QUIC transfer → Automerge CRDTs for offline conflict resolution
-- **Self-hosted sync server** — Axum `/pull` + `/push` endpoints, Dockerized
-- **Semantic playlist generation** — local sentence-transformer embeddings + natural language queries
-- **Spotify via librespot** — local playback, tracks mapped to CAS blobs where they overlap
-- **Commit graph UI** — visual playlist history, revert to any prior snapshot
+Melomaniac's LAN sync is a pull-based HTTP protocol over port 7700:
+
+1. **Discovery**: mDNS-SD announces `_melomaniac._tcp.local.` with the device's hostname and public key fingerprint.
+2. **Pairing**: First contact uses QR code exchange. Desktop generates a QR payload containing its public key and address; iOS scans it, sends its own key back to `/pair`. Both sides persist the trust list.
+3. **Auth**: Every request carries a header with an Ed25519 signature over `device_id:timestamp_ms`. Replays outside a 30-second window are rejected.
+4. **Auto-sync**: `triggerAutoSync` polls peers every few seconds, fetches `/manifest` (all branch HEAD hashes), diffs against `lastSeenHeads`, and calls `sync_playlist` for each changed branch.
+5. **sync_playlist**: Pulls the peer's commit chain (`/commits/:id/:branch`), downloads missing blobs (`/blob/:hash`), runs 3-way merge, writes result. Fast-forwards or auto-merges silently; true conflicts go to `pending_merges` and surface in the UI.
+
+---
+
+## License
+
+GPLv3 — see [LICENSE](LICENSE).

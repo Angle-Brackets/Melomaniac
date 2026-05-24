@@ -39,6 +39,10 @@ pub struct DesktopSyncBridge {
     mdns: Arc<std::sync::Mutex<Option<ServiceDaemon>>>,
     db: Arc<Database>,
     cas: Arc<CasStore>,
+    // std::sync::Mutex, not tokio::sync::Mutex: Tauri command handlers run inside
+    // the Tokio runtime, so tokio::sync::Mutex::blocking_lock() would panic.
+    // These maps are only locked briefly for HashMap reads/writes, so the
+    // sync mutex is the right tool and will never cause priority inversion.
     pending_merges: Arc<std::sync::Mutex<HashMap<String, PendingMerge>>>,
     /// Shared with the Axum ServerState so /pair can verify and consume it.
     pending_qr_token: Arc<std::sync::Mutex<Option<(String, u64)>>>,

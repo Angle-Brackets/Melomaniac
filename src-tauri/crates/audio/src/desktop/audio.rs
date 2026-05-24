@@ -46,6 +46,9 @@ struct Request {
 pub struct DesktopBridge {
     req_tx: SyncSender<Request>,
     position_ms: Arc<AtomicU64>,
+    // Kept alive here so any future public API can read it without going through
+    // the audio thread. The audio thread owns the clone that actually writes it.
+    #[allow(dead_code)]
     duration_ms: Arc<AtomicU64>,
 }
 

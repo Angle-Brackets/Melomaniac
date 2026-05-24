@@ -29,6 +29,7 @@ fn entry(hash: &str) -> TrackEntry {
         duration_ms: None,
         mime_type: None,
         artwork_hash: None,
+        replaces: None,
         extra: Default::default(),
     }
 }
@@ -44,6 +45,7 @@ fn entry_ab(hash: &str, start: u64, end: u64) -> TrackEntry {
         duration_ms: None,
         mime_type: None,
         artwork_hash: None,
+        replaces: None,
         extra: Default::default(),
     }
 }
