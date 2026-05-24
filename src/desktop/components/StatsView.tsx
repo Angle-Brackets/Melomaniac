@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { TrackRecord } from '../data';
 import type { TrackStats } from '../../store/types';
@@ -24,9 +24,12 @@ const TOP_LIMIT = 20;
 export default function StatsView(): JSX.Element {
   const [rows, setRows] = useState<Array<{ hash: string; stats: TrackStats; track: TrackRecord | null }>>([]);
   const [loading, setLoading] = useState(true);
+  const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
+  const fetchedRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
+    fetchedRef.current.clear();
     try {
       const [topPairs, allTracks] = await Promise.all([
         invoke<[string, TrackStats][]>('library_get_top_tracks', { limit: TOP_LIMIT }),
@@ -34,11 +37,21 @@ export default function StatsView(): JSX.Element {
       ]);
 
       const trackMap = new Map<string, TrackRecord>(allTracks.map(t => [t.hash, t]));
-      setRows(topPairs.map(([hash, stats]) => ({
+      const nextRows = topPairs.map(([hash, stats]) => ({
         hash,
         stats,
         track: trackMap.get(hash) ?? null,
-      })));
+      }));
+      setRows(nextRows);
+
+      // Fetch artwork for each track that has an artwork_hash, fire-and-forget per track
+      for (const { hash, track } of nextRows) {
+        if (!track?.artwork_hash || fetchedRef.current.has(hash)) continue;
+        fetchedRef.current.add(hash);
+        invoke<string>('track_get_artwork', { hash })
+          .then(url => setArtworkUrls(prev => ({ ...prev, [hash]: url })))
+          .catch(() => {});
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -128,23 +141,36 @@ export default function StatsView(): JSX.Element {
               {idx + 1}
             </span>
 
-            {/* Track info */}
-            <div style={{ minWidth: 0 }}>
+            {/* Track info — artwork thumbnail + title/artist */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <div style={{
-                fontSize: 12, fontWeight: 500, color: 'var(--text-0)',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                width: 32, height: 32, borderRadius: 4, flexShrink: 0,
+                background: 'var(--bg-3)',
+                overflow: 'hidden',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                {track?.title ?? hash.slice(0, 12) + '…'}
+                {artworkUrls[hash]
+                  ? <img src={artworkUrls[hash]} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <span style={{ fontSize: 14, opacity: 0.3 }}>♪</span>
+                }
               </div>
-              {track?.artist && (
+              <div style={{ minWidth: 0 }}>
                 <div style={{
-                  fontSize: 10, color: 'var(--text-2)',
+                  fontSize: 12, fontWeight: 500, color: 'var(--text-0)',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>
-                  {track.artist}
-                  {track.album ? ` · ${track.album}` : ''}
+                  {track?.title ?? hash.slice(0, 12) + '…'}
                 </div>
-              )}
+                {track?.artist && (
+                  <div style={{
+                    fontSize: 10, color: 'var(--text-2)',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}>
+                    {track.artist}
+                    {track.album ? ` · ${track.album}` : ''}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Play count */}
