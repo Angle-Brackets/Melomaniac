@@ -828,8 +828,8 @@ impl Database {
                  FROM skips
                  GROUP BY hash
              ) s ON s.hash = t.hash
-             WHERE COALESCE(p.play_count, 0) > 0
-             ORDER BY play_count DESC
+             WHERE COALESCE(p.play_count, 0) > 0 OR COALESCE(s.skip_count, 0) > 0
+             ORDER BY play_count DESC, skip_count DESC
              LIMIT ?"
         )
         .bind(limit).fetch_all(&self.pool).await?;
