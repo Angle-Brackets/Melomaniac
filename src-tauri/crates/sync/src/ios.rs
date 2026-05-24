@@ -265,6 +265,7 @@ async fn sync_one_branch_async(
     cas: Arc<CasStore>,
     peer_entry: &PlaylistManifest,
     branch_name: &str,
+    peer_display_name: &str,
     pending_merges: Arc<std::sync::Mutex<HashMap<String, PendingMerge>>>,
     progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
 ) -> Result<SyncReport, SyncError> {
@@ -481,11 +482,12 @@ async fn sync_one_branch_async(
 
     if !conflicts.is_empty() {
         let pending = PendingMerge {
-            local_head:    local_head_str.to_string(),
-            peer_head:     peer_head.to_string(),
-            ancestor_hash: ancestor.clone(),
-            branch_name:   local_branch_name.to_string(),
-            conflicts:     conflicts.clone(),
+            local_head:        local_head_str.to_string(),
+            peer_head:         peer_head.to_string(),
+            ancestor_hash:     ancestor.clone(),
+            branch_name:       local_branch_name.to_string(),
+            conflicts:         conflicts.clone(),
+            peer_display_name: peer_display_name.to_string(),
         };
         // Lock is released before any await — no async hold across the lock boundary.
         pending_merges.lock().unwrap().insert(playlist_id.to_string(), pending);
@@ -501,7 +503,7 @@ async fn sync_one_branch_async(
             tree_hash,
             timestamp: unix_now() as i64,
             device_id: identity.public_key_b64(),
-            message:   Some("auto-merge".into()),
+            message:   Some(format!("auto-merge from {peer_display_name}")),
         };
         db.insert_commit(&merge_commit, &[local_head_str, peer_head]).await?;
         db.update_branch_head(&playlist_id, local_branch_name, &merge_commit.hash).await?;
@@ -826,7 +828,7 @@ impl SyncBridge for IosSyncBridge {
 
             sync_one_branch_async(
                 &client, identity, db, cas,
-                &peer_entry, &branch_name,
+                &peer_entry, &branch_name, &peer.display_name,
                 pending_merges, progress_tx,
             ).await
         })
@@ -881,7 +883,7 @@ impl SyncBridge for IosSyncBridge {
                 for branch_name in changed {
                     let report = sync_one_branch_async(
                         &client, identity.clone(), db.clone(), cas.clone(),
-                        &entry, &branch_name,
+                        &entry, &branch_name, &peer.display_name,
                         pending_merges.clone(), None,
                     ).await?;
                     total.blobs_fetched += report.blobs_fetched;

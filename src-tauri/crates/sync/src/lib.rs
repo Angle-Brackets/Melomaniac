@@ -193,11 +193,12 @@ pub struct SyncReport {
 /// Kept until the user resolves every ConflictChunk and calls resolve_merge_conflict.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PendingMerge {
-    pub local_head:    String,
-    pub peer_head:     String,
-    pub ancestor_hash: Option<String>,
-    pub branch_name:   String,
-    pub conflicts:     Vec<ConflictChunk>,
+    pub local_head:        String,
+    pub peer_head:         String,
+    pub ancestor_hash:     Option<String>,
+    pub branch_name:       String,
+    pub conflicts:         Vec<ConflictChunk>,
+    pub peer_display_name: String,
 }
 
 // ── ConflictChunk ─────────────────────────────────────────────────────────────

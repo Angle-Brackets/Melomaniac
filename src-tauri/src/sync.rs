@@ -358,7 +358,7 @@ pub async fn resolve_merge_conflict(
             .unwrap_or_default()
             .as_secs() as i64,
         device_id: sync_state.bridge.fingerprint(),
-        message:   Some("merge".into()),
+        message:   Some(format!("merge from {}", pending.peer_display_name)),
     };
 
     db.insert_commit(&merge_commit, &[&pending.local_head, &pending.peer_head])
