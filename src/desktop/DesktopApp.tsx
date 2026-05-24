@@ -882,10 +882,8 @@ export default function DesktopApp(): JSX.Element {
   };
 
   const handleSkipNext = () => {
-    // Record skip if a track is loaded and has played for at least 1 s (fire-and-forget)
-    if (loadedHash && livePositionMsRef.current > 1000) {
+    if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
-    }
     // Manual queue takes priority
     if (manualQueue.length > 0) {
       const [next, ...rest] = manualQueue;
@@ -916,11 +914,6 @@ export default function DesktopApp(): JSX.Element {
   skipNextRef.current = handleSkipNext;
 
   const handleSkipPrev = () => {
-    // Record skip if we're genuinely moving to the previous track (position <= 3 s)
-    // When position > 3 s the track restarts (not a true skip), so we don't record.
-    if (loadedHash && livePositionMsRef.current > 1000 && livePositionMsRef.current <= 3000) {
-      invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
-    }
     // Restart current track if more than 3 s in — reload is more reliable than seek-to-0
     if (livePositionMsRef.current > 3000 && loadedHash) {
       invoke('track_play', { hash: loadedHash }).catch(console.error);
@@ -928,6 +921,8 @@ export default function DesktopApp(): JSX.Element {
       setIsPlaying(true);
       return;
     }
+    if (loadedHash)
+      invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
     const q = playQueue;
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);

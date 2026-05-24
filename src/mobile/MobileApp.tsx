@@ -121,7 +121,7 @@ export default function MobileApp() {
       if (now - lastAdvancedAt < 1500) return;
       lastAdvancedAt = now;
       const s = useStore.getState();
-      if (recordSkip && positionMsRef.current > 1000) {
+      if (recordSkip) {
         const lh = s.loadedTrackHash;
         if (lh) invoke('track_record_skip', { hash: lh, positionMs: positionMsRef.current }).catch(console.error);
       }
@@ -139,8 +139,8 @@ export default function MobileApp() {
 
     const playPrev = () => {
       const s = useStore.getState();
-      // Record a skip only if genuinely going back (position <= 3 s means back-skip, not restart)
-      if (positionMsRef.current > 1000 && positionMsRef.current <= 3000) {
+      // Only record a skip when going back — if >3 s in the track restarts, not a skip
+      if (positionMsRef.current <= 3000) {
         const lh = s.loadedTrackHash;
         if (lh) invoke('track_record_skip', { hash: lh, positionMs: positionMsRef.current }).catch(console.error);
       }
