@@ -22,6 +22,7 @@ pub struct SystemState(pub Mutex<System>);
 unsafe extern "C" {
     fn melo_memory_bytes() -> u64;
     fn melo_cpu_usage_percent() -> f32;
+    fn melo_open_url(url: *const std::ffi::c_char);
 }
 
 #[cfg(target_os = "ios")]
@@ -77,4 +78,16 @@ pub fn get_system_stats(state: State<'_, SystemState>) -> AppStats {
             cpu_usage: 0.0,
         }
     }
+}
+
+#[tauri::command]
+pub fn open_url_in_app(url: String) {
+    #[cfg(target_os = "ios")]
+    {
+        if let Ok(c_url) = std::ffi::CString::new(url) {
+            unsafe { melo_open_url(c_url.as_ptr()); }
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = url;
 }

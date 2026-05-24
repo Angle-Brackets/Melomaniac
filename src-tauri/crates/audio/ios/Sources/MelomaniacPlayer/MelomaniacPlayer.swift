@@ -1,6 +1,7 @@
 import AVFoundation
 import Darwin
 import MediaPlayer
+import SafariServices
 import UIKit
 
 // ── Playback-end delegate ─────────────────────────────────────────────────────
@@ -391,4 +392,18 @@ public func meloCpuUsagePercent() -> Float {
         }
     }
     return usage
+}
+
+// ── In-app URL opener (SFSafariViewController) ────────────────────────────────
+
+@_cdecl("melo_open_url")
+public func melo_open_url(_ urlCString: UnsafePointer<CChar>) {
+    guard let urlStr = String(cString: urlCString, encoding: .utf8),
+          let url = URL(string: urlStr) else { return }
+    DispatchQueue.main.async {
+        let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        guard let root = scene?.windows.first?.rootViewController else { return }
+        let safari = SFSafariViewController(url: url)
+        root.present(safari, animated: true)
+    }
 }

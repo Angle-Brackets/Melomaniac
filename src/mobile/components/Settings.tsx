@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-shell';
 import { Icons } from '../icons';
 import { MMTabBar, usePullToRefresh, PullSpinner } from './common';
 import type { TabId } from './common';
@@ -427,7 +426,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           <Row
             title="Source on GitHub"
             chev
-            onClick={() => open(GITHUB_URL).catch(console.error)}
+            onClick={() => invoke('open_url_in_app', { url: GITHUB_URL }).catch(console.error)}
           >
             <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>Angle-Brackets/Melomaniac</span>
           </Row>

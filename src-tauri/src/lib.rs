@@ -244,6 +244,7 @@ pub fn run() {
             storage::get_artwork_blob_bytes,
             storage::library_get_stray_tracks,
             stats::get_system_stats,
+            stats::open_url_in_app,
             network::fetch_image_url,
             downloader::download_enqueue,
             downloader::download_queue,
