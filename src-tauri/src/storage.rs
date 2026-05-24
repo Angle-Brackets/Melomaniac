@@ -1353,6 +1353,13 @@ pub async fn library_get_top_tracks(
     storage.db.get_top_tracks(limit as i64).await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn library_get_all_track_stats(
+    storage: State<'_, StorageState>,
+) -> Result<Vec<(String, TrackStats)>, String> {
+    storage.db.get_all_track_stats().await.map_err(|e| e.to_string())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

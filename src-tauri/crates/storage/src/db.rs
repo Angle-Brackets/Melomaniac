@@ -808,6 +808,32 @@ impl Database {
 
     /// Return the top `limit` tracks ordered by play count descending.
     /// Returns (track_hash, TrackStats) pairs.
+    pub async fn get_all_track_stats(&self) -> Result<Vec<(String, TrackStats)>, StorageError> {
+        let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+            "SELECT t.hash,
+                    COALESCE(p.play_count,       0) AS play_count,
+                    COALESCE(s.skip_count,       0) AS skip_count,
+                    COALESCE(p.total_listen_ms,  0) AS total_listen_ms
+             FROM tracks t
+             LEFT JOIN (
+                 SELECT hash,
+                        COUNT(*)                      AS play_count,
+                        SUM(COALESCE(duration_ms, 0)) AS total_listen_ms
+                 FROM plays GROUP BY hash
+             ) p ON p.hash = t.hash
+             LEFT JOIN (
+                 SELECT hash, COUNT(*) AS skip_count
+                 FROM skips GROUP BY hash
+             ) s ON s.hash = t.hash
+             ORDER BY play_count DESC, skip_count DESC, t.title ASC"
+        )
+        .fetch_all(&self.pool).await?;
+
+        Ok(rows.into_iter().map(|(hash, play_count, skip_count, total_listen_ms)| {
+            (hash, TrackStats { play_count, skip_count, total_listen_ms })
+        }).collect())
+    }
+
     pub async fn get_top_tracks(&self, limit: i64) -> Result<Vec<(String, TrackStats)>, StorageError> {
         // A single query with sub-selects avoids N+1 stats lookups.
         let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(

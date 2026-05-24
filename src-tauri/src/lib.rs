@@ -268,6 +268,7 @@ pub fn run() {
             storage::track_record_skip,
             storage::track_get_stats,
             storage::library_get_top_tracks,
+            storage::library_get_all_track_stats,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,
             sync::sync_get_peers,
