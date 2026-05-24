@@ -234,7 +234,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* Header */}
         <div style={{ padding: '12px 22px 6px' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, letterSpacing: -0.5 }}>Settings</h1>
-          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v0.1 alpha · mobile</div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v1.0 alpha · mobile</div>
         </div>
 
         {/* Conflict resolution banner — shown when any playlist has an unresolved merge */}
@@ -420,7 +420,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* About */}
         <SettingsGroup label="About">
           <div style={{ padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)' }}>
-            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>Melomaniac v0.1 Alpha</div>
+            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>Melomaniac v1.0 Alpha</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', marginTop: 3 }}>Tauri 2 · React · Rust · GPLv3</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 3 }}>By Soupa · built {BUILD_DATE}</div>
           </div>

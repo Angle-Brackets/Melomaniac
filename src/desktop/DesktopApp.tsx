@@ -1328,7 +1328,7 @@ export default function DesktopApp(): JSX.Element {
           padding: '0 12px', flexShrink: 0,
         }}>
           <span className="font-mono text-[9px] text-mm-t2 flex items-center gap-2">
-            Melomaniac by Soupa | v0.1 Alpha | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--text-3)' }}>N/A</span>
+            Melomaniac by Soupa | v1.0 Alpha | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--text-3)' }}>N/A</span>
             {showStats && appStats && (
               <span className="ml-4 text-mm-accent-lit">
                 RAM: {appStats.memory_mb.toFixed(1)} MB | CPU: {appStats.cpu_usage.toFixed(1)}%

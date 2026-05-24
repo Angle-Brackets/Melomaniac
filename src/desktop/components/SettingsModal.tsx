@@ -234,7 +234,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
           {/* ── About ── */}
           <section className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-mm-t1">Melomaniac v0.1 Alpha</p>
+              <p className="text-xs text-mm-t1">Melomaniac v1.0 Alpha</p>
               <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Tauri 2 · React · Rust · GPLv3</p>
             </div>
             <button onClick={onReset} className="btn btn-ghost btn-xs">Reset to defaults</button>
