@@ -1,4 +1,4 @@
-<table><tr><td>
+<img src="src-tauri/icons/icon.png" width="180" alt="Melomaniac logo" align="right"/>
 
 # Melomaniac
 
@@ -12,12 +12,6 @@
 A local-first, cross-platform music player with **git-style playlist versioning**. Every track, artwork, and playlist snapshot is a BLAKE3-hashed blob. Playlists are repositories. Branches are sub-playlists. Forks are forks. Devices sync over LAN the same way developers sync code — by diffing commits and merging changes.
 
 **Platforms:** macOS · Linux · Windows · iOS (real device + simulator)
-
-</td><td>
-
-<img src="src-tauri/icons/icon.png" width="180" alt="Melomaniac logo"/>
-
-</td></tr></table>
 
 ---
 
