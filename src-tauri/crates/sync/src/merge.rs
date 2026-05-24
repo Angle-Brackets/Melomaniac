@@ -46,11 +46,28 @@ pub fn diff_trees(
     }
 
     // ── Track deletion vs modification ────────────────────────────────────────
+    // Build rename maps: old_hash → new_entry, for tracks that carry a "replaces" field.
+    // A rename means the track's bytes changed due to a metadata edit, not a true deletion.
+    let our_renames: std::collections::HashMap<&str, &melomaniac_storage::TrackEntry> = ours
+        .tracks
+        .iter()
+        .filter_map(|t| t.replaces.as_deref().map(|old| (old, t)))
+        .collect();
+    let their_renames: std::collections::HashMap<&str, &melomaniac_storage::TrackEntry> = theirs
+        .tracks
+        .iter()
+        .filter_map(|t| t.replaces.as_deref().map(|old| (old, t)))
+        .collect();
+
     for base_track in &base.tracks {
         let in_ours = ours.tracks.iter().any(|t| t.hash == base_track.hash);
         let in_theirs = theirs.tracks.iter().any(|t| t.hash == base_track.hash);
 
         if !in_ours && in_theirs {
+            // Skip if ours replaced this hash via a metadata edit.
+            if our_renames.contains_key(base_track.hash.as_str()) {
+                continue;
+            }
             let their_version = theirs.tracks.iter().find(|t| t.hash == base_track.hash);
             conflicts.push(ConflictChunk {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -60,6 +77,10 @@ pub fn diff_trees(
                 context: serde_json::to_value(base_track).unwrap_or(serde_json::Value::Null),
             });
         } else if in_ours && !in_theirs {
+            // Skip if theirs replaced this hash via a metadata edit.
+            if their_renames.contains_key(base_track.hash.as_str()) {
+                continue;
+            }
             let our_version = ours.tracks.iter().find(|t| t.hash == base_track.hash);
             conflicts.push(ConflictChunk {
                 id: uuid::Uuid::new_v4().to_string(),

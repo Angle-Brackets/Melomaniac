@@ -23,6 +23,10 @@ pub struct TrackEntry {
     pub mime_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artwork_hash: Option<String>,
+    /// Set when a metadata edit replaces this track's bytes (new hash ← old hash).
+    /// The merge engine uses this to distinguish a metadata rename from a deletion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
     /// Preserves unknown fields added by newer clients so round-trips never strip data.
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,

@@ -314,6 +314,7 @@ async fn patch_single_branch(
     let mut changed = false;
     for entry in tracks.iter_mut() {
         if entry["hash"].as_str() == Some(&old_hash) {
+            entry["replaces"] = serde_json::Value::String(old_hash.clone());
             entry["hash"] = serde_json::Value::String(new_hash.clone());
             changed = true;
         }
@@ -477,8 +478,9 @@ async fn patch_single_branch_bulk(
     // Apply every hash mapping in a single pass.
     let mut changed = false;
     for entry in tracks.iter_mut() {
-        if let Some(h) = entry["hash"].as_str() {
-            if let Some((_, new)) = mappings.iter().find(|(old, _)| old == h) {
+        if let Some(h) = entry["hash"].as_str().map(|s| s.to_string()) {
+            if let Some((old, new)) = mappings.iter().find(|(old, _)| old == &h) {
+                entry["replaces"] = serde_json::Value::String(old.clone());
                 entry["hash"] = serde_json::Value::String(new.clone());
                 changed = true;
             }
