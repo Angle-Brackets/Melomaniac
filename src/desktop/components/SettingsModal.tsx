@@ -100,14 +100,18 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               </div>
             </div>
 
-            {/* Right panel toggle */}
-            <div className="flex items-center justify-between py-2 border-b border-mm-b0">
-              <span className="text-xs text-mm-t1">Show AI & Metrics panel</span>
+            {/* Right panel — always on, not user-togglable */}
+            <div className="flex items-center justify-between py-2 border-b border-mm-b0" title="AI & Metrics panel is always enabled">
+              <div>
+                <span className="text-xs text-mm-t1">Show AI & Metrics panel</span>
+                <span className="text-[10px] text-mm-t2 ml-2 font-mono">always on</span>
+              </div>
               <input
                 type="checkbox"
-                checked={settings.showRightPanel}
-                onChange={e => updateSetting('showRightPanel', e.target.checked)}
-                className="toggle toggle-primary toggle-sm"
+                checked
+                readOnly
+                disabled
+                className="toggle toggle-primary toggle-sm opacity-40"
               />
             </div>
           </section>

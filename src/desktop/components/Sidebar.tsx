@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useStore } from '../../store';
 import type { Playlist } from '../data';
 import {
-  IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoBranch, IcoSync,
-  IcoEditor, IcoDownload, IcoMetrics, IcoSettings, IcoPin, IcoChevron,
+  IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoBranch,
+  IcoEditor, IcoDiscover, IcoSettings, IcoPin, IcoChevron,
 } from '../icons';
 
 // ── Rail icon with tooltip ────────────────────────────────────────────────────
@@ -12,24 +12,26 @@ interface RailIconProps {
   active?: boolean;
   onClick?: () => void;
   title?: string;
+  disabled?: boolean;
 }
 
-function RailIcon({ icon, active = false, onClick, title }: RailIconProps) {
+function RailIcon({ icon, active = false, onClick, title, disabled = false }: RailIconProps) {
   const [hovered, setHovered] = useState(false);
   const [label, sub] = (title ?? '').split(' — ');
   return (
     <div
       className="rail-icon-wrap"
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      style={{ opacity: disabled ? 0.35 : 1, cursor: disabled ? 'default' : undefined }}
     >
       <div style={{
         width: 32, height: 32,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: 6, cursor: 'pointer',
-        color: active ? 'var(--accent-light)' : hovered ? 'var(--text-1)' : 'var(--text-2)',
-        background: active ? 'var(--bg-5)' : hovered ? 'var(--bg-3)' : 'transparent',
+        borderRadius: 6, cursor: disabled ? 'default' : 'pointer',
+        color: active ? 'var(--accent-light)' : hovered && !disabled ? 'var(--text-1)' : 'var(--text-2)',
+        background: active ? 'var(--bg-5)' : hovered && !disabled ? 'var(--bg-3)' : 'transparent',
         transition: 'all 0.14s',
       }}>
         {icon}
@@ -38,6 +40,7 @@ function RailIcon({ icon, active = false, onClick, title }: RailIconProps) {
         <div className="rail-tooltip">
           <span style={{ color: 'var(--text-0)', fontWeight: 600 }}>{label}</span>
           {sub && <span style={{ color: 'var(--text-2)', fontSize: 10, display: 'block', marginTop: 1 }}>{sub}</span>}
+          {disabled && <span style={{ color: 'var(--text-3)', fontSize: 10, display: 'block', marginTop: 1 }}>Coming soon</span>}
         </div>
       )}
     </div>
@@ -385,17 +388,15 @@ export default function LibrarySidebar({
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', padding: '8px 0', gap: 4, flexShrink: 0,
       }}>
-        <RailIcon icon={<IcoMenu size={14} />}     title={expanded ? 'Collapse sidebar' : 'Expand sidebar'} onClick={onToggleExpanded} />
+        <RailIcon icon={<IcoMenu size={14} />}      title={expanded ? 'Collapse sidebar' : 'Expand sidebar'} onClick={onToggleExpanded} />
         <RailIcon icon={<IcoLibrary size={14} />}   active={activeRailItem === 'playlists'} onClick={() => onRailChange('playlists')} title="Playlists — browse playlists & tracks" />
         <RailIcon icon={<IcoMusicLib size={14} />}  active={activeRailItem === 'library'}   onClick={() => onRailChange('library')}   title="Library — all tracks on this machine" />
-        <RailIcon icon={<IcoHistory size={14} />}  active={activeRailItem === 'history'} onClick={() => onRailChange('history')} title="Listening History — play log & skip stats" />
-        <RailIcon icon={<IcoBranch size={14} />}    active={activeRailItem === 'melo'}    onClick={() => onRailChange('melo')}    title="Commit Graph — playlist version history" />
-        <RailIcon icon={<IcoSync size={14} />}     active={activeRailItem === 'sync'}    onClick={() => onRailChange('sync')}    title="Sync — push/pull with upstream remote" />
-        <RailIcon icon={<IcoEditor size={14} />}   active={activeRailItem === 'editor'}  onClick={() => onRailChange('editor')} title="Editor — modify track metadata & MP3 tags" />
+        <RailIcon icon={<IcoHistory size={14} />}   active={activeRailItem === 'history'}   onClick={() => onRailChange('history')}   title="Listening History — play log & skip stats" />
+        <RailIcon icon={<IcoBranch size={14} />}    active={activeRailItem === 'melo'}      onClick={() => onRailChange('melo')}      title="Commit Graph — playlist version history" />
+        <RailIcon icon={<IcoEditor size={14} />}    active={activeRailItem === 'editor'}    onClick={() => onRailChange('editor')}    title="Editor — modify track metadata & MP3 tags" />
+        <RailIcon icon={<IcoDiscover size={14} />}  disabled title="Discover — AI-powered music discovery" />
         <div style={{ flex: 1 }} />
-        <RailIcon icon={<IcoDownload size={14} />} active={activeRailItem === 'import'}  onClick={() => onRailChange('import')}  title="Import" />
-        <RailIcon icon={<IcoMetrics size={14} />}  active={activeRailItem === 'metrics'} onClick={() => onRailChange('metrics')} title="Metrics" />
-        <RailIcon icon={<IcoSettings size={14} />} active={activeRailItem === 'settings'} onClick={onOpenSettings} title="Settings" />
+        <RailIcon icon={<IcoSettings size={14} />}  active={activeRailItem === 'settings'}  onClick={onOpenSettings} title="Settings" />
       </div>
 
       {/* Library tree */}

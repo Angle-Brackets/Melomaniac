@@ -27,6 +27,7 @@ export {
   FiX           as IcoClose,
   FiArrowUp     as IcoPush,
   FiList        as IcoQueue,
+  FiCompass     as IcoDiscover,
 } from 'react-icons/fi';
 
 // Pin — thumbtack shape, no Feather equivalent
