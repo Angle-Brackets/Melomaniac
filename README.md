@@ -17,6 +17,21 @@ A local-first, cross-platform music player with **git-style playlist versioning*
 
 ---
 
+## Installation
+
+Download the latest installer for your platform from the [Releases](https://github.com/Angle-Brackets/Melomaniac/releases) page.
+
+| Platform | Installer |
+|---|---|
+| macOS | `.dmg` (universal — Intel + Apple Silicon) |
+| Linux | `.deb` (Debian/Ubuntu) · `.AppImage` (portable) |
+| Windows | `.msi` · `.exe` (NSIS) |
+| iOS | Build from source (see [Development](#development)) |
+
+macOS: if you see "unidentified developer", right-click → Open the first time (Gatekeeper bypass for unsigned apps).
+
+---
+
 ## Features
 
 ### Playback
