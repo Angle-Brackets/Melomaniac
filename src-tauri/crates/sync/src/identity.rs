@@ -152,6 +152,7 @@ impl NodeIdentity {
 /// Persisted as `{app_data_dir}/known_devices.json` (pretty-printed JSON).
 /// A companion signature file `known_devices.json.sig` is written on every
 /// save so callers can detect tampered files.
+#[derive(Clone)]
 pub struct TrustList {
     devices: Vec<KnownDevice>,
     path: std::path::PathBuf,
