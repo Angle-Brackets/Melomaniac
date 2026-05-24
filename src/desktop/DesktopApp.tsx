@@ -122,6 +122,7 @@ export default function DesktopApp(): JSX.Element {
   const openPairingDisplay = useStore(s => s.openPairingDisplay);
   const syncToast          = useStore(s => s.syncToast);
   const refreshLivePeers   = useStore(s => s.refreshLivePeers);
+  const loadPlaylists      = useStore(s => s.loadPlaylists);
   const artworkVersion     = useStore(s => s.artworkVersion);
   const syncVersion        = useStore(s => s.syncVersion);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
@@ -270,9 +271,11 @@ export default function DesktopApp(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Background peer poll — drives auto-sync when a known device comes online
+  // Background peer poll — drives auto-sync when a known device comes online.
+  // Populate the Zustand playlists store first so triggerAutoSync has local
+  // state to compare against before the first poll fires.
   useEffect(() => {
-    refreshLivePeers()
+    loadPlaylists().then(() => refreshLivePeers())
     const id = setInterval(refreshLivePeers, 15_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps

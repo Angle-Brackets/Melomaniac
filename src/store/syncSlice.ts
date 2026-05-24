@@ -83,6 +83,12 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     invoke<PlaylistManifest[]>('sync_fetch_peer_manifest', { publicKeyB64: peer.public_key_b64 })
       .then(async manifest => {
         const { playlists } = get()
+
+        // Guard: if the local store hasn't loaded yet, skip this poll entirely.
+        // Do NOT update lastSeenHeads — if we do, the next poll will think
+        // nothing changed even though we never actually compared against local state.
+        if (playlists.length === 0) return
+
         const localIds = new Set(playlists.map(p => p.id))
         const peerLastSeen = lastSeenHeads.get(peer.public_key_b64) ?? new Map<string, string>()
 
@@ -96,9 +102,6 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         }
         lastSeenHeads.set(peer.public_key_b64, newLastSeen)
 
-        console.log(`[sync] manifest from ${peer.display_name}: ${manifest.length} playlist(s), localIds=${[...localIds].map(id=>id.slice(0,8))}`)
-        manifest.forEach(e => console.log(`[sync]   peer playlist=${e.id.slice(0,8)} name="${e.name}" branches=[${e.branches.map(b=>`${b.name}:${b.head_commit?.slice(0,7)??'none'}`)}] localMatch=${localIds.has(e.id)}`))
-
         // Find playlists that exist locally and have at least one changed branch.
         const toSync: Array<{ id: string; branchNames: string[] }> = []
         for (const entry of manifest) {
@@ -110,12 +113,10 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
             .filter(b => b.head_commit && localBranches.has(b.name))
             .filter(b => peerLastSeen.get(`${entry.id}:${b.name}`) !== b.head_commit)
             .map(b => b.name)
-          console.log(`[sync] ${peer.display_name} playlist=${entry.id.slice(0,8)} localBranches=[${[...localBranches]}] changedBranches=[${changedBranches}]`)
           if (changedBranches.length > 0) toSync.push({ id: entry.id, branchNames: changedBranches })
         }
 
         if (toSync.length === 0) {
-          console.log(`[sync] ${peer.display_name}: no changed branches, skipping`)
           // No structural changes. Still refresh metadata (album edits, artwork
           // set after tracks were added) so they propagate without a new commit.
           const sharedIds = manifest.filter(e => localIds.has(e.id)).map(e => e.id)
@@ -136,20 +137,16 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         let conflicted = 0
         for (const { id, branchNames } of toSync) {
           try {
-            console.log(`[sync] syncing playlist=${id.slice(0,8)} branches=${branchNames} from ${peer.display_name}`)
             const report: SyncReport = branchNames.length === 1
               ? await invoke('sync_playlist', { playlistId: id, branchName: branchNames[0], publicKeyB64: peer.public_key_b64 })
               : await invoke('sync_playlist_branches', { playlistId: id, branchNames, publicKeyB64: peer.public_key_b64 })
-            console.log(`[sync] result: blobs=${report.blobs_fetched} conflicts=${report.conflicts.length}`)
             if (report.conflicts.length > 0) {
               get().openDiffViewer(id, report.conflicts)
               conflicted++
             } else {
               synced++
             }
-          } catch (e) {
-            console.error(`[sync] sync_playlist failed for ${id.slice(0,8)}:`, e)
-          }
+          } catch { /* peer went offline mid-sync */ }
         }
 
         if (synced > 0 || conflicted > 0) {
@@ -162,7 +159,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
           }
         }
       })
-      .catch((e) => console.error(`[sync] manifest fetch failed for ${peer.display_name}:`, e))
+      .catch(() => {})
       .finally(() => syncingPeers.delete(peer.public_key_b64))
   }
 
