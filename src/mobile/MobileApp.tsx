@@ -81,8 +81,11 @@ export default function MobileApp() {
   // ── Background peer poll — drives auto-sync when a known device comes online ──
   useEffect(() => {
     refreshLivePeers()
+    // Second poll after 4 s catches mDNS re-discovery lag after app resume —
+    // NWBrowser can take a few seconds to re-find peers on the local network.
+    const earlyId = setTimeout(refreshLivePeers, 4_000)
     const id = setInterval(refreshLivePeers, 15_000)
-    return () => clearInterval(id)
+    return () => { clearTimeout(earlyId); clearInterval(id) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

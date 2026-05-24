@@ -234,6 +234,7 @@ pub fn run() {
             editor::file_scan_directory,
             editor::library_read_metadata,
             editor::library_edit_track,
+            editor::library_edit_tracks_bulk,
             editor::library_set_artwork,
             editor::library_set_artwork_for_tracks,
             editor::library_replace_artwork,

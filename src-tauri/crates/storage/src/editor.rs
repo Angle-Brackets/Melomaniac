@@ -195,7 +195,12 @@ pub async fn set_artwork_for_track_list(
         let title = db.get_track(&hashes[0]).await?.map(|t| t.title).unwrap_or_default();
         format!("Update artwork: {title}")
     } else {
-        format!("Update artwork: {} tracks", hashes.len())
+        let mut titles = Vec::with_capacity(hashes.len());
+        for h in &hashes {
+            let title = db.get_track(h).await?.map(|t| t.title).unwrap_or_default();
+            titles.push(format!("• {title}"));
+        }
+        format!("Update artwork: {} tracks\n{}", hashes.len(), titles.join("\n"))
     };
     commit_branches_for_artwork(&hashes, &msg, cas, db).await?;
     Ok((artwork_hash, hashes))
@@ -212,7 +217,17 @@ pub async fn replace_cas_artwork(
     let affected = db.get_track_hashes_by_artwork(old_artwork_hash).await?;
     let new_hash = cas.write_blob(&image_bytes).await?;
     db.replace_artwork_hash(old_artwork_hash, &new_hash).await?;
-    let msg = format!("Replace artwork: {} track{}", affected.len(), if affected.len() == 1 { "" } else { "s" });
+    let msg = if affected.len() == 1 {
+        let title = db.get_track(&affected[0]).await?.map(|t| t.title).unwrap_or_default();
+        format!("Replace artwork: {title}")
+    } else {
+        let mut titles = Vec::with_capacity(affected.len());
+        for h in &affected {
+            let title = db.get_track(h).await?.map(|t| t.title).unwrap_or_default();
+            titles.push(format!("• {title}"));
+        }
+        format!("Replace artwork: {} tracks\n{}", affected.len(), titles.join("\n"))
+    };
     commit_branches_for_artwork(&affected, &msg, cas, db).await?;
     Ok((new_hash, affected))
 }
@@ -313,6 +328,170 @@ async fn patch_single_branch(
     let new_tree_hash  = cas.write_blob(&new_tree_bytes).await?;
 
     // Build and store a new commit
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let commit_body = serde_json::json!({
+        "tree_hash": &new_tree_hash,
+        "parent":    &head_commit,
+        "timestamp": timestamp,
+        "device_id": "melomaniac-editor",
+        "message":   &commit_msg,
+    }).to_string();
+
+    let new_commit_hash = cas.write_blob(commit_body.as_bytes()).await?;
+
+    let record = CommitRecord {
+        hash:      new_commit_hash.clone(),
+        tree_hash: new_tree_hash,
+        timestamp,
+        device_id: "melomaniac-editor".to_string(),
+        message:   Some(commit_msg),
+    };
+    db.insert_commit(&record, &[head_commit.as_str()]).await?;
+
+    Ok(Some(BranchHeadUpdate { branch_id, new_commit_hash }))
+}
+
+// ── Bulk metadata edit ────────────────────────────────────────────────────────
+
+/// Edit multiple library tracks in one operation.
+///
+/// All hash swaps are patched into each affected branch in a single pass and
+/// a single commit is created per branch, keeping history clean regardless of
+/// how many tracks are edited at once.
+///
+/// Returns a vec of `(old_hash, new_hash)` pairs for all tracks whose bytes
+/// actually changed (unchanged tracks are omitted).
+pub async fn edit_cas_tracks_bulk(
+    edits: &[(String, AudioMetadata)],
+    cas:   &Arc<CasStore>,
+    db:    &Arc<Database>,
+) -> Result<Vec<(String, String)>, StorageError> {
+    // Phase 1 — rewrite each blob, update DB row.
+    struct Mapping { old: String, new: String, title: String }
+    let mut mappings: Vec<Mapping> = Vec::new();
+
+    for (old_hash, metadata) in edits {
+        let track = db.get_track(old_hash).await?
+            .ok_or_else(|| StorageError::BlobNotFound(old_hash.clone()))?;
+        let ext      = mime_to_ext(track.mime_type.as_deref().unwrap_or("audio/mpeg")).to_string();
+        let original = cas.read_blob(old_hash).await?;
+        let new_bytes = apply_metadata_to_bytes(original, ext, metadata.clone()).await?;
+        let new_hash  = CasStore::hash(&new_bytes);
+        if new_hash == *old_hash { continue; }
+
+        cas.write_blob(&new_bytes).await?;
+        db.update_track_hash_and_metadata(
+            old_hash, &new_hash,
+            metadata.title.as_deref().unwrap_or(&track.title),
+            metadata.artist.as_deref().unwrap_or(&track.artist),
+            metadata.album.as_deref().or(track.album.as_deref()),
+        ).await?;
+
+        let title = metadata.title.clone().unwrap_or_else(|| track.title.clone());
+        mappings.push(Mapping { old: old_hash.clone(), new: new_hash, title });
+    }
+
+    if mappings.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Phase 2 — patch every affected branch once with all hash swaps.
+    let commit_msg = if mappings.len() == 1 {
+        format!("Edit metadata: {}", mappings[0].title)
+    } else {
+        let bullets = mappings.iter().map(|m| format!("• {}", m.title)).collect::<Vec<_>>().join("\n");
+        format!("Edit metadata: {} tracks\n{}", mappings.len(), bullets)
+    };
+
+    let pairs: Vec<(String, String)> = mappings.iter().map(|m| (m.old.clone(), m.new.clone())).collect();
+    patch_trees_bulk_parallel(&pairs, &commit_msg, cas, db).await?;
+
+    Ok(pairs)
+}
+
+async fn patch_trees_bulk_parallel(
+    mappings:   &[(String, String)],
+    commit_msg: &str,
+    cas:        &Arc<CasStore>,
+    db:         &Arc<Database>,
+) -> Result<(), StorageError> {
+    let branches = db.get_all_branches_with_heads().await?;
+
+    let mut set = tokio::task::JoinSet::new();
+    for (branch_id, head_commit) in branches {
+        let mappings   = mappings.to_vec();
+        let msg        = commit_msg.to_string();
+        let cas        = Arc::clone(cas);
+        let db         = Arc::clone(db);
+        set.spawn(async move {
+            patch_single_branch_bulk(branch_id, head_commit, mappings, msg, cas, db).await
+        });
+    }
+
+    let mut updates: Vec<BranchHeadUpdate> = Vec::new();
+    while let Some(result) = set.join_next().await {
+        match result {
+            Ok(Ok(Some(u))) => updates.push(u),
+            Ok(Ok(None))    => {}
+            Ok(Err(e))      => eprintln!("[editor] bulk branch patch error: {e}"),
+            Err(e)          => eprintln!("[editor] bulk branch task error: {e}"),
+        }
+    }
+
+    if !updates.is_empty() {
+        let pairs: Vec<(String, String)> = updates
+            .into_iter()
+            .map(|u| (u.branch_id, u.new_commit_hash))
+            .collect();
+        db.batch_update_branch_heads(&pairs).await?;
+    }
+
+    Ok(())
+}
+
+async fn patch_single_branch_bulk(
+    branch_id:  String,
+    head_commit: String,
+    mappings:   Vec<(String, String)>,
+    commit_msg: String,
+    cas:        Arc<CasStore>,
+    db:         Arc<Database>,
+) -> Result<Option<BranchHeadUpdate>, StorageError> {
+    let commit = match db.get_commit(&head_commit).await? {
+        Some(c) => c,
+        None    => return Ok(None),
+    };
+
+    let tree_bytes = cas.read_blob(&commit.tree_hash).await?;
+    let mut tree: serde_json::Value = serde_json::from_slice(&tree_bytes)?;
+
+    let tracks = match tree["tracks"].as_array_mut() {
+        Some(t) => t,
+        None    => return Ok(None),
+    };
+
+    // Apply every hash mapping in a single pass.
+    let mut changed = false;
+    for entry in tracks.iter_mut() {
+        if let Some(h) = entry["hash"].as_str() {
+            if let Some((_, new)) = mappings.iter().find(|(old, _)| old == h) {
+                entry["hash"] = serde_json::Value::String(new.clone());
+                changed = true;
+            }
+        }
+    }
+
+    if !changed {
+        return Ok(None);
+    }
+
+    let new_tree_bytes  = serde_json::to_vec(&tree)?;
+    let new_tree_hash   = cas.write_blob(&new_tree_bytes).await?;
+
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use melomaniac_storage::{
     editor::{read_metadata, scan_directory, write_metadata_to_file, edit_cas_track},
     read_cas_metadata, set_cas_artwork, replace_cas_artwork, set_artwork_for_track_list,
-    file_set_artwork as storage_file_set_artwork,
+    file_set_artwork as storage_file_set_artwork, edit_cas_tracks_bulk,
     AudioMetadata, FileEntry,
 };
 
@@ -120,6 +120,23 @@ pub async fn library_edit_track(
     storage:  State<'_, StorageState>,
 ) -> Result<String, String> {
     edit_cas_track(&hash, &metadata, &storage.cas, &storage.db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Edit multiple CAS library tracks in one operation.
+///
+/// All hash swaps are patched into each affected branch in a single pass,
+/// producing one commit per branch regardless of how many tracks changed.
+/// The commit message lists every modified track as a bullet.
+///
+/// Returns a vec of `(old_hash, new_hash)` for tracks whose bytes changed.
+#[tauri::command]
+pub async fn library_edit_tracks_bulk(
+    edits:   Vec<(String, AudioMetadata)>,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<(String, String)>, String> {
+    edit_cas_tracks_bulk(&edits, &storage.cas, &storage.db)
         .await
         .map_err(|e| e.to_string())
 }
