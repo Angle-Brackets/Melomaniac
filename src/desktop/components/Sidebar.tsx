@@ -3,7 +3,7 @@ import { useStore } from '../../store';
 import type { Playlist } from '../data';
 import {
   IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoBranch,
-  IcoEditor, IcoDiscover, IcoSettings, IcoPin, IcoChevron,
+  IcoEditor, IcoSettings, IcoPin, IcoChevron, IcoDiscover,
 } from '../icons';
 
 // ── Rail icon with tooltip ────────────────────────────────────────────────────
@@ -394,7 +394,7 @@ export default function LibrarySidebar({
         <RailIcon icon={<IcoHistory size={14} />}   active={activeRailItem === 'history'}   onClick={() => onRailChange('history')}   title="Listening History — play log & skip stats" />
         <RailIcon icon={<IcoBranch size={14} />}    active={activeRailItem === 'melo'}      onClick={() => onRailChange('melo')}      title="Commit Graph — playlist version history" />
         <RailIcon icon={<IcoEditor size={14} />}    active={activeRailItem === 'editor'}    onClick={() => onRailChange('editor')}    title="Editor — modify track metadata & MP3 tags" />
-        <RailIcon icon={<IcoDiscover size={14} />}  disabled title="Discover — AI-powered music discovery" />
+        <RailIcon icon={<IcoDiscover size={17} />}  disabled title="Discover — AI-powered music discovery" />
         <div style={{ flex: 1 }} />
         <RailIcon icon={<IcoSettings size={14} />}  active={activeRailItem === 'settings'}  onClick={onOpenSettings} title="Settings" />
       </div>
