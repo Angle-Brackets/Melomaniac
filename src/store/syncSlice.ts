@@ -263,7 +263,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
 
   submitScannedQr: async (payload) => {
     await invoke('sync_accept_qr_pairing', { payload })
-    await get().refreshKnownDevices()
+    await Promise.all([get().refreshKnownDevices(), get().refreshLivePeers()])
     showToast(`Paired with ${payload.display_name}`)
     get().closePairing()
   },

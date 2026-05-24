@@ -24,14 +24,7 @@ use tokio::sync::RwLock;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const SERVICE_TYPE: &str = "_melomaniac._tcp.local.";
-const DEFAULT_PORT: u16 = 7700;
-
-fn sync_port() -> u16 {
-    std::env::var("MELO_SYNC_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(DEFAULT_PORT)
-}
+fn sync_port() -> u16 { crate::sync_port() }
 
 // ── DesktopSyncBridge ─────────────────────────────────────────────────────────
 
@@ -689,6 +682,7 @@ impl SyncBridge for DesktopSyncBridge {
         let server_state = ServerState {
             identity: self.identity.clone(),
             trust_list: self.trust_list.clone(),
+            peers_map: self.peers.clone(),
             db: self.db.clone(),
             cas: self.cas.clone(),
             pending_qr_token: self.pending_qr_token.clone(),
@@ -811,16 +805,35 @@ impl SyncBridge for DesktopSyncBridge {
         VerifyingKey::from_bytes(&key_bytes32).map_err(|_| SyncError::AuthFailed)?;
 
         let device = KnownDevice {
-            public_key_b64: payload.public_key_b64,
-            display_name: payload.display_name,
+            public_key_b64: payload.public_key_b64.clone(),
+            display_name: payload.display_name.clone(),
             added_at: unix_now(),
         };
 
         let identity = Arc::clone(&self.identity);
+        let peers   = Arc::clone(&self.peers);
         block(async {
             let mut tl = self.trust_list.write().await;
-            tl.add(device);
-            tl.save(&identity)
+            tl.add(device.clone());
+            tl.save(&identity)?;
+            drop(tl);
+
+            // Immediately surface the peer so it shows up without waiting for
+            // the next mDNS advertisement cycle.
+            if let Some(addr_str) = &payload.addr {
+                if let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() {
+                    peers.write().await.insert(
+                        device.public_key_b64.clone(),
+                        PeerInfo {
+                            public_key_b64: device.public_key_b64,
+                            display_name:   device.display_name,
+                            addr,
+                            latency_ms: None,
+                        },
+                    );
+                }
+            }
+            Ok(())
         })
     }
 

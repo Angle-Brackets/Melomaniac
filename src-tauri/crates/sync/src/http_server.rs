@@ -1,10 +1,11 @@
 use crate::{
-    KnownDevice, NodeIdentity, PlaylistManifest, TrackSyncRecord,
+    KnownDevice, NodeIdentity, PeerInfo, PlaylistManifest, TrackSyncRecord,
     identity::{TrustList, unix_now},
+    sync_port,
 };
 use axum::{
     Router,
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     extract::Json,
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
@@ -12,7 +13,7 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use melomaniac_storage::{CommitRecord, Database, CasStore};
-use std::sync::Arc;
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::RwLock;
 
 // ── ServerState ───────────────────────────────────────────────────────────────
@@ -21,6 +22,7 @@ use tokio::sync::RwLock;
 pub(crate) struct ServerState {
     pub(crate) identity:          Arc<NodeIdentity>,
     pub(crate) trust_list:        Arc<RwLock<TrustList>>,
+    pub(crate) peers_map:         Arc<RwLock<HashMap<String, PeerInfo>>>,
     pub(crate) db:                Arc<Database>,
     pub(crate) cas:               Arc<CasStore>,
     /// Token stored when we generate a QR code; the scanning device POSTs it
@@ -251,6 +253,7 @@ pub(crate) struct PairRequest {
 }
 
 pub(crate) async fn handle_pair(
+    ConnectInfo(remote_addr): ConnectInfo<SocketAddr>,
     State(state): State<ServerState>,
     Json(req): Json<PairRequest>,
 ) -> StatusCode {
@@ -278,7 +281,7 @@ pub(crate) async fn handle_pair(
     *state.pending_qr_token.lock().unwrap() = None;
 
     let device = KnownDevice {
-        public_key_b64: req.public_key_b64,
+        public_key_b64: req.public_key_b64.clone(),
         display_name: req.display_name.clone(),
         added_at: unix_now(),
     };
@@ -286,12 +289,29 @@ pub(crate) async fn handle_pair(
     let mut tl = state.trust_list.write().await;
     tl.add(device);
     tl.save(&state.identity).unwrap_or_else(|e| eprintln!("[sync] /pair: save error: {e}"));
+    drop(tl);
+
+    // Immediately surface the newly paired device as a live peer so it appears
+    // in the UI without waiting for the next mDNS advertisement cycle.
+    // The requester's sync server runs on the same IP as this HTTP connection,
+    // on the well-known sync port.
+    let peer_addr = SocketAddr::new(remote_addr.ip(), sync_port());
+    state.peers_map.write().await.insert(
+        req.public_key_b64.clone(),
+        PeerInfo {
+            public_key_b64: req.public_key_b64,
+            display_name: req.display_name,
+            addr: peer_addr,
+            latency_ms: None,
+        },
+    );
+
     StatusCode::OK
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
-pub(crate) fn build_router(state: ServerState) -> Router {
+pub(crate) fn build_router(state: ServerState) -> axum::extract::connect_info::IntoMakeServiceWithConnectInfo<Router, SocketAddr> {
     use axum::routing::post;
     use crate::routes as r;
     Router::new()
@@ -303,4 +323,5 @@ pub(crate) fn build_router(state: ServerState) -> Router {
         .route(r::COMMITS, get(handle_commits))
         .route(r::PAIR,    post(handle_pair))
         .with_state(state)
+        .into_make_service_with_connect_info::<SocketAddr>()
 }

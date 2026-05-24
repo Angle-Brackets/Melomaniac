@@ -26,6 +26,15 @@ pub mod routes {
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod desktop;
 
+/// The well-known port the sync HTTP server binds on.
+/// Override with the `MELO_SYNC_PORT` environment variable.
+pub fn sync_port() -> u16 {
+    std::env::var("MELO_SYNC_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(7700)
+}
+
 /// Delete all persisted sync state so the next launch starts completely fresh.
 /// Only compiled in debug builds; call this before `NodeIdentity::load_or_create`.
 #[cfg(debug_assertions)]
