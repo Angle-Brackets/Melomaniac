@@ -87,19 +87,9 @@ fn fast_forward_theirs_additions_no_conflict() {
     assert!(hashes.contains(&"c"));
 }
 
-// ── Test 3: Fast-forward theirs (theirs == base, ours added tracks) ──────────
-//
-// BUG: The auto-merge algorithm only carries forward ours-side additions when
-// theirs also contains them (`their_set.contains()`). When theirs == base,
-// `their_set` == `base_set`, so ours-only new tracks ("x") are silently
-// dropped from the merged output. This is a genuine bug in the implementation;
-// see src-tauri/crates/sync/src/merge.rs lines 118–140.
-// The test is marked #[ignore] rather than deleted so it documents the expected
-// (correct) behaviour and will start passing once the bug is fixed.
+// ── Test 3: Fast-forward ours (theirs == base, ours added tracks) ────────────
 
 #[test]
-#[ignore = "BUG: ours-only additions are dropped when theirs == base — the auto-merge \
-            filter uses `their_set.contains()` instead of `!base_set.contains()` for ours tracks"]
 fn fast_forward_ours_additions_no_conflict() {
     let base_tracks = vec![entry("a"), entry("b")];
     let base   = tree("P", base_tracks.clone());
@@ -117,16 +107,8 @@ fn fast_forward_ours_additions_no_conflict() {
 }
 
 // ── Test 4: True merge additive — both sides added different tracks ───────────
-//
-// BUG: Same root cause as test 3. The auto-merge only appends `their_additions`
-// (tracks in theirs not in base). Our-side additions ("x") are filtered out
-// because the initial `merged_tracks` collection uses `their_set.contains()`,
-// which does not include ours-only new tracks. Marked #[ignore] to document
-// the correct expected behaviour.
 
 #[test]
-#[ignore = "BUG: ours-only additions are dropped in true-merge case — same root cause as \
-            fast_forward_ours_additions_no_conflict; see merge.rs lines 118–140"]
 fn true_merge_additive_no_conflicts() {
     let base   = tree("P", vec![entry("a"), entry("b")]);
     let ours   = tree("P", vec![entry("a"), entry("b"), entry("x")]);

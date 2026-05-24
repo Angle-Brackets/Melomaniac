@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use melomaniac_storage::{
     ArtworkLibraryEntry, BranchRecord, CasStore, CommitRecord, Database, Indexer,
-    PlaylistMeta, PlaylistRecord, TrackRecord, TreeBlob,
+    PlaylistMeta, PlaylistRecord, TrackRecord, TrackStats, TreeBlob,
 };
 use serde::Serialize;
 use tauri::State;
@@ -1308,6 +1308,49 @@ pub async fn dev_seed_dev_playlist(
     ).await?;
 
     Ok(())
+}
+
+// ── Play / skip stat commands ─────────────────────────────────────────────────
+
+/// Record that the currently-loaded track played to (or near) completion.
+/// Called fire-and-forget from the frontend on the `TrackEnded` audio event.
+#[tauri::command]
+pub async fn track_record_play(
+    hash:        String,
+    duration_ms: Option<i64>,
+    storage:     State<'_, StorageState>,
+) -> Result<(), String> {
+    storage.db.record_play(&hash, duration_ms).await.map_err(|e| e.to_string())
+}
+
+/// Record that the user skipped a track at `position_ms` milliseconds in.
+/// Called fire-and-forget from the frontend when skip-next or skip-prev fires.
+#[tauri::command]
+pub async fn track_record_skip(
+    hash:        String,
+    position_ms: i64,
+    storage:     State<'_, StorageState>,
+) -> Result<(), String> {
+    storage.db.record_skip(&hash, position_ms).await.map_err(|e| e.to_string())
+}
+
+/// Return aggregate play/skip stats for a single track by hash.
+#[tauri::command]
+pub async fn track_get_stats(
+    hash:    String,
+    storage: State<'_, StorageState>,
+) -> Result<TrackStats, String> {
+    storage.db.get_track_stats(&hash).await.map_err(|e| e.to_string())
+}
+
+/// Return the top `limit` tracks ordered by play count, with their stats.
+/// Returns a list of [hash, TrackStats] pairs serialised as JSON arrays.
+#[tauri::command]
+pub async fn library_get_top_tracks(
+    limit:   usize,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<(String, TrackStats)>, String> {
+    storage.db.get_top_tracks(limit as i64).await.map_err(|e| e.to_string())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

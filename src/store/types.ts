@@ -118,6 +118,12 @@ export type QrPayload = {
   exp:            number  // Unix timestamp seconds
 }
 
+export type TrackStats = {
+  play_count:      number
+  skip_count:      number
+  total_listen_ms: number
+}
+
 export type BranchInfo = {
   name:         string
   track_count:  number

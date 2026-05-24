@@ -264,6 +264,10 @@ pub fn run() {
             storage::get_commit_author,
             storage::set_commit_author,
             storage::library_get_storage_bytes,
+            storage::track_record_play,
+            storage::track_record_skip,
+            storage::track_get_stats,
+            storage::library_get_top_tracks,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,
             sync::sync_get_peers,

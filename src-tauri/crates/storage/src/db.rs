@@ -759,6 +759,94 @@ impl Database {
         }).sum();
         Ok(total)
     }
+
+    // ── Play / skip stats ─────────────────────────────────────────────────────
+
+    /// Record that a track was played to completion (or near completion).
+    /// `duration_ms` is how long the user actually listened (usually the
+    /// full track duration, but callers may pass the position at stop time).
+    pub async fn record_play(&self, hash: &str, duration_ms: Option<i64>) -> Result<(), StorageError> {
+        let now = unix_now();
+        sqlx::query(
+            "INSERT INTO plays (hash, played_at, duration_ms) VALUES (?, ?, ?)"
+        )
+        .bind(hash).bind(now).bind(duration_ms)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Record that the user skipped away from a track at `position_ms`.
+    pub async fn record_skip(&self, hash: &str, position_ms: i64) -> Result<(), StorageError> {
+        let now = unix_now();
+        sqlx::query(
+            "INSERT INTO skips (hash, skipped_at, position_ms) VALUES (?, ?, ?)"
+        )
+        .bind(hash).bind(now).bind(position_ms)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Return play/skip aggregate stats for a single track.
+    pub async fn get_track_stats(&self, hash: &str) -> Result<TrackStats, StorageError> {
+        let play_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM plays WHERE hash = ?"
+        )
+        .bind(hash).fetch_one(&self.pool).await?;
+
+        let skip_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM skips WHERE hash = ?"
+        )
+        .bind(hash).fetch_one(&self.pool).await?;
+
+        let total_listen_ms: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(duration_ms), 0) FROM plays WHERE hash = ? AND duration_ms IS NOT NULL"
+        )
+        .bind(hash).fetch_one(&self.pool).await?;
+
+        Ok(TrackStats { play_count, skip_count, total_listen_ms })
+    }
+
+    /// Return the top `limit` tracks ordered by play count descending.
+    /// Returns (track_hash, TrackStats) pairs.
+    pub async fn get_top_tracks(&self, limit: i64) -> Result<Vec<(String, TrackStats)>, StorageError> {
+        // A single query with sub-selects avoids N+1 stats lookups.
+        let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+            "SELECT t.hash,
+                    COALESCE(p.play_count,       0) AS play_count,
+                    COALESCE(s.skip_count,       0) AS skip_count,
+                    COALESCE(p.total_listen_ms,  0) AS total_listen_ms
+             FROM tracks t
+             LEFT JOIN (
+                 SELECT hash,
+                        COUNT(*)                      AS play_count,
+                        SUM(COALESCE(duration_ms, 0)) AS total_listen_ms
+                 FROM plays
+                 GROUP BY hash
+             ) p ON p.hash = t.hash
+             LEFT JOIN (
+                 SELECT hash, COUNT(*) AS skip_count
+                 FROM skips
+                 GROUP BY hash
+             ) s ON s.hash = t.hash
+             WHERE COALESCE(p.play_count, 0) > 0
+             ORDER BY play_count DESC
+             LIMIT ?"
+        )
+        .bind(limit).fetch_all(&self.pool).await?;
+
+        Ok(rows.into_iter().map(|(hash, play_count, skip_count, total_listen_ms)| {
+            (hash, TrackStats { play_count, skip_count, total_listen_ms })
+        }).collect())
+    }
+}
+
+// ── TrackStats ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TrackStats {
+    pub play_count:      i64,
+    pub skip_count:      i64,
+    pub total_listen_ms: i64,
 }
 
 // ── Artwork library entry ─────────────────────────────────────────────────────

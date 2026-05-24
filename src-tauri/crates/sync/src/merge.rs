@@ -115,13 +115,8 @@ pub fn diff_trees(
     // ── Auto-merge ────────────────────────────────────────────────────────────
     let base_set: std::collections::HashSet<&str> = base_hashes.iter().copied().collect();
 
-    let mut merged_tracks: Vec<melomaniac_storage::TrackEntry> = ours
-        .tracks
-        .iter()
-        .filter(|t| base_set.contains(t.hash.as_str()) || their_set.contains(t.hash.as_str()))
-        .cloned()
-        .collect();
-
+    // Start from all of ours; retain removes tracks that theirs deleted (in base but gone from theirs).
+    let mut merged_tracks: Vec<melomaniac_storage::TrackEntry> = ours.tracks.clone();
     merged_tracks.retain(|t| {
         !base_set.contains(t.hash.as_str()) || their_set.contains(t.hash.as_str())
     });

@@ -7,6 +7,7 @@ import type { TabId } from './common';
 import { applyTheme, writeCustomHue, NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
 import { useStore } from '../../store';
+import type { TrackStats, TrackRecord } from '../../store/types';
 
 const SETTINGS_KEY = 'melomaniac.settings';
 
@@ -117,6 +118,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const authorInputRef = useRef<HTMLInputElement>(null);
   const [stats, setStats]         = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
   const [storageBytes, setStorageBytes] = useState<number | null>(null);
+  const [topTracks, setTopTracks] = useState<Array<{ hash: string; stats: TrackStats; track: TrackRecord | null }>>([]);
 
   // Apply persisted theme once on mount
   useEffect(() => {
@@ -144,6 +146,21 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   // Storage size — read once on mount
   useEffect(() => {
     invoke<number>('library_get_storage_bytes').then(setStorageBytes).catch(() => {});
+  }, []);
+
+  // Top tracks — loaded once on mount
+  useEffect(() => {
+    Promise.all([
+      invoke<[string, TrackStats][]>('library_get_top_tracks', { limit: 10 }),
+      invoke<TrackRecord[]>('library_get_all'),
+    ]).then(([pairs, allTracks]) => {
+      const trackMap = new Map<string, TrackRecord>(allTracks.map(t => [t.hash, t]));
+      setTopTracks(pairs.map(([hash, trackStats]) => ({
+        hash,
+        stats: trackStats,
+        track: trackMap.get(hash) ?? null,
+      })));
+    }).catch(() => {});
   }, []);
 
   // Focus author input when entering edit mode
@@ -336,6 +353,46 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           <Row title="Streaming quality" detail="N/A" chev={false} muted/>
           <Row title="Crossfade" detail="N/A" chev={false} isLast muted/>
         </SettingsGroup>
+
+        {/* Top Tracks */}
+        {topTracks.length > 0 && (
+          <SettingsGroup label="Most Played">
+            {topTracks.map(({ hash, stats: trackStats, track }, idx) => (
+              <div
+                key={hash}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 14px',
+                  borderBottom: idx < topTracks.length - 1 ? '0.5px solid var(--border-0)' : 'none',
+                }}
+              >
+                <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', width: 18, textAlign: 'right', flexShrink: 0 }}>
+                  {idx + 1}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {track?.title ?? hash.slice(0, 10) + '…'}
+                  </div>
+                  {track?.artist && (
+                    <div style={{ fontSize: 11, color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {track.artist}
+                    </div>
+                  )}
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 12, color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {trackStats.play_count}×
+                  </div>
+                  {trackStats.skip_count > 0 && (
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace' }}>
+                      {trackStats.skip_count} skip{trackStats.skip_count !== 1 ? 's' : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </SettingsGroup>
+        )}
 
         {/* Developer */}
         <SettingsGroup label="Developer">

@@ -37,6 +37,7 @@ import { useAnimatedMount } from './hooks/useAnimatedMount';
 import { DiffViewer } from '../components/DiffViewer';
 import { PairingModal } from '../components/PairingModal';
 import { PeerPlaylistsModal } from '../components/PeerPlaylistsModal';
+import StatsView from './components/StatsView';
 import { useStore } from '../store';
 
 export type { AppSettings };
@@ -474,6 +475,11 @@ export default function DesktopApp(): JSX.Element {
         setPositionMs(0);
         const { loopMode: lm, loadedHash: lh, abA: a, durationMs: dur } = sr.current;
 
+        // Record natural play completion (fire-and-forget)
+        if (lh && dur > 0) {
+          invoke('track_record_play', { hash: lh, durationMs: dur }).catch(console.error);
+        }
+
         if (lm === 'one') {
           if (lh) invoke('track_play', { hash: lh }).catch(console.error);
           setIsPlaying(true);
@@ -866,6 +872,10 @@ export default function DesktopApp(): JSX.Element {
   };
 
   const handleSkipNext = () => {
+    // Record skip if a track is loaded and has played for at least 1 s (fire-and-forget)
+    if (loadedHash && livePositionMsRef.current > 1000) {
+      invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
+    }
     // Manual queue takes priority
     if (manualQueue.length > 0) {
       const [next, ...rest] = manualQueue;
@@ -896,6 +906,11 @@ export default function DesktopApp(): JSX.Element {
   skipNextRef.current = handleSkipNext;
 
   const handleSkipPrev = () => {
+    // Record skip if we're genuinely moving to the previous track (position <= 3 s)
+    // When position > 3 s the track restarts (not a true skip), so we don't record.
+    if (loadedHash && livePositionMsRef.current > 1000 && livePositionMsRef.current <= 3000) {
+      invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
+    }
     // Restart current track if more than 3 s in — reload is more reliable than seek-to-0
     if (livePositionMsRef.current > 3000 && loadedHash) {
       invoke('track_play', { hash: loadedHash }).catch(console.error);
@@ -992,7 +1007,9 @@ export default function DesktopApp(): JSX.Element {
 
           {/* Center column */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-2)' }}>
-            {railItem === 'library' ? (
+            {railItem === 'history' ? (
+              <StatsView />
+            ) : railItem === 'library' ? (
               <LibraryView
                 artworkUrls={artworkUrls}
                 onOpenInEditor={hash => { setEditorTrackId(trackOrder.find(t => t.hash === hash)?.id ?? null); setRailItem('editor'); }}
