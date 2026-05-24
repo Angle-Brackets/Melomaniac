@@ -344,6 +344,8 @@ function BranchPickerSheet({ playlist, activeBranchName, onSelect, onClose, onRe
         title="Branches"
         subtitle={`${playlist.name} · ${playlist.branches.length} branch${playlist.branches.length !== 1 ? 'es' : ''}`}
         height="80%"
+        onClose={onClose}
+        animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
         accessory={
           <button
             onClick={() => setCreating(c => !c)}
@@ -479,7 +481,7 @@ function ForkSheet({ playlist, onClose, onForked }: {
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-      <MMSheet title="Fork Playlist" subtitle={`Fork "${playlist.name}" to a new playlist`} height="52%">
+      <MMSheet title="Fork Playlist" subtitle={`Fork "${playlist.name}" to a new playlist`} height="52%" onClose={onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
             <div style={{ marginBottom: 6 }}>
@@ -579,7 +581,7 @@ function EditSheet({ playlist, currentBranchName, trackHashes, onClose, onSaved,
     return (
       <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
         <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-        <MMSheet title="Delete Playlist" subtitle={playlist.name} height="52%">
+        <MMSheet title="Delete Playlist" subtitle={playlist.name} height="52%" onClose={onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <p style={{ fontSize: 14, color: 'var(--text-1)', lineHeight: 1.5, margin: 0 }}>
               Delete <strong style={{ color: 'var(--text-0)' }}>{playlist.name}</strong>? This cannot be undone.
@@ -623,7 +625,7 @@ function EditSheet({ playlist, currentBranchName, trackHashes, onClose, onSaved,
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-      <MMSheet title="Edit Playlist" subtitle={playlist.name} height="62%">
+      <MMSheet title="Edit Playlist" subtitle={playlist.name} height="62%" onClose={onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
           <div>
@@ -1071,7 +1073,7 @@ function MergeSheet({ playlist, targetBranch, targetTracks, onClose, onMerged }:
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }}/>
-      <MMSheet title={`Merge into ${targetBranch}`} subtitle={`${playlist.branches.length - 1} source branch${playlist.branches.length - 1 !== 1 ? 'es' : ''} · ${strategy}`} height="86%" expandable>
+      <MMSheet title={`Merge into ${targetBranch}`} subtitle={`${playlist.branches.length - 1} source branch${playlist.branches.length - 1 !== 1 ? 'es' : ''} · ${strategy}`} height="86%" expandable onClose={onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
 
           <MField label="From branch">

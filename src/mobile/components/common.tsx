@@ -253,10 +253,10 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
     if (expandable && !expanded && (totalDy < -60 || v < -400)) {
       setDragOffset(0); setExpanded(true); return;
     }
-    if (expandable && expanded && (totalDy > 44 || v > 280)) {
+    if (expandable && expanded && (totalDy > 80 || v > 300)) {
       setDragOffset(0); setExpanded(false); return;
     }
-    if (!expanded && (totalDy > 44 || v > 280)) {
+    if (!expanded && (totalDy > 80 || v > 300)) {
       setDragOffset(0); dismiss(); return;
     }
     setDragOffset(0); // spring back
@@ -280,22 +280,26 @@ export function MMSheet({ title, subtitle, children, height = '72%', accessory, 
       ...animStyle,
       animation: dismissing ? 'mmSheetDown 0.27s ease-in both' : animStyle?.animation,
     }}>
-      {/* drag handle — swipe up to expand, swipe down to collapse/dismiss */}
+      {/* drag handle + header area — the entire header zone is the swipe target so
+          users don't have to hit the tiny pill precisely. Pointer events are attached
+          to the whole header block and the pill serves only as a visual affordance. */}
       <div
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
         onPointerUp={onDragEnd}
         onPointerCancel={onDragEnd}
-        style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 6px', touchAction: 'none' }}
+        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
       >
-        <div style={{ width: 38, height: 4, borderRadius: 2, background: 'var(--border-2)' }}/>
-      </div>
-      <div style={{ padding: '6px 20px 14px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-0)', letterSpacing: -0.2 }}>{title}</div>
-          {subtitle && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>{subtitle}</div>}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 6px' }}>
+          <div style={{ width: 38, height: 4, borderRadius: 2, background: 'var(--border-2)' }}/>
         </div>
-        {accessory}
+        <div style={{ padding: '6px 20px 14px', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-0)', letterSpacing: -0.2 }}>{title}</div>
+            {subtitle && <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>{subtitle}</div>}
+          </div>
+          {accessory}
+        </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '4px 20px 28px' }} className="mm-scroll">
         {children}
