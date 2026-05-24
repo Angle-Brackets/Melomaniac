@@ -525,6 +525,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   };
 
   const handleNext = () => {
+    if (loadedTrackHash && positionMsRef.current > 1000)
+      invoke('track_record_skip', { hash: loadedTrackHash, positionMs: positionMsRef.current }).catch(console.error);
     advance();
     const hash = useStore.getState().currentHash();
     if (!hash) return;
@@ -538,6 +540,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       positionMsRef.current = 0;
       invoke('audio_seek', { positionMs: 0 }).catch(console.error);
     } else {
+      if (loadedTrackHash && positionMsRef.current > 1000)
+        invoke('track_record_skip', { hash: loadedTrackHash, positionMs: positionMsRef.current }).catch(console.error);
       retreat();
       const hash = useStore.getState().currentHash();
       if (!hash) return;

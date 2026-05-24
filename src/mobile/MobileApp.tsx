@@ -111,13 +111,20 @@ export default function MobileApp() {
 
     // ── playNext / playPrev ────────────────────────────────────────────────────
     let lastAdvancedAt = 0;
-    const playNext = () => {
+    // Reset per track so each track gets at most one play record.
+    let hasRecordedPlay = false;
+
+    const playNext = (recordSkip = false) => {
       const now = Date.now();
       // 1500 ms debounce guards against double-fire when TrackEnded and RemoteNextTrack
       // arrive nearly simultaneously (e.g. OS media key pressed right as a track ends).
       if (now - lastAdvancedAt < 1500) return;
       lastAdvancedAt = now;
       const s = useStore.getState();
+      if (recordSkip && positionMsRef.current > 1000) {
+        const lh = s.loadedTrackHash;
+        if (lh) invoke('track_record_skip', { hash: lh, positionMs: positionMsRef.current }).catch(console.error);
+      }
       s.advance();
       const hash = useStore.getState().currentHash();
       if (!hash) { s.setPlaying(false); return; }
@@ -125,12 +132,18 @@ export default function MobileApp() {
       if (!track) { s.setPlaying(false); return; }
       s.setLoaded(track.hash, track.duration_ms);
       positionMsRef.current = 0;
+      hasRecordedPlay = false;
       invoke('track_play', { hash: track.hash }).catch(console.error);
       s.setPlaying(true);
     };
 
     const playPrev = () => {
       const s = useStore.getState();
+      // Record a skip only if genuinely going back (position <= 3 s means back-skip, not restart)
+      if (positionMsRef.current > 1000 && positionMsRef.current <= 3000) {
+        const lh = s.loadedTrackHash;
+        if (lh) invoke('track_record_skip', { hash: lh, positionMs: positionMsRef.current }).catch(console.error);
+      }
       s.retreat();
       const hash = useStore.getState().currentHash();
       if (!hash) return;
@@ -138,6 +151,7 @@ export default function MobileApp() {
       if (!track) return;
       s.setLoaded(track.hash, track.duration_ms);
       positionMsRef.current = 0;
+      hasRecordedPlay = false;
       invoke('track_play', { hash: track.hash }).catch(console.error);
       s.setPlaying(true);
     };
@@ -161,6 +175,15 @@ export default function MobileApp() {
           return;
         }
         positionMsRef.current = posMs;
+        // Record a play once the listener crosses 50% of the track or 4 minutes.
+        if (!hasRecordedPlay) {
+          const dur = loopStateRef.durMs;
+          const lh  = useStore.getState().loadedTrackHash;
+          if (lh && dur > 0 && posMs >= Math.min(dur * 0.5, 240_000)) {
+            hasRecordedPlay = true;
+            invoke('track_record_play', { hash: lh, durationMs: posMs }).catch(console.error);
+          }
+        }
         return;
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
@@ -199,7 +222,7 @@ export default function MobileApp() {
         s.setPlaying(!s.isPlaying);
         return;
       }
-      if (payload === 'RemoteNextTrack')     { playNext(); return; }
+      if (payload === 'RemoteNextTrack')     { playNext(true); return; }
       if (payload === 'RemotePreviousTrack') { playPrev(); return; }
       if (typeof payload === 'object' && 'RemoteSeek' in payload) {
         const posMs = payload.RemoteSeek;

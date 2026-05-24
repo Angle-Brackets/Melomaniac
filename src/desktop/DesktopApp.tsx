@@ -186,6 +186,9 @@ export default function DesktopApp(): JSX.Element {
   // Live position updated on every PositionChanged without triggering a re-render.
   // PlayerControls / MiniPlayer read this via rAF and update their DOM directly.
   const livePositionMsRef = useRef(0);
+  // Tracks whether we've already recorded a play for the current loaded track.
+  // Reset whenever a new track is loaded so each track gets at most one play record.
+  const hasRecordedPlayRef = useRef(false);
   const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
   const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
@@ -442,6 +445,7 @@ export default function DesktopApp(): JSX.Element {
       sr.current.durationMs = track.duration_ms;
       setPositionMs(0);
       livePositionMsRef.current = 0;
+      hasRecordedPlayRef.current = false;
       setIsPlaying(true);
       invoke('track_play', { hash: track.hash }).catch(console.error);
     };
@@ -467,6 +471,17 @@ export default function DesktopApp(): JSX.Element {
           livePositionMsRef.current = posMs;
           sr.current.positionMs = posMs;
         }
+        // Record a play once the listener crosses 50% of the track or 4 minutes,
+        // whichever comes first. This matches the Last.fm / Spotify convention and
+        // captures skips-near-the-end that TrackEnded would miss.
+        if (!hasRecordedPlayRef.current) {
+          const dur = sr.current.durationMs;
+          const lh  = sr.current.loadedHash;
+          if (lh && dur > 0 && posMs >= Math.min(dur * 0.5, 240_000)) {
+            hasRecordedPlayRef.current = true;
+            invoke('track_record_play', { hash: lh, durationMs: posMs }).catch(console.error);
+          }
+        }
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
         if (payload.DurationKnown > 0) setDurationMs(payload.DurationKnown);
@@ -474,11 +489,6 @@ export default function DesktopApp(): JSX.Element {
       if (payload === 'TrackEnded') {
         setPositionMs(0);
         const { loopMode: lm, loadedHash: lh, abA: a, durationMs: dur } = sr.current;
-
-        // Record natural play completion (fire-and-forget)
-        if (lh && dur > 0) {
-          invoke('track_record_play', { hash: lh, durationMs: dur }).catch(console.error);
-        }
 
         if (lm === 'one') {
           if (lh) invoke('track_play', { hash: lh }).catch(console.error);
@@ -867,7 +877,7 @@ export default function DesktopApp(): JSX.Element {
       setLoadedHash(track.hash);
       setDurationMs(track.duration_ms);
       sr.current.durationMs = track.duration_ms;
-      setPositionMs(0); livePositionMsRef.current = 0;
+      setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
     }
   };
 
@@ -886,7 +896,7 @@ export default function DesktopApp(): JSX.Element {
       setLoadedHash(next.hash);
       setDurationMs(next.duration_ms);
       sr.current.durationMs = next.duration_ms;
-      setPositionMs(0); livePositionMsRef.current = 0;
+      setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       return;
     }
     const q = playQueue;
@@ -901,7 +911,7 @@ export default function DesktopApp(): JSX.Element {
     setLoadedHash(next.hash);
     setDurationMs(next.duration_ms);
     sr.current.durationMs = next.duration_ms;
-    setPositionMs(0); livePositionMsRef.current = 0;
+    setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
   };
   skipNextRef.current = handleSkipNext;
 
@@ -914,7 +924,7 @@ export default function DesktopApp(): JSX.Element {
     // Restart current track if more than 3 s in — reload is more reliable than seek-to-0
     if (livePositionMsRef.current > 3000 && loadedHash) {
       invoke('track_play', { hash: loadedHash }).catch(console.error);
-      setPositionMs(0); livePositionMsRef.current = 0;
+      setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       setIsPlaying(true);
       return;
     }
@@ -930,7 +940,7 @@ export default function DesktopApp(): JSX.Element {
     setLoadedHash(prev.hash);
     setDurationMs(prev.duration_ms);
     sr.current.durationMs = prev.duration_ms;
-    setPositionMs(0); livePositionMsRef.current = 0;
+    setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
   };
   skipPrevRef.current = handleSkipPrev;
 
@@ -954,7 +964,7 @@ export default function DesktopApp(): JSX.Element {
       setLoadedHash(queueTrack.hash);
       setDurationMs(queueTrack.duration_ms);
       sr.current.durationMs = queueTrack.duration_ms;
-      setPositionMs(0); livePositionMsRef.current = 0;
+      setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       setIsPlaying(true);
       return;
     }
@@ -965,7 +975,7 @@ export default function DesktopApp(): JSX.Element {
     setLoadedHash(track.hash);
     setDurationMs(track.duration_ms);
     sr.current.durationMs = track.duration_ms;
-    setPositionMs(0); livePositionMsRef.current = 0;
+    setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
     setIsPlaying(true);
   };
 
@@ -1272,7 +1282,7 @@ export default function DesktopApp(): JSX.Element {
               invoke('audio_stop').catch(console.error);
               setIsPlaying(false);
               setLoadedHash(null);
-              setPositionMs(0); livePositionMsRef.current = 0;
+              setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
             }}
           />
         )}

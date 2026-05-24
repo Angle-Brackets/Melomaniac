@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createStore } from 'zustand/vanilla'
-import { createSyncSlice, SyncSlice } from '../syncSlice'
+import { createSyncSlice } from '../syncSlice'
 import { createLibrarySlice } from '../librarySlice'
 import { createPlaybackSlice } from '../playbackSlice'
 import { createPlaylistSlice } from '../playlistSlice'
