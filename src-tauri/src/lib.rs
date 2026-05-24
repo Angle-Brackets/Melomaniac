@@ -175,7 +175,11 @@ pub fn run() {
                         use melomaniac_sync::ios::IosSyncBridge;
                         let b = IosSyncBridge::new(identity, sync_data_dir, db, cas)
                             .expect("failed to create iOS sync bridge");
-                        b.start_discovery().ok();
+                        tauri::async_runtime::block_on(async {
+                            if let Err(e) = b.start_discovery() {
+                                eprintln!("[sync] iOS start_discovery failed: {e}");
+                            }
+                        });
                         Arc::new(b) as Arc<dyn SyncBridge>
                     }
 
