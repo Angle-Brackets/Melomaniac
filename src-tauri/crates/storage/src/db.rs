@@ -825,6 +825,7 @@ impl Database {
                  SELECT hash, COUNT(*) AS skip_count
                  FROM skips GROUP BY hash
              ) s ON s.hash = t.hash
+             WHERE COALESCE(p.play_count, 0) > 0 OR COALESCE(s.skip_count, 0) > 0
              ORDER BY play_count DESC, skip_count DESC, t.title ASC"
         )
         .fetch_all(&self.pool).await?;
