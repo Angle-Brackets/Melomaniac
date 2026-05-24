@@ -96,6 +96,9 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         }
         lastSeenHeads.set(peer.public_key_b64, newLastSeen)
 
+        console.log(`[sync] manifest from ${peer.display_name}: ${manifest.length} playlist(s), localIds=${[...localIds].map(id=>id.slice(0,8))}`)
+        manifest.forEach(e => console.log(`[sync]   peer playlist=${e.id.slice(0,8)} name="${e.name}" branches=[${e.branches.map(b=>`${b.name}:${b.head_commit?.slice(0,7)??'none'}`)}] localMatch=${localIds.has(e.id)}`))
+
         // Find playlists that exist locally and have at least one changed branch.
         const toSync: Array<{ id: string; branchNames: string[] }> = []
         for (const entry of manifest) {
@@ -107,7 +110,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
             .filter(b => b.head_commit && localBranches.has(b.name))
             .filter(b => peerLastSeen.get(`${entry.id}:${b.name}`) !== b.head_commit)
             .map(b => b.name)
-          console.log(`[sync] ${peer.display_name} playlist=${entry.id.slice(0,8)} peerBranches=${entry.branches.map(b=>`${b.name}:${b.head_commit?.slice(0,7)}`)} changedBranches=${changedBranches}`)
+          console.log(`[sync] ${peer.display_name} playlist=${entry.id.slice(0,8)} localBranches=[${[...localBranches]}] changedBranches=[${changedBranches}]`)
           if (changedBranches.length > 0) toSync.push({ id: entry.id, branchNames: changedBranches })
         }
 
