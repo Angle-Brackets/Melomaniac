@@ -89,6 +89,7 @@ Melomaniac is a cross-platform music player built on **Tauri 2 + React/TypeScrip
 - [ ] **Track export** — export a CAS blob back to the filesystem / iOS Files app via document picker (`library_export_track`)
 - [ ] **Android support** — audio bridge via ExoPlayer/Media3; sync bridge via NSD (Network Service Discovery)
 - [ ] **Playlist creation on mobile** — `+` button currently disabled
+- [ ] **Automatic Playlist Metadata Generation** - Either using AI or by analyzing the audio content and generating a unique audial fingerprint
 
 ### Medium-term
 - [ ] **AI & Metrics panel** (desktop right panel) — currently a placeholder toggle; planned: local embeddings, listening pattern analysis, smart playlist suggestions
