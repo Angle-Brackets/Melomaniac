@@ -2,24 +2,26 @@ import { useState, useRef, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { PlaylistRecord, BranchRecord } from '../data';
 import { IcoPin } from '../icons';
-import { FiSettings as GearIcon, FiGitBranch, FiTrash2, FiEdit2, FiCheck, FiX } from 'react-icons/fi';
+import { FiSettings as GearIcon, FiGitBranch, FiTrash2, FiEdit2, FiCheck, FiX, FiAlertTriangle } from 'react-icons/fi';
 import { TbGitFork } from 'react-icons/tb';
 import { FiGitMerge } from 'react-icons/fi';
 
 interface PlaylistHeaderProps {
-  playlist:      PlaylistRecord | null;
-  artworkUrl:    string | null;
-  activeBranch:  string;
-  onBranchChange:(name: string) => void;
-  activeTab:     string;
-  onTabChange:   (tab: string) => void;
-  isPinned:      boolean;
-  onTogglePin:   () => void;
-  onNewBranch:   () => void;
-  onMerge:       () => void;
-  onFork:        () => void;
-  onEditArtwork: () => void;
+  playlist:          PlaylistRecord | null;
+  artworkUrl:        string | null;
+  activeBranch:      string;
+  onBranchChange:    (name: string) => void;
+  activeTab:         string;
+  onTabChange:       (tab: string) => void;
+  isPinned:          boolean;
+  onTogglePin:       () => void;
+  onNewBranch:       () => void;
+  onMerge:           () => void;
+  onFork:            () => void;
+  onEditArtwork:     () => void;
   onBranchesChanged: () => void;
+  hasConflict:       boolean;
+  onResolveConflict: () => void;
 }
 
 const TABS = ['Tracks', 'History', 'Settings'] as const;
@@ -217,6 +219,7 @@ const iconBtn: React.CSSProperties = {
 export default function PlaylistHeader({
   playlist, artworkUrl, activeBranch, onBranchChange, activeTab,
   onTabChange, isPinned, onTogglePin, onNewBranch, onMerge, onFork, onEditArtwork, onBranchesChanged,
+  hasConflict, onResolveConflict,
 }: PlaylistHeaderProps): JSX.Element {
   const name = playlist?.name ?? 'No playlist selected';
   const branch = playlist?.branches.find(b => b.name === activeBranch) ?? playlist?.branches[0];
@@ -303,7 +306,16 @@ export default function PlaylistHeader({
               Fork
             </button>
             <button className="btn btn-ghost btn-xs" onClick={onNewBranch} title="New branch from current HEAD">⎇ Branch</button>
-            {(playlist.branches?.length ?? 0) > 1 && (
+            {hasConflict ? (
+              <button
+                className="btn btn-xs gap-1 bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30"
+                onClick={onResolveConflict}
+                title="Merge conflict — click to resolve"
+              >
+                <FiAlertTriangle size={12} />
+                Conflict
+              </button>
+            ) : (playlist.branches?.length ?? 0) > 1 && (
               <button className="btn btn-ghost btn-xs gap-1" onClick={onMerge} title="Merge another branch into this one">
                 <FiGitMerge size={12} />
                 Merge

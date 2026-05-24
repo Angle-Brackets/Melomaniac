@@ -119,12 +119,14 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 
 // ── Root App ──────────────────────────────────────────────────────────────────
 export default function DesktopApp(): JSX.Element {
-  const openPairingDisplay = useStore(s => s.openPairingDisplay);
-  const syncToast          = useStore(s => s.syncToast);
-  const refreshLivePeers   = useStore(s => s.refreshLivePeers);
-  const loadPlaylists      = useStore(s => s.loadPlaylists);
-  const artworkVersion     = useStore(s => s.artworkVersion);
-  const syncVersion        = useStore(s => s.syncVersion);
+  const openPairingDisplay       = useStore(s => s.openPairingDisplay);
+  const syncToast                = useStore(s => s.syncToast);
+  const refreshLivePeers         = useStore(s => s.refreshLivePeers);
+  const loadPlaylists            = useStore(s => s.loadPlaylists);
+  const artworkVersion           = useStore(s => s.artworkVersion);
+  const syncVersion              = useStore(s => s.syncVersion);
+  const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
+  const reopenConflict           = useStore(s => s.reopenConflict);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -1102,6 +1104,8 @@ export default function DesktopApp(): JSX.Element {
                   onFork={() => setShowForkModal(true)}
                   onEditArtwork={() => setShowArtworkModal(true)}
                   onBranchesChanged={reloadPlaylists}
+                  hasConflict={activePlaylistId ? pendingConflictPlaylists.includes(activePlaylistId) : false}
+                  onResolveConflict={() => { if (activePlaylistId) reopenConflict(activePlaylistId); }}
                 />
 
                 {activeTab === 'Tracks' && (
