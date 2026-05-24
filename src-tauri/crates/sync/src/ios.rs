@@ -518,6 +518,11 @@ pub struct IosSyncBridge {
     discovery_open: Arc<AtomicBool>,
     data_dir: PathBuf,
     trust_list: Arc<RwLock<TrustList>>,
+    /// Tokio-flavoured copy shared with the Axum HTTP server. Updated on every
+    /// pairing so the server always sees the current trust list.
+    http_trust_list: Arc<tokio::sync::RwLock<TrustList>>,
+    /// Tokio-flavoured peers map shared with the Axum HTTP server (for /pair).
+    http_peers_map: Arc<tokio::sync::RwLock<HashMap<String, PeerInfo>>>,
     db: Arc<Database>,
     cas: Arc<CasStore>,
     pending_merges: Arc<std::sync::Mutex<HashMap<String, PendingMerge>>>,
@@ -550,12 +555,15 @@ impl IosSyncBridge {
 
         let trust_list_path = data_dir.join("known_devices.json");
         let trust_list = TrustList::load(&trust_list_path)?;
+        let http_trust_list = Arc::new(tokio::sync::RwLock::new(trust_list.clone()));
         let instance = Self {
             identity: Arc::new(identity),
             peers: Arc::new(RwLock::new(Vec::new())),
             discovery_open: Arc::new(AtomicBool::new(false)),
             data_dir,
             trust_list: Arc::new(RwLock::new(trust_list)),
+            http_trust_list,
+            http_peers_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             db,
             cas,
             pending_merges: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -584,9 +592,8 @@ impl SyncBridge for IosSyncBridge {
         // Start the Axum HTTP server so Desktop can pull from iOS.
         let server_state = ServerState {
             identity:         self.identity.clone(),
-            trust_list:       Arc::new(tokio::sync::RwLock::new(
-                (*self.trust_list.read().map_err(|_| SyncError::IdentityError("trust list lock".into()))?).clone()
-            )),
+            trust_list:       self.http_trust_list.clone(),
+            peers_map:        self.http_peers_map.clone(),
             db:               self.db.clone(),
             cas:              self.cas.clone(),
             pending_qr_token: self.pending_qr_token.clone(),
@@ -690,7 +697,7 @@ impl SyncBridge for IosSyncBridge {
                 .trust_list
                 .write()
                 .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
-            list.add(device);
+            list.add(device.clone());
             list.save(&self.identity)?;
         }
 
@@ -718,13 +725,20 @@ impl SyncBridge for IosSyncBridge {
             }
         }
 
+        // Mirror the new device into the HTTP server's trust list immediately
+        // so auth checks pass as soon as desktop tries to connect.
         // POST our own identity back to the desktop so it can add us to its
         // trust list (the QR payload only flows one way; /pair closes the loop).
+        let http_trust_list = self.http_trust_list.clone();
         if let Some(addr) = payload.addr {
             let own_pk   = self.identity.public_key_b64();
             let own_name = self.identity.display_name.clone();
             let token    = payload.token;
             tokio::spawn(async move {
+                {
+                    let mut tl = http_trust_list.write().await;
+                    tl.add(device);
+                }
                 let url = format!("http://{addr}/pair");
                 eprintln!("[sync] iOS: POSTing identity to {url}");
                 let body = serde_json::json!({
@@ -744,6 +758,10 @@ impl SyncBridge for IosSyncBridge {
             });
         } else {
             eprintln!("[sync] iOS: QR payload had no addr — desktop won't be notified");
+            tokio::spawn(async move {
+                let mut tl = http_trust_list.write().await;
+                tl.add(device);
+            });
         }
 
         Ok(())
