@@ -27,8 +27,17 @@ export {
   FiX           as IcoClose,
   FiArrowUp     as IcoPush,
   FiList        as IcoQueue,
-  FiCompass     as IcoDiscover,
 } from 'react-icons/fi';
+
+// Sparkles — matches the mobile Discover tab icon exactly
+export function IcoDiscover({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <path d="M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8L12 3z"/>
+      <path d="M19 16l.8 1.7L21.5 18.5l-1.7.8L19 21l-.8-1.7L16.5 18.5l1.7-.8L19 16z"/>
+    </svg>
+  );
+}
 
 // Pin — thumbtack shape, no Feather equivalent
 export function IcoPin({ filled = false, size = 11 }: { filled?: boolean; size?: number }) {
