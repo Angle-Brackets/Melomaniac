@@ -415,12 +415,15 @@ async fn sync_one_branch_async(
         .find(|b| b.name == branch_name)
         .and_then(|b| b.head_commit.clone());
 
-    // Early-exit for the main branch when heads already match.
-    if branch_name == "main" && local_head.as_deref() == Some(&peer_entry.head_commit) {
+    eprintln!("[sync] sync_one_branch: playlist={} branch={} local_head={:?} peer_head={}", &playlist_id[..playlist_id.len().min(8)], branch_name, local_head.as_deref().map(|h| &h[..h.len().min(7)]), &peer_entry.head_commit[..peer_entry.head_commit.len().min(7)]);
+    // Early-exit when heads already match.
+    if local_head.as_deref() == Some(&peer_entry.head_commit) {
+        eprintln!("[sync] sync_one_branch: heads match, nothing to do");
         return Ok(SyncReport { blobs_fetched: 0, bytes_fetched: 0, conflicts: vec![] });
     }
 
     let peer_commits = client.get_commits(&playlist_id, branch_name).await?;
+    eprintln!("[sync] sync_one_branch: got {} commits from peer", peer_commits.len());
 
     let local_hashes: std::collections::HashSet<String> =
         cas.list_all_hashes().into_iter().collect();
@@ -601,11 +604,15 @@ async fn sync_one_branch_async(
 
     let local_head_str = local_head.as_deref().expect("checked above");
 
+    eprintln!("[sync] sync_one_branch: ancestor={:?} local={} peer={}", ancestor.as_deref().map(|h| &h[..h.len().min(7)]), &local_head_str[..local_head_str.len().min(7)], &peer_head[..peer_head.len().min(7)]);
+
     if ancestor.as_deref() == Some(peer_head) {
+        eprintln!("[sync] sync_one_branch: already ahead of peer, skipping");
         return Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts: vec![] });
     }
 
     if ancestor.as_deref() == Some(local_head_str) {
+        eprintln!("[sync] sync_one_branch: fast-forward to {}", &peer_head[..peer_head.len().min(7)]);
         db.update_branch_head(&playlist_id, local_branch_name, peer_head).await?;
         return Ok(SyncReport { blobs_fetched, bytes_fetched, conflicts: vec![] });
     }

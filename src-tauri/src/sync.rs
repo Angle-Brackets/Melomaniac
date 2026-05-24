@@ -99,6 +99,7 @@ pub async fn sync_playlist(
     app: AppHandle,
 ) -> Result<SyncReport, String> {
     let branch = branch_name.unwrap_or_else(|| "main".to_string());
+    eprintln!("[sync] sync_playlist: playlist={} branch={} peer={:?}", &playlist_id[..playlist_id.len().min(8)], branch, public_key_b64.as_deref().map(|k| &k[..k.len().min(8)]));
     let bridge = Arc::clone(&state.bridge);
     let progress_tx = spawn_progress_forwarder(app);
     let report = tokio::task::spawn_blocking(move || {
@@ -106,6 +107,7 @@ pub async fn sync_playlist(
     })
     .await
     .map_err(|e| e.to_string())??;
+    eprintln!("[sync] sync_playlist done: blobs={} bytes={} conflicts={}", report.blobs_fetched, report.bytes_fetched, report.conflicts.len());
 
     // Remove orphaned track rows left by metadata edits on the source device.
     let db  = Arc::clone(&storage.db);
