@@ -81,10 +81,10 @@ interface AddToFolderPopupProps {
 }
 
 export function AddToFolderPopup({ item, folders, currentFolderId, onClose, onAddToFolder, onCreateFolder, onRemoveFromFolder }: AddToFolderPopupProps): JSX.Element {
-  const [newName,  setNewName]  = useState('');
+  const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const currentFolder = folders.find(f => f.id === currentFolderId);
-  const otherFolders  = folders.filter(f => f.id !== currentFolderId);
+  const otherFolders = folders.filter(f => f.id !== currentFolderId);
 
   return (
     <dialog className="modal modal-open" style={{ zIndex: 300 }}>
@@ -167,12 +167,12 @@ interface PlaylistRowProps {
 
 function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, onTogglePin, onAddToFolderClick, synced, onDragStart, onDragEnd }: PlaylistRowProps) {
   const [open, setOpen] = useState(!!defaultOpen);
-  const [hov,  setHov]  = useState(false);
-  const isActive    = item.id === activeId;
-  const isPinned    = pinnedIds.has(item.id);
+  const [hov, setHov] = useState(false);
+  const isActive = item.id === activeId;
+  const isPinned = pinnedIds.has(item.id);
   const hasChildren = !!item.children?.length;
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
-  const reopenConflict           = useStore(s => s.reopenConflict);
+  const reopenConflict = useStore(s => s.reopenConflict);
   const hasConflict = pendingConflictPlaylists.includes(item.id);
 
   return (
@@ -229,7 +229,7 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
           {synced && !item.pull && item.commit && (
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
               stroke="var(--green)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <title>Up to date</title><path d="M2 5l2.2 2.2L8 3"/>
+              <title>Up to date</title><path d="M2 5l2.2 2.2L8 3" />
             </svg>
           )}
           {item.pull && (
@@ -251,8 +251,8 @@ function PlaylistRow({ item, activeId, depth, onSelect, defaultOpen, pinnedIds, 
               title="Add to folder"
             >
               <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-                <rect x="4.25" y="0" width="1.5" height="10" rx="0.75"/>
-                <rect x="0" y="4.25" width="10" height="1.5" rx="0.75"/>
+                <rect x="4.25" y="0" width="1.5" height="10" rx="0.75" />
+                <rect x="0" y="4.25" width="10" height="1.5" rx="0.75" />
               </svg>
             </span>
           )}
@@ -290,7 +290,7 @@ interface FolderRowProps {
 }
 
 function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onTogglePin, onAddToFolderClick, onAssignToFolder, onDeleteFolder, onDragStart, onDragEnd }: FolderRowProps) {
-  const [open,      setOpen]      = useState(true);
+  const [open, setOpen] = useState(true);
   const [dragCount, setDragCount] = useState(0);
   const isOver = dragCount > 0;
 
@@ -318,7 +318,7 @@ function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onToggleP
           className="flex-1 flex items-center gap-1.5 cursor-pointer text-[10px] font-bold tracking-[0.08em] text-mm-t2 uppercase hover:text-mm-t1 transition-colors min-w-0"
         >
           <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor" className="shrink-0 opacity-70">
-            <path d="M1 3.5C1 2.67 1.67 2 2.5 2H4.62l1 1.5H9.5c.83 0 1.5.67 1.5 1.5V9c0 .83-.67 1.5-1.5 1.5h-7C1.67 10.5 1 9.83 1 9V3.5z"/>
+            <path d="M1 3.5C1 2.67 1.67 2 2.5 2H4.62l1 1.5H9.5c.83 0 1.5.67 1.5 1.5V9c0 .83-.67 1.5-1.5 1.5h-7C1.67 10.5 1 9.83 1 9V3.5z" />
           </svg>
           <span className="flex-1 truncate">{folder.name}</span>
           <IcoChevron size={9} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
@@ -331,7 +331,7 @@ function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onToggleP
           style={{ width: 20, height: 20, minHeight: 'unset', padding: 0 }}
         >
           <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-            <line x1="2" y1="2" x2="8" y2="8"/><line x1="8" y1="2" x2="2" y2="8"/>
+            <line x1="2" y1="2" x2="8" y2="8" /><line x1="8" y1="2" x2="2" y2="8" />
           </svg>
         </button>
       </div>
@@ -370,14 +370,14 @@ export default function LibrarySidebar({
   pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder, onDeleteFolder,
   onOpenSettings, onAddToFolderClick, onNewPlaylist,
 }: LibrarySidebarProps): JSX.Element {
-  const [isDragging,    setIsDragging]    = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [noFolderCount, setNoFolderCount] = useState(0);
 
-  const pinned     = playlists.filter(p => pinnedIds.has(p.id));
+  const pinned = playlists.filter(p => pinnedIds.has(p.id));
   const unassigned = playlists.filter(p => !pinnedIds.has(p.id) && folderAssignments[p.id] == null);
 
   const handleDragStart = (_id: string) => setIsDragging(true);
-  const handleDragEnd   = () => { setIsDragging(false); setNoFolderCount(0); };
+  const handleDragEnd = () => { setIsDragging(false); setNoFolderCount(0); };
 
   return (
     <div className="flex h-full">
@@ -388,15 +388,15 @@ export default function LibrarySidebar({
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', padding: '8px 0', gap: 4, flexShrink: 0,
       }}>
-        <RailIcon icon={<IcoMenu size={14} />}      title={expanded ? 'Collapse sidebar' : 'Expand sidebar'} onClick={onToggleExpanded} />
-        <RailIcon icon={<IcoLibrary size={14} />}   active={activeRailItem === 'playlists'} onClick={() => onRailChange('playlists')} title="Playlists — browse playlists & tracks" />
-        <RailIcon icon={<IcoMusicLib size={14} />}  active={activeRailItem === 'library'}   onClick={() => onRailChange('library')}   title="Library — all tracks on this machine" />
-        <RailIcon icon={<IcoHistory size={14} />}   active={activeRailItem === 'history'}   onClick={() => onRailChange('history')}   title="Listening History — play log & skip stats" />
-        <RailIcon icon={<IcoBranch size={14} />}    active={activeRailItem === 'melo'}      onClick={() => onRailChange('melo')}      title="Commit Graph — playlist version history" />
-        <RailIcon icon={<IcoEditor size={14} />}    active={activeRailItem === 'editor'}    onClick={() => onRailChange('editor')}    title="Editor — modify track metadata & MP3 tags" />
-        <RailIcon icon={<IcoDiscover size={17} />}  disabled title="Discover — AI-powered music discovery" />
+        <RailIcon icon={<IcoMenu size={14} />} title={expanded ? 'Collapse sidebar' : 'Expand sidebar'} onClick={onToggleExpanded} />
+        <RailIcon icon={<IcoLibrary size={14} />} active={activeRailItem === 'playlists'} onClick={() => onRailChange('playlists')} title="Playlists — browse playlists & tracks" />
+        <RailIcon icon={<IcoMusicLib size={14} />} active={activeRailItem === 'library'} onClick={() => onRailChange('library')} title="Library — all tracks on this machine" />
+        <RailIcon icon={<IcoHistory size={14} />} active={activeRailItem === 'history'} onClick={() => onRailChange('history')} title="Listening History — play log & skip stats" />
+        <RailIcon icon={<IcoBranch size={14} />} active={activeRailItem === 'melo'} onClick={() => onRailChange('melo')} title="Commit Graph — playlist version history" />
+        <RailIcon icon={<IcoEditor size={14} />} active={activeRailItem === 'editor'} onClick={() => onRailChange('editor')} title="Editor — modify track metadata & MP3 tags" />
+        <RailIcon icon={<IcoDiscover size={23} />} disabled title="Discover — AI-powered music discovery" />
         <div style={{ flex: 1 }} />
-        <RailIcon icon={<IcoSettings size={14} />}  active={activeRailItem === 'settings'}  onClick={onOpenSettings} title="Settings" />
+        <RailIcon icon={<IcoSettings size={14} />} active={activeRailItem === 'settings'} onClick={onOpenSettings} title="Settings" />
       </div>
 
       {/* Library tree */}
