@@ -87,26 +87,26 @@ A local-first, cross-platform music player with **git-style playlist versioning*
 │   Zustand Store                                                      │
 │   ├─ librarySlice   tracks, artwork cache, library status            │
 │   ├─ playbackSlice  currentTrack, isPlaying, volume, AB loop         │
-│   ├─ playlistSlice  active playlist, branches, commit history         │
+│   ├─ playlistSlice  active playlist, branches, commit history        │
 │   ├─ queueSlice     queue, shuffle (Random/Smart), advance           │
-│   └─ syncSlice      livePeers, knownDevices, conflicts, progress      │
-└──────────────┬───────────────────────────────┬──────────────────────┘
-               │  invoke() / listen()           │
-               │  @tauri-apps/api/core          │
-┌──────────────▼───────────────────────────────▼──────────────────────┐
+│   └─ syncSlice      livePeers, knownDevices, conflicts, progress     │
+└──────────────┬───────────────────────────────┬───────────────────────┘
+               │  invoke() / listen()          │
+               │  @tauri-apps/api/core         │
+┌──────────────▼───────────────────────────────▼───────────────────────┐
 │                   Tauri 2 Command Layer  (src-tauri/src/)            │
 │                                                                      │
-│  audio.rs      audio_load · audio_play · audio_pause · audio_seek   │
+│  audio.rs      audio_load · audio_play · audio_pause · audio_seek    │
 │                audio_stop · audio_set_volume · audio_position        │
 │  storage.rs    playlist_get_all · playlist_get_tracks · track_ingest │
 │                track_get_artwork · library_remove_tracks · …         │
 │  sync.rs       sync_get_peers · sync_with_peer · sync_playlist       │
-│                sync_generate_qr_payload · sync_accept_qr_pairing …  │
-│  editor.rs     editor_read_tags · editor_write_tags · …             │
-│  stats.rs      get_system_stats · open_url_in_app                   │
+│                sync_generate_qr_payload · sync_accept_qr_pairing …   │
+│  editor.rs     editor_read_tags · editor_write_tags · …              │
+│  stats.rs      get_system_stats · open_url_in_app                    │
 │  downloader.rs download_enqueue · download_queue                     │
-└──────────┬──────────────────────┬───────────────────┬───────────────┘
-           │                      │                   │
+└──────────┬──────────────────────┬──────────────────┬─────────────────┘
+           │                      │                  │
     ┌──────▼──────┐        ┌──────▼──────┐    ┌──────▼──────┐
     │ melomaniac  │        │ melomaniac  │    │ melomaniac  │
     │   -audio    │        │  -storage   │    │   -sync     │
@@ -130,18 +130,18 @@ A local-first, cross-platform music player with **git-style playlist versioning*
     │  MelomaniacPlayer    │              │   MelomaniacSync      │
     │  (Swift static lib)  │              │   (Swift static lib)  │
     │                      │              │                       │
-    │  AVAudioPlayer       │              │  NWBrowser  (discover)│
-    │  AVAudioSession      │              │  NWListener (advertise)│
+    │  AVAudioPlayer       │              │  NWBrowser (discover) │
+    │  AVAudioSession      │              │  NWListener(advertise)│
     │  MPNowPlaying        │              │  @_cdecl FFI exports  │
     │  MPRemoteCommand     │              │                       │
     │  SFSafariViewController│            │  Axum HTTP server     │
     │  @_cdecl FFI exports │              │  (shared with desktop)│
     └──────────────────────┘              └───────────────────────┘
            │                                        │
-    ┌──────▼──────────────────────────────────────▼───────┐
+    ┌──────▼────────────────────────────────────────▼──────┐
     │               OS / Hardware                          │
     │                                                      │
-    │  Desktop: cpal audio device, mDNS socket, TCP/7700  │
+    │  Desktop: cpal audio device, mDNS socket, TCP/7700   │
     │  iOS:     AVFoundation, Network.framework, TCP/7700  │
     └──────────────────────────────────────────────────────┘
 ```
