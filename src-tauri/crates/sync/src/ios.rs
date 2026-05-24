@@ -585,7 +585,7 @@ impl SyncBridge for IosSyncBridge {
         let server_state = ServerState {
             identity:         self.identity.clone(),
             trust_list:       Arc::new(tokio::sync::RwLock::new(
-                self.trust_list.read().map_err(|_| SyncError::IdentityError("trust list lock".into()))?.clone()
+                (*self.trust_list.read().map_err(|_| SyncError::IdentityError("trust list lock".into()))?).clone()
             )),
             db:               self.db.clone(),
             cas:              self.cas.clone(),
