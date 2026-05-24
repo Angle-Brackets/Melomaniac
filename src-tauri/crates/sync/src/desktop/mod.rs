@@ -855,6 +855,7 @@ impl SyncBridge for DesktopSyncBridge {
         &self,
         playlist_id: &str,
         branch_name: &str,
+        peer_pk: Option<&str>,
         progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
     ) -> Result<SyncReport, SyncError> {
         let identity = self.identity.clone();
@@ -864,10 +865,16 @@ impl SyncBridge for DesktopSyncBridge {
         let pending_merges = self.pending_merges.clone();
         let playlist_id = playlist_id.to_string();
         let branch_name = branch_name.to_string();
+        let peer_pk = peer_pk.map(str::to_string);
 
         block(async move {
-            let peer = peers.read().await.values().next().cloned()
-                .ok_or(SyncError::NotPaired)?;
+            let map = peers.read().await;
+            let peer = if let Some(ref pk) = peer_pk {
+                map.get(pk.as_str()).cloned()
+            } else {
+                map.values().next().cloned()
+            }.ok_or(SyncError::NotPaired)?;
+            drop(map);
             let client = SyncClient::new(identity.clone(), peer.addr);
 
             let manifest = client.get_manifest().await?;

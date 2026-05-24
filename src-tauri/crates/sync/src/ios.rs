@@ -788,6 +788,7 @@ impl SyncBridge for IosSyncBridge {
         &self,
         playlist_id: &str,
         branch_name: &str,
+        peer_pk: Option<&str>,
         progress_tx: Option<std::sync::mpsc::SyncSender<super::SyncProgress>>,
     ) -> Result<SyncReport, SyncError> {
         let identity = self.identity.clone();
@@ -797,13 +798,18 @@ impl SyncBridge for IosSyncBridge {
         let pending_merges = self.pending_merges.clone();
         let playlist_id = playlist_id.to_string();
         let branch_name = branch_name.to_string();
+        let peer_pk = peer_pk.map(str::to_string);
 
         tokio::runtime::Handle::current().block_on(async move {
             let peer = {
                 let list = peers.read().map_err(|_| {
                     SyncError::IdentityError("peers lock poisoned".into())
                 })?;
-                list.first().cloned()
+                if let Some(ref pk) = peer_pk {
+                    list.iter().find(|p| &p.public_key_b64 == pk).cloned()
+                } else {
+                    list.first().cloned()
+                }
             };
             let peer = peer.ok_or(SyncError::NotPaired)?;
             let client = SyncClient {

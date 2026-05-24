@@ -123,6 +123,7 @@ export default function DesktopApp(): JSX.Element {
   const syncToast          = useStore(s => s.syncToast);
   const refreshLivePeers   = useStore(s => s.refreshLivePeers);
   const artworkVersion     = useStore(s => s.artworkVersion);
+  const syncVersion        = useStore(s => s.syncVersion);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -276,6 +277,11 @@ export default function DesktopApp(): JSX.Element {
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Refresh the commit graph whenever a background sync imports new commits.
+  useEffect(() => {
+    if (syncVersion > 0) setCommitRefreshKey(k => k + 1)
+  }, [syncVersion]);
 
   // Fetch the persisted commit author name from the backend on mount
   useEffect(() => {

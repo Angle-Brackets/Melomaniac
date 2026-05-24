@@ -345,6 +345,7 @@ pub trait SyncBridge: Send + Sync {
         &self,
         playlist_id: &str,
         branch_name: &str,
+        peer_pk: Option<&str>, // None = pick the first available peer
         progress_tx: Option<std::sync::mpsc::SyncSender<SyncProgress>>,
     ) -> Result<SyncReport, SyncError>;
 

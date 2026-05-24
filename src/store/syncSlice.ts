@@ -35,6 +35,10 @@ export type SyncSlice = {
   artworkVersion: number
   bumpArtworkVersion: () => void
 
+  // Incremented after every successful auto-sync (commits imported from a peer).
+  // Desktop's CommitGraph watches this to know when to re-fetch history.
+  syncVersion: number
+
   // Per-playlist download progress (0–1). Present while downloading, absent when idle.
   downloadProgress: Record<string, number>
   setDownloadProgress: (playlistId: string, pct: number) => void
@@ -128,8 +132,8 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
         for (const { id, branchNames } of toSync) {
           try {
             const report: SyncReport = branchNames.length === 1
-              ? await invoke('sync_playlist', { playlistId: id, branchName: branchNames[0] })
-              : await invoke('sync_playlist_branches', { playlistId: id, branchNames })
+              ? await invoke('sync_playlist', { playlistId: id, branchName: branchNames[0], publicKeyB64: peer.public_key_b64 })
+              : await invoke('sync_playlist_branches', { playlistId: id, branchNames, publicKeyB64: peer.public_key_b64 })
             if (report.conflicts.length > 0) {
               get().openDiffViewer(id, report.conflicts)
               conflicted++
@@ -141,6 +145,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
 
         if (synced > 0 || conflicted > 0) {
           await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+          set(s => ({ syncVersion: s.syncVersion + 1 }))
           if (conflicted > 0) {
             showToast(`Synced with ${peer.display_name} — ${conflicted} conflict${conflicted !== 1 ? 's' : ''} need resolution`)
           } else {
@@ -222,6 +227,8 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
 
   artworkVersion: 0,
   bumpArtworkVersion: () => set(s => ({ artworkVersion: s.artworkVersion + 1 })),
+
+  syncVersion: 0,
 
   pairingOpen:       false,
   pairingMode:       null,

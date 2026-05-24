@@ -93,6 +93,7 @@ fn spawn_progress_forwarder(app: AppHandle) -> std::sync::mpsc::SyncSender<SyncP
 pub async fn sync_playlist(
     playlist_id: String,
     branch_name: Option<String>,
+    public_key_b64: Option<String>,
     state: State<'_, SyncState>,
     storage: State<'_, StorageState>,
     app: AppHandle,
@@ -101,7 +102,7 @@ pub async fn sync_playlist(
     let bridge = Arc::clone(&state.bridge);
     let progress_tx = spawn_progress_forwarder(app);
     let report = tokio::task::spawn_blocking(move || {
-        bridge.sync_playlist(&playlist_id, &branch, Some(progress_tx)).map_err(|e| e.to_string())
+        bridge.sync_playlist(&playlist_id, &branch, public_key_b64.as_deref(), Some(progress_tx)).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -124,6 +125,7 @@ pub async fn sync_playlist(
 pub async fn sync_playlist_branches(
     playlist_id: String,
     branch_names: Vec<String>,
+    public_key_b64: Option<String>,
     state: State<'_, SyncState>,
     storage: State<'_, StorageState>,
     app: AppHandle,
@@ -135,9 +137,10 @@ pub async fn sync_playlist_branches(
     for branch in branch_names {
         let bridge = Arc::clone(&state.bridge);
         let pid = playlist_id.clone();
+        let pk = public_key_b64.clone();
         let progress_tx = spawn_progress_forwarder(app.clone());
         let report = tokio::task::spawn_blocking(move || {
-            bridge.sync_playlist(&pid, &branch, Some(progress_tx)).map_err(|e| e.to_string())
+            bridge.sync_playlist(&pid, &branch, pk.as_deref(), Some(progress_tx)).map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())??;
