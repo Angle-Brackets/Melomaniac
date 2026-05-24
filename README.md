@@ -15,7 +15,7 @@ A local-first, cross-platform music player with **git-style playlist versioning*
 
 </td><td>
 
-<img src="melomaniac-logo.png" width="180" alt="Melomaniac logo"/>
+<img src="src-tauri/icons/icon.png" width="180" alt="Melomaniac logo"/>
 
 </td></tr></table>
 
