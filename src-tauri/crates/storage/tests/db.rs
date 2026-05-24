@@ -1,6 +1,14 @@
 use melomaniac_storage::{CommitRecord, Database, TrackRecord};
 use tempfile::TempDir;
 
+// Helper: open an in-memory DB via `:memory:` path (avoids TempDir for stat tests)
+async fn open_mem_db() -> Database {
+    use std::path::PathBuf;
+    let db = Database::open(PathBuf::from(":memory:")).await.unwrap();
+    db.migrate().await.unwrap();
+    db
+}
+
 async fn open_db(dir: &TempDir) -> Database {
     let db = Database::open(dir.path().join("db.sqlite")).await.unwrap();
     db.migrate().await.unwrap();
@@ -298,4 +306,57 @@ async fn commit_history_missing_start_returns_empty() {
     let db  = open_db(&dir).await;
     let history = db.get_commit_history("nonexistent", 10).await.unwrap();
     assert!(history.is_empty());
+}
+
+// ── Play/skip stats ───────────────────────────────────────────────────────────
+// These tests target record_play, record_skip, get_track_stats, get_top_tracks.
+// Those methods are being added by a separate agent. Tests are marked #[ignore]
+// so the suite stays green until the methods land.
+
+#[tokio::test]
+#[ignore = "TODO: uncomment when record_play / get_track_stats DB methods land"]
+async fn test_record_play_and_get_stats() {
+    let db = open_mem_db().await;
+
+    db.insert_track(&track("aabbcc")).await.unwrap();
+    // db.record_play("aabbcc").await.unwrap();
+    // let stats = db.get_track_stats("aabbcc").await.unwrap().unwrap();
+    // assert_eq!(stats.play_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "TODO: uncomment when record_skip / get_track_stats DB methods land"]
+async fn test_record_skip_and_get_stats() {
+    let db = open_mem_db().await;
+
+    db.insert_track(&track("aabbcc")).await.unwrap();
+    // db.record_skip("aabbcc").await.unwrap();
+    // let stats = db.get_track_stats("aabbcc").await.unwrap().unwrap();
+    // assert_eq!(stats.skip_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "TODO: uncomment when get_top_tracks DB method lands"]
+async fn test_get_top_tracks() {
+    let db = open_mem_db().await;
+
+    let mut t1 = track("hash1"); t1.title = "Low".into();
+    let mut t2 = track("hash2"); t2.title = "Mid".into();
+    let mut t3 = track("hash3"); t3.title = "High".into();
+
+    db.insert_track(&t1).await.unwrap();
+    db.insert_track(&t2).await.unwrap();
+    db.insert_track(&t3).await.unwrap();
+
+    // db.record_play("hash1").await.unwrap();
+    // db.record_play("hash2").await.unwrap();
+    // db.record_play("hash2").await.unwrap();
+    // db.record_play("hash3").await.unwrap();
+    // db.record_play("hash3").await.unwrap();
+    // db.record_play("hash3").await.unwrap();
+
+    // let top = db.get_top_tracks(3).await.unwrap();
+    // assert_eq!(top[0].hash, "hash3"); // play_count = 3
+    // assert_eq!(top[1].hash, "hash2"); // play_count = 2
+    // assert_eq!(top[2].hash, "hash1"); // play_count = 1
 }
