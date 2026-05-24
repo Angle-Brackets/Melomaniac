@@ -797,6 +797,19 @@ pub async fn playlist_delete(
     storage.db.delete_playlist(&playlist_id).await.map_err(|e| e.to_string())
 }
 
+/// Remove specific tracks from the library by hash. Used after deleting a
+/// playlist when the user also wants to clean up tracks exclusive to that playlist.
+#[tauri::command]
+pub async fn library_remove_tracks(
+    hashes:  Vec<String>,
+    storage: State<'_, StorageState>,
+) -> Result<(), String> {
+    for hash in &hashes {
+        storage.db.remove_track(hash).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 // ── Branches ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]

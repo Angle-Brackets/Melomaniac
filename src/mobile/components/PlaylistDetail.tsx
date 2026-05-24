@@ -189,13 +189,24 @@ function TrackRow({ track, idx, playing, onPlay, onFavorite, onRemove, revealed,
 }) {
   const artUrl  = useTrackArtwork(track.hash, track.artwork_hash);
   const startXRef = useRef(0);
+  const startYRef = useRef(0);
   const accent  = 'var(--accent)';
 
   // Swipe-to-delete: a left swipe of ≥48 px reveals the red delete button behind the row.
   // A right swipe of ≥24 px closes it. A tap while revealed also closes (no accidental deletes).
-  const handlePointerDown = (e: React.PointerEvent) => { startXRef.current = e.clientX; };
+  // We also track the Y axis so vertical scroll gestures don't accidentally trigger reveals.
+  const handlePointerDown = (e: React.PointerEvent) => {
+    startXRef.current = e.clientX;
+    startYRef.current = e.clientY;
+  };
   const handlePointerUp   = (e: React.PointerEvent) => {
     const dx = e.clientX - startXRef.current;
+    const dy = e.clientY - startYRef.current;
+    // If the gesture is predominantly vertical, treat it as a scroll — never trigger reveal.
+    if (Math.abs(dy) > Math.abs(dx) + 5) {
+      if (revealed) onClose?.();
+      return;
+    }
     if (dx < -48)       { onReveal?.(); return; }
     if (dx > 24)        { onClose?.();  return; }
     if (!revealed)      { onPlay?.(); }
@@ -505,9 +516,10 @@ function ForkSheet({ playlist, onClose, onForked }: {
 }
 
 // ── Edit sheet ───────────────────────────────────────────────────────────────
-function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }: {
+function EditSheet({ playlist, currentBranchName, trackHashes, onClose, onSaved, onDeleted }: {
   playlist: PlaylistRecord;
   currentBranchName: string;
+  trackHashes: string[];
   onClose: () => void;
   onSaved: () => void;
   onDeleted: () => void;
@@ -516,11 +528,12 @@ function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }:
   const [desc, setDesc] = useState(playlist.description ?? '');
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // 'idle' | 'confirm' | 'confirmWithMusic'
+  const [deleteStep, setDeleteStep] = useState<'idle' | 'confirm' | 'confirmWithMusic'>('idle');
 
   const handleSave = async () => {
     setBusy(true);
     try {
-      // Fire both mutations in parallel; only issue commands that actually changed.
       const ops: Promise<unknown>[] = [];
       if (name.trim() !== playlist.name) {
         ops.push(invoke('playlist_rename', { playlistId: playlist.id, branchName: currentBranchName, newName: name.trim(), message: '' }));
@@ -538,15 +551,18 @@ function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }:
     }
   };
 
-  const handleDelete = async () => {
-    if (!window.confirm(`Delete "${playlist.name}"? This cannot be undone.`)) return;
+  const execDelete = async (withMusic: boolean) => {
     setDeleting(true);
     try {
+      if (withMusic && trackHashes.length > 0) {
+        await invoke('library_remove_tracks', { hashes: trackHashes });
+      }
       await invoke('playlist_delete', { playlistId: playlist.id });
       onDeleted();
     } catch (e) {
       console.error(e);
       setDeleting(false);
+      setDeleteStep('idle');
     }
   };
 
@@ -555,6 +571,54 @@ function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }:
     background: 'var(--bg-3)', border: '0.5px solid var(--border-1)',
     outline: 'none', color: 'var(--text-0)', fontSize: 14,
   };
+
+  const btnBase: React.CSSProperties = { width: '100%', padding: '12px', borderRadius: 99, fontSize: 14, fontWeight: 500, cursor: 'pointer', border: 'none' };
+
+  // Inline delete confirmation replaces the sheet body
+  if (deleteStep !== 'idle') {
+    return (
+      <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+        <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
+        <MMSheet title="Delete Playlist" subtitle={playlist.name} height="52%">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ fontSize: 14, color: 'var(--text-1)', lineHeight: 1.5, margin: 0 }}>
+              Delete <strong style={{ color: 'var(--text-0)' }}>{playlist.name}</strong>? This cannot be undone.
+            </p>
+            {trackHashes.length > 0 && (
+              <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.45, margin: 0 }}>
+                This playlist has <strong>{trackHashes.length}</strong> track{trackHashes.length !== 1 ? 's' : ''}. Do you also want to remove them from your library? Only remove music that isn't in any other playlist.
+              </p>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+              {trackHashes.length > 0 && (
+                <button
+                  onClick={() => execDelete(true)}
+                  disabled={deleting}
+                  style={{ ...btnBase, background: '#dc2626', color: '#fff', opacity: deleting ? 0.5 : 1 }}
+                >
+                  {deleting ? '…' : `Delete playlist + ${trackHashes.length} track${trackHashes.length !== 1 ? 's' : ''}`}
+                </button>
+              )}
+              <button
+                onClick={() => execDelete(false)}
+                disabled={deleting}
+                style={{ ...btnBase, background: trackHashes.length > 0 ? 'transparent' : '#dc2626', border: trackHashes.length > 0 ? '0.5px solid #f87171' : 'none', color: trackHashes.length > 0 ? '#f87171' : '#fff', opacity: deleting ? 0.5 : 1 }}
+              >
+                {deleting ? '…' : 'Delete playlist only'}
+              </button>
+              <button
+                onClick={() => setDeleteStep('idle')}
+                disabled={deleting}
+                style={{ ...btnBase, background: 'var(--bg-3)', color: 'var(--text-1)' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </MMSheet>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
@@ -601,11 +665,10 @@ function EditSheet({ playlist, currentBranchName, onClose, onSaved, onDeleted }:
           </div>
 
           <button
-            onClick={handleDelete}
-            disabled={deleting}
-            style={{ width: '100%', padding: '12px', borderRadius: 99, background: 'transparent', border: '0.5px solid #f87171', color: '#f87171', fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: deleting ? 0.5 : 1 }}
+            onClick={() => setDeleteStep('confirm')}
+            style={{ width: '100%', padding: '12px', borderRadius: 99, background: 'transparent', border: '0.5px solid #f87171', color: '#f87171', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}
           >
-            {deleting ? '…' : 'Delete Playlist'}
+            Delete Playlist
           </button>
         </div>
       </MMSheet>
@@ -1530,7 +1593,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
             </div>
           </div>
           <button
-            style={{ ...iconBtn(36), flexShrink: 0 }}
+            style={{ ...iconBtn(36), flexShrink: 0, marginLeft: 'auto' }}
             onClick={() => {
               if (searchOpen) { setSearchOpen(false); setSearch(''); }
               else setSearchOpen(true);
@@ -1649,7 +1712,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
                     playlistId: currentPlaylistId,
                     branchName: currentBranchName,
                     hash: track.hash,
-                    message: '',
+                    message: `Remove: ${track.title}`,
                   }).catch(() => loadTracks());
                 }}
               />
@@ -1712,6 +1775,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
         <EditSheet
           playlist={playlist}
           currentBranchName={currentBranchName}
+          trackHashes={playlistTracks.map(t => t.hash)}
           onClose={() => setSheet(null)}
           onSaved={() => handleRefresh()}
           onDeleted={() => onBack()}

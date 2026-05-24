@@ -1130,7 +1130,7 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
         <PullSpinner pullY={pullY} refreshing={refreshing}/>
         <div style={{ padding: '14px 22px 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.5 }}>Playlists</h1>
-          <button style={iconBtn(36)}><Icons.plus size={20} stroke="var(--accent)"/></button>
+          <button disabled style={{ ...iconBtn(36), opacity: 0.3, cursor: 'default' }} title="Playlist creation coming soon"><Icons.plus size={20} stroke="var(--text-2)"/></button>
         </div>
         <div style={{ padding: '4px 22px 12px', fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>
           {playlists.length} playlist{playlists.length !== 1 ? 's' : ''}
