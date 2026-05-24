@@ -17,10 +17,10 @@ function fmtMs(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function CoverflowCard({ track, size, glow }: { track: TrackRecord; size: number; glow: boolean }) {
+const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow }: { track: TrackRecord; size: number; glow: boolean }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
   return <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>;
-}
+});
 
 
 function QueueSheetRow({ track }: { track: TrackRecord }) {
@@ -203,6 +203,9 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
 
   const animateTo = (t: number) => {
     if (animFr.current) cancelAnimationFrame(animFr.current);
+    // Cancel any in-progress drag so touch handlers don't fight the programmatic animation.
+    dragX.current = null;
+    dragging.current = false;
     posRef.current = Math.max(0, Math.min(tracks.length - 1, posRef.current));
     const s = posRef.current, d = t - s;
     if (Math.abs(d) < 0.001) {
