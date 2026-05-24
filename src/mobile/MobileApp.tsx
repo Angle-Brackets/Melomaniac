@@ -49,23 +49,21 @@ export default function MobileApp() {
     });
     // Restore last-selected playlist after playlists load and pre-populate the queue
     loadPlaylists().then(() => {
+      const { playlists, setCurrentPlaylist, setPlayingBranch, loadQueue, branchByPlaylist } = useStore.getState();
+      if (!playlists.length) return;
       const saved = localStorage.getItem('mm_last_playlist');
-      if (!saved) return;
-      const { playlists, setCurrentPlaylist, setPlayingBranch, loadQueue } = useStore.getState();
-      const pl = playlists.find(p => p.id === saved);
-      if (!pl) return;
-      setCurrentPlaylist(saved); // restores persisted browsing branch from branchByPlaylist
+      const targetId = (saved && playlists.find(p => p.id === saved)) ? saved : playlists[0].id;
+      const pl = playlists.find(p => p.id === targetId)!;
+      setCurrentPlaylist(targetId);
       const branchName = useStore.getState().currentBranchName;
       const validBranch = pl.branches.find(b => b.name === branchName)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
-      setPlayingBranch(validBranch); // initialize playing branch to match restored queue
-      invoke<import('../store/types').PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: saved, branchName: validBranch })
+      setPlayingBranch(validBranch);
+      invoke<import('../store/types').PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: targetId, branchName: validBranch })
         .then(ptracks => {
           loadQueue(ptracks.map(t => t.hash));
           useStore.getState().hydrateTracksFromPlaylist(ptracks);
         })
         .catch(() => {});
-      // Prefetch playlist artworks (use persisted branch per playlist)
-      const { branchByPlaylist } = useStore.getState();
       playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
     });
   }, []);

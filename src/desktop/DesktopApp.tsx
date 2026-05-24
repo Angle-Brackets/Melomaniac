@@ -321,11 +321,24 @@ export default function DesktopApp(): JSX.Element {
   // ── Load real playlists from backend ─────────────────────────────────────
   const reloadPlaylists = useCallback(() => {
     invoke<PlaylistRecord[]>('playlist_get_all')
-      .then(setPlaylistRecords)
+      .then(records => {
+        setPlaylistRecords(records);
+        setActivePlaylistId(prev => {
+          if (prev !== null) return prev;
+          const saved = localStorage.getItem('mm_last_desktop_playlist');
+          if (saved && records.some(r => r.id === saved)) return saved;
+          return records[0]?.id ?? null;
+        });
+      })
       .catch(console.error);
   }, []);
 
   useEffect(() => { reloadPlaylists(); }, []);
+
+  // Persist active playlist so it survives restarts
+  useEffect(() => {
+    if (activePlaylistId) localStorage.setItem('mm_last_desktop_playlist', activePlaylistId);
+  }, [activePlaylistId]);
 
   // ── Reset branch when switching playlists ────────────────────────────────
   useEffect(() => {
