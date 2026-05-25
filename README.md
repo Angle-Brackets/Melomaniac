@@ -1,6 +1,6 @@
 # Melomaniac
 
-<img align="right" src="src-tauri/icons/icon.png" width="180" alt="Melomaniac logo"/>
+<img align="right" src="icon-transparent.png" width="180" alt="Melomaniac logo"/>
 
 [![CI](https://github.com/Angle-Brackets/Melomaniac/actions/workflows/ci.yml/badge.svg)](https://github.com/Angle-Brackets/Melomaniac/actions/workflows/ci.yml)
 ![Tauri 2](https://img.shields.io/badge/Tauri-2-blue?logo=tauri)
