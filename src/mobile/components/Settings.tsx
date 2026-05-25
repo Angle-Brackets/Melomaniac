@@ -17,7 +17,7 @@ function fmtBytes(b: number): string {
   return `${(b / 1024 ** 3).toFixed(2)} GB`;
 }
 const GITHUB_URL   = 'https://github.com/Angle-Brackets/Melomaniac';
-const BUILD_DATE   = 'May 17, 2026';
+const BUILD_DATE   = __BUILD_DATE__;
 
 // ── Persistence ────────────────────────────────────────────────────────────────
 // All settings are written to localStorage under SETTINGS_KEY as a flat JSON

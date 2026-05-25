@@ -10,6 +10,12 @@ export default defineConfig(async () => ({
   // @tailwindcss/vite replaces the PostCSS pipeline — no postcss.config needed
   plugins: [tailwindcss(), react()],
 
+  define: {
+    __BUILD_DATE__: JSON.stringify(
+      new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    ),
+  },
+
   clearScreen: false,
   test: {
     environment: "node",
