@@ -26,7 +26,7 @@ Download the latest installer for your platform from the [Releases](https://gith
 | macOS | `.dmg` (universal — Intel + Apple Silicon) |
 | Linux | `.deb` (Debian/Ubuntu) · `.AppImage` (portable) |
 | Windows | `.msi` · `.exe` (NSIS) |
-| iOS | Build from source (see [Development](#development)) |
+| iOS | Build from source (see [Development](#development)) or [Testflight](https://testflight.apple.com/join/UVZ7kB4H) |
 
 macOS: if you see "unidentified developer", right-click → Open the first time (Gatekeeper bypass for unsigned apps).
 
