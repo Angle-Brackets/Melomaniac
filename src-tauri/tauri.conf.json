@@ -39,7 +39,8 @@
     ],
     "iOS": {
       "developmentTeam": "76438TBLFL",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "minimumSystemVersion": "16.0"
     }
   }
 }
