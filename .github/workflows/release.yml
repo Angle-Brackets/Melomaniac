@@ -63,11 +63,8 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: |
           curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos \
-            -o src-tauri/binaries/yt-dlp-x86_64-apple-darwin
-          cp src-tauri/binaries/yt-dlp-x86_64-apple-darwin \
-            src-tauri/binaries/yt-dlp-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/yt-dlp-x86_64-apple-darwin \
-            src-tauri/binaries/yt-dlp-aarch64-apple-darwin
+            -o src-tauri/binaries/yt-dlp-universal-apple-darwin
+          chmod +x src-tauri/binaries/yt-dlp-universal-apple-darwin
 
       - name: Download yt-dlp sidecar (Windows)
         if: matrix.os == 'windows-latest'
