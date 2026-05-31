@@ -1,6 +1,6 @@
 {
   "productName": "Melomaniac",
-  "version": "1.0.0-alpha",
+  "version": "1.0.0",
   "identifier": "com.melomaniac.app",
   "build": {
     "beforeDevCommand": "npm run dev",
