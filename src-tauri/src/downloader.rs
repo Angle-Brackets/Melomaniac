@@ -142,7 +142,7 @@ async fn do_download(
     let tmp_template = format!("/tmp/melomaniac_{}.%(ext)s", id);
 
     let (mut rx, _child) = app.shell()
-        .sidecar("yt-dlp")
+        .sidecar("melomaniac-ytdlp")
         .map_err(|e| e.to_string())?
         .args([
             "--format",         "bestaudio[ext=m4a]/bestaudio",

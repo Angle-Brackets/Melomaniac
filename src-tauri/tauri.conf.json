@@ -28,7 +28,7 @@
     "active": true,
     "targets": "all",
     "externalBin": [
-      "binaries/yt-dlp"
+      "binaries/melomaniac-ytdlp"
     ],
     "icon": [
       "icons/32x32.png",
