@@ -1,0 +1,233 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+/* ── CSS Variables ─────────────────────────────────────────────────────────── */
+/* Fallback values (JS overrides these on mount via the settings effect) */
+:root {
+  --bg-0: #110b04;
+  --bg-1: #1a1007;
+  --bg-2: #22160a;
+  --bg-3: #2c1d0e;
+  --bg-4: #382513;
+  --bg-5: #452e18;
+  --accent: #d4803c;
+  --accent-light: #eca04e;
+  --accent-dim: #7a4820;
+  --text-0: #f5e6cc;
+  --text-1: #c09a72;
+  --text-2: #8a6440;
+  --text-3: #5a3e20;
+  --border-0: #1e1208;
+  --border-1: #2a1a0c;
+  --border-2: #3e2814;
+  --green: #4ead7a;
+  --blue: #7ab0d8;
+}
+
+/* ── Box-sizing scope ──────────────────────────────────────────────────────── */
+.desktop-root *, .desktop-root *::before, .desktop-root *::after {
+  box-sizing: border-box;
+}
+
+/* ── Root layout ───────────────────────────────────────────────────────────── */
+/* Fills the Tauri window; no centering or inner shadow needed since decorations=false */
+.desktop-root {
+  width: 100vw;
+  height: 100vh;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-window {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: var(--bg-2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ── Custom title bar ──────────────────────────────────────────────────────── */
+/* decorations=false means we own the entire window chrome */
+.titlebar {
+  height: 32px;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border-0);
+  display: flex;
+  align-items: center;
+  padding: 0;
+  flex-shrink: 0;
+  position: relative;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar-title {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Window control buttons — no-drag so clicks land on the button, not the drag region */
+.titlebar-btn {
+  width: 46px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+  transition: background 0.1s, color 0.1s;
+  font-family: 'Outfit', sans-serif;
+  flex-shrink: 0;
+}
+.titlebar-btn:hover             { background: var(--bg-3); color: var(--text-0); }
+.titlebar-btn-close:hover       { background: #c0392b; color: #fff; }
+
+/* ── Track list grid ───────────────────────────────────────────────────────── */
+/* Custom column layout — DaisyUI table is too opinionated for this grid */
+.tl-row {
+  display: grid;
+  grid-template-columns: 18px 24px 28px 1fr 0.65fr 0.65fr 72px 68px 54px 28px;
+  padding: 4px 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-0);
+  gap: 0;
+  min-width: 0;
+  transition: background 0.1s;
+}
+.tl-row:hover     { background: var(--bg-4); }
+.tl-row.active-row              { background: var(--bg-5); }
+.tl-row.active-row:hover        { background: var(--bg-5); }
+
+/* Density variants */
+[data-density="compact"] .tl-row  { padding-top: 1px; padding-bottom: 1px; }
+[data-density="normal"]  .tl-row  { padding-top: 3px; padding-bottom: 3px; }
+/* relaxed uses the default 4px padding */
+
+.tl-cell {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+  min-width: 0;
+}
+.tl-cell.bright { color: var(--text-0); }
+.tl-cell.muted  { color: var(--text-2); }
+.tl-cell.mono   { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-2); }
+
+/* ── Seek / volume bars ────────────────────────────────────────────────────── */
+/* Custom because of the draggable A·B loop markers overlaid on the seek track */
+.seek-track {
+  height: 3px;
+  background: var(--border-1);
+  border-radius: 2px;
+  position: relative;
+  transition: height 0.12s;
+}
+.seek-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* ── Rail icon tooltips ────────────────────────────────────────────────────── */
+/* DaisyUI tooltip uses data-tip but requires absolute positioning we can't easily control here */
+.rail-icon-wrap {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+.rail-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  background: var(--bg-4);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 5px 8px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-1);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+  z-index: 200;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  font-family: 'Outfit', sans-serif;
+}
+.rail-icon-wrap:hover .rail-tooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* ── Custom scrollbar ──────────────────────────────────────────────────────── */
+.styled-scroll::-webkit-scrollbar        { width: 4px; height: 4px; }
+.styled-scroll::-webkit-scrollbar-track  { background: transparent; }
+.styled-scroll::-webkit-scrollbar-thumb  { background: var(--border-2); border-radius: 2px; }
+.styled-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ── Animations ────────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes mm-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--mm-dist, -200px)); }
+}
+.tl-context-menu { animation: fadeInScale 0.12s ease; }
+
+/* ── Modal enter / exit ────────────────────────────────────────────────────── */
+@keyframes mm-modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+@keyframes mm-modal-out {
+  from { opacity: 1; transform: scale(1)    translateY(0); }
+  to   { opacity: 0; transform: scale(0.95) translateY(6px); }
+}
+@keyframes mm-backdrop-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mm-backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+
+.mm-modal-box      { animation: mm-modal-in    190ms cubic-bezier(0.34, 1.4, 0.64, 1) both; }
+.mm-modal-box-exit { animation: mm-modal-out   155ms ease-in both; }
+.mm-backdrop       { animation: mm-backdrop-in  190ms ease both; }
+.mm-backdrop-exit  { animation: mm-backdrop-out 155ms ease both; }
+div:hover > .lib-delete-btn { opacity: 1 !important; }

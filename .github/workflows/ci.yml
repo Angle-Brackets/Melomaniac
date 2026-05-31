@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "a*"]
+  pull_request:
+
+jobs:
+  # ── Rust tests ────────────────────────────────────────────────────────────────
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            libasound2-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Run storage tests
+        working-directory: src-tauri
+        run: cargo test -p melomaniac-storage
+
+      - name: Run audio type tests (device-requiring tests are skipped)
+        working-directory: src-tauri
+        run: cargo test -p melomaniac-audio
+
+  # ── TypeScript tests ──────────────────────────────────────────────────────────
+  frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Run Vitest
+        run: npm test

@@ -1,0 +1,2 @@
+ALTER TABLE tracks ADD COLUMN ingested_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracks ADD COLUMN source_url  TEXT;
