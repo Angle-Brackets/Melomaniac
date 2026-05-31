@@ -68,6 +68,11 @@ jobs:
         env:
           VITE_PLATFORM: ios
 
+      - name: Initialize Xcode project
+        run: npx tauri ios init
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
       - name: Build iOS IPA
         run: npx tauri ios build --export-method app-store-connect
         env:
