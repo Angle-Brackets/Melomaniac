@@ -23,6 +23,8 @@ type MobileSavedPlaybackState = {
   hash: string; durationMs: number;
   playlistId: string | null; branchName: string | null;
   shuffle: ShuffleMode;
+  shuffledQueue?: string[];
+  shuffleIndex?: number;
 };
 
 export default function MobileApp() {
@@ -89,9 +91,19 @@ export default function MobileApp() {
               const s = useStore.getState();
               s.setLoaded(restore.hash, restore.durationMs);
               s.setPlaying(true);
-              if (restore.shuffle !== ShuffleMode.Off) s.setShuffle(restore.shuffle);
-              const idx = ptracks.findIndex(t => t.hash === restore.hash);
-              if (idx >= 0) s.jumpTo(idx);
+              if (restore.shuffle !== ShuffleMode.Off) {
+                s.setShuffle(restore.shuffle); // sets mode + refills queue
+                if (restore.shuffledQueue?.length && restore.shuffleIndex != null) {
+                  const validSet = new Set(ptracks.map(t => t.hash));
+                  const filtered = restore.shuffledQueue.filter(h => validSet.has(h));
+                  if (filtered.length > 0) {
+                    useStore.setState({ shuffledQueue: filtered, shuffleIndex: restore.shuffleIndex });
+                  }
+                }
+              } else {
+                const idx = ptracks.findIndex(t => t.hash === restore.hash);
+                if (idx >= 0) s.jumpTo(idx);
+              }
             }
           }
         })
@@ -118,6 +130,8 @@ export default function MobileApp() {
           playlistId: state.currentPlaylistId,
           branchName: state.playingBranchName,
           shuffle: state.shuffle,
+          shuffledQueue: state.shuffle !== ShuffleMode.Off ? state.shuffledQueue : undefined,
+          shuffleIndex: state.shuffle !== ShuffleMode.Off ? state.shuffleIndex : undefined,
         } satisfies MobileSavedPlaybackState));
       } else {
         localStorage.removeItem('melomaniac.playback_state');

@@ -261,6 +261,7 @@ export default function DesktopApp(): JSX.Element {
     hash: string; durationMs: number;
     playlistId: string | null; branchName: string | null;
     isShuffle: boolean; shuffleMode: ShuffleMode;
+    shuffledHashes?: string[]; // persisted queue order when shuffle is on
   };
   const pendingRestoreRef = useRef<SavedPlaybackState | null>(null);
 
@@ -347,7 +348,15 @@ export default function DesktopApp(): JSX.Element {
     useStore.getState().setPlaying(true);
     if (r.isShuffle) {
       setIsShuffle(true);
-      setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode));
+      if (r.shuffledHashes?.length) {
+        const validSet = new Set(trackOrder.map(t => t.hash));
+        const restored = r.shuffledHashes
+          .filter(h => validSet.has(h))
+          .map(h => trackOrder.find(t => t.hash === h)!);
+        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode));
+      } else {
+        setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode));
+      }
     }
     pendingRestoreRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -459,7 +468,15 @@ export default function DesktopApp(): JSX.Element {
     useStore.getState().setPlaying(true);
     if (r.isShuffle) {
       setIsShuffle(true);
-      setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode));
+      if (r.shuffledHashes?.length) {
+        const validSet = new Set(playlistTracks.map(t => t.hash));
+        const restored = r.shuffledHashes
+          .filter(h => validSet.has(h))
+          .map(h => playlistTracks.find(t => t.hash === h)!);
+        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode));
+      } else {
+        setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode));
+      }
     }
     pendingRestoreRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -679,13 +696,14 @@ export default function DesktopApp(): JSX.Element {
           hash: state.loadedTrackHash, durationMs: state.duration_ms,
           playlistId: activePlaylistId, branchName: activeBranch,
           isShuffle, shuffleMode: settings.shuffleMode,
+          shuffledHashes: isShuffle && shuffledQueue ? shuffledQueue.map(t => t.hash) : undefined,
         } satisfies SavedPlaybackState));
       } else {
         localStorage.removeItem('melomaniac.playback_state');
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode]);
+  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode, shuffledQueue]);
 
   // ── Persist sidebar state to localStorage ────────────────────────────────
   useEffect(() => {
