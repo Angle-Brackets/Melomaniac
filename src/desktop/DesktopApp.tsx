@@ -127,6 +127,9 @@ export default function DesktopApp(): JSX.Element {
   const syncVersion              = useStore(s => s.syncVersion);
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const reopenConflict           = useStore(s => s.reopenConflict);
+  const isPlaying  = useStore(s => s.isPlaying);
+  const loadedHash = useStore(s => s.loadedTrackHash);
+  const durationMs = useStore(s => s.duration_ms);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -176,16 +179,13 @@ export default function DesktopApp(): JSX.Element {
   });
   const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
   const [activeTrackId, setActiveTrackId] = useState(1);
-  const [isPlaying, setIsPlaying] = useState(false);
   // User-local favorites — persisted to localStorage, never committed to git
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('melomaniac.favorites') ?? '[]')); } catch { return new Set(); }
   });
   const [isShuffle, setIsShuffle] = useState(false);
   const [shuffledQueue, setShuffledQueue] = useState<Track[] | null>(null);
-  const [loadedHash, setLoadedHash] = useState<string | null>(null);
   const [positionMs, setPositionMs] = useState(0);
-  const [durationMs, setDurationMs] = useState(0);
   const lastSeekTime = useRef(0);
   // Live position updated on every PositionChanged without triggering a re-render.
   // PlayerControls / MiniPlayer read this via rAF and update their DOM directly.
@@ -340,12 +340,11 @@ export default function DesktopApp(): JSX.Element {
     if (!r || r.playlistId !== null || trackOrder.length === 0) return;
     const track = trackOrder.find(t => t.hash === r.hash);
     if (!track) { pendingRestoreRef.current = null; return; }
-    setLoadedHash(r.hash);
+    useStore.getState().setLoaded(r.hash, r.durationMs);
     setActiveTrackId(track.id);
-    setDurationMs(r.durationMs);
     sr.current.durationMs = r.durationMs;
     hasRecordedPlayRef.current = true;
-    setIsPlaying(true);
+    useStore.getState().setPlaying(true);
     if (r.isShuffle) {
       setIsShuffle(true);
       setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode));
@@ -453,12 +452,11 @@ export default function DesktopApp(): JSX.Element {
     if (activePlaylistId !== r.playlistId || activeBranch !== r.branchName) return;
     const track = playlistTracks.find(t => t.hash === r.hash);
     if (!track) { pendingRestoreRef.current = null; return; }
-    setLoadedHash(r.hash);
+    useStore.getState().setLoaded(r.hash, r.durationMs);
     setActiveTrackId(track.id);
-    setDurationMs(r.durationMs);
     sr.current.durationMs = r.durationMs;
     hasRecordedPlayRef.current = true;
-    setIsPlaying(true);
+    useStore.getState().setPlaying(true);
     if (r.isShuffle) {
       setIsShuffle(true);
       setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode));
@@ -529,13 +527,12 @@ export default function DesktopApp(): JSX.Element {
 
     const loadTrack = (track: Track) => {
       setActiveTrackId(track.id);
-      setLoadedHash(track.hash);
-      setDurationMs(track.duration_ms);
+      useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
       setPositionMs(0);
       livePositionMsRef.current = 0;
       hasRecordedPlayRef.current = false;
-      setIsPlaying(true);
+      useStore.getState().setPlaying(true);
       invoke('track_play', { hash: track.hash }).catch(console.error);
     };
 
@@ -573,7 +570,11 @@ export default function DesktopApp(): JSX.Element {
         }
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
-        if (payload.DurationKnown > 0) setDurationMs(payload.DurationKnown);
+        if (payload.DurationKnown > 0) {
+          const lh = useStore.getState().loadedTrackHash;
+          if (lh) useStore.getState().setLoaded(lh, payload.DurationKnown);
+          sr.current.durationMs = payload.DurationKnown;
+        }
       }
       if (payload === 'TrackEnded') {
         setPositionMs(0);
@@ -581,7 +582,7 @@ export default function DesktopApp(): JSX.Element {
 
         if (lm === 'one') {
           if (lh) invoke('track_play', { hash: lh }).catch(console.error);
-          setIsPlaying(true);
+          useStore.getState().setPlaying(true);
           return;
         }
         if (lm === 'ab') {
@@ -590,7 +591,7 @@ export default function DesktopApp(): JSX.Element {
           setPositionMs(aMs);
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
           invoke('audio_play').catch(console.error);
-          setIsPlaying(true);
+          useStore.getState().setPlaying(true);
           return;
         }
 
@@ -625,9 +626,9 @@ export default function DesktopApp(): JSX.Element {
           loadTrack(pq[nextIdx]);
         }
       }
-      if (payload === 'RemotePlay')  setIsPlaying(true);
-      if (payload === 'RemotePause') setIsPlaying(false);
-      if (payload === 'RemoteTogglePlayPause') setIsPlaying(p => !p);
+      if (payload === 'RemotePlay')  useStore.getState().setPlaying(true);
+      if (payload === 'RemotePause') useStore.getState().setPlaying(false);
+      if (payload === 'RemoteTogglePlayPause') { const s = useStore.getState(); s.setPlaying(!s.isPlaying); }
       if (payload === 'RemoteNextTrack')     skipNextRef.current();
       if (payload === 'RemotePreviousTrack') skipPrevRef.current();
     }).then(fn => { unlisten = fn; });
@@ -672,16 +673,19 @@ export default function DesktopApp(): JSX.Element {
 
   // ── Persist playback state for WebView-restart recovery ─────────────────
   useEffect(() => {
-    if (loadedHash) {
-      localStorage.setItem('melomaniac.playback_state', JSON.stringify({
-        hash: loadedHash, durationMs,
-        playlistId: activePlaylistId, branchName: activeBranch,
-        isShuffle, shuffleMode: settings.shuffleMode,
-      } satisfies SavedPlaybackState));
-    } else {
-      localStorage.removeItem('melomaniac.playback_state');
-    }
-  }, [loadedHash, durationMs, activePlaylistId, activeBranch, isShuffle, settings.shuffleMode]);
+    return useStore.subscribe(state => {
+      if (state.loadedTrackHash) {
+        localStorage.setItem('melomaniac.playback_state', JSON.stringify({
+          hash: state.loadedTrackHash, durationMs: state.duration_ms,
+          playlistId: activePlaylistId, branchName: activeBranch,
+          isShuffle, shuffleMode: settings.shuffleMode,
+        } satisfies SavedPlaybackState));
+      } else {
+        localStorage.removeItem('melomaniac.playback_state');
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode]);
 
   // ── Persist sidebar state to localStorage ────────────────────────────────
   useEffect(() => {
@@ -966,19 +970,18 @@ export default function DesktopApp(): JSX.Element {
       // Already loaded — just toggle pause/resume
       if (isPlaying) {
         invoke('audio_pause').catch(console.error);
-        setIsPlaying(false);
+        useStore.getState().setPlaying(false);
       } else {
         invoke('audio_play').catch(console.error);
-        setIsPlaying(true);
+        useStore.getState().setPlaying(true);
       }
     } else {
       // Different track — load and play it
       setActiveTrackId(id);
       invoke('track_play', { hash: track.hash }).catch(console.error);
-      setIsPlaying(true);
-      setLoadedHash(track.hash);
-      setDurationMs(track.duration_ms);
+      useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
+      useStore.getState().setPlaying(true);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
     }
   };
@@ -992,10 +995,9 @@ export default function DesktopApp(): JSX.Element {
       setManualQueue(rest);
       setActiveTrackId(next.id);
       invoke('track_play', { hash: next.hash }).catch(console.error);
-      setIsPlaying(true);
-      setLoadedHash(next.hash);
-      setDurationMs(next.duration_ms);
+      useStore.getState().setLoaded(next.hash, next.duration_ms);
       sr.current.durationMs = next.duration_ms;
+      useStore.getState().setPlaying(true);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       return;
     }
@@ -1007,10 +1009,9 @@ export default function DesktopApp(): JSX.Element {
     const next = q[nextIdx];
     setActiveTrackId(next.id);
     invoke('track_play', { hash: next.hash }).catch(console.error);
-    setIsPlaying(true);
-    setLoadedHash(next.hash);
-    setDurationMs(next.duration_ms);
+    useStore.getState().setLoaded(next.hash, next.duration_ms);
     sr.current.durationMs = next.duration_ms;
+    useStore.getState().setPlaying(true);
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
   };
   skipNextRef.current = handleSkipNext;
@@ -1020,7 +1021,7 @@ export default function DesktopApp(): JSX.Element {
     if (livePositionMsRef.current > 3000 && loadedHash) {
       invoke('track_play', { hash: loadedHash }).catch(console.error);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-      setIsPlaying(true);
+      useStore.getState().setPlaying(true);
       return;
     }
     if (loadedHash)
@@ -1033,10 +1034,9 @@ export default function DesktopApp(): JSX.Element {
     const prev = q[prevIdx];
     setActiveTrackId(prev.id);
     invoke('track_play', { hash: prev.hash }).catch(console.error);
-    setIsPlaying(true);
-    setLoadedHash(prev.hash);
-    setDurationMs(prev.duration_ms);
+    useStore.getState().setLoaded(prev.hash, prev.duration_ms);
     sr.current.durationMs = prev.duration_ms;
+    useStore.getState().setPlaying(true);
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
   };
   skipPrevRef.current = handleSkipPrev;
@@ -1049,31 +1049,29 @@ export default function DesktopApp(): JSX.Element {
       if (!queueTrack || queueTrack.hash === loadedHash) {
         if (isPlaying) {
           invoke('audio_pause').catch(console.error);
-          setIsPlaying(false);
+          useStore.getState().setPlaying(false);
         } else {
           invoke('audio_play').catch(console.error);
-          setIsPlaying(true);
+          useStore.getState().setPlaying(true);
         }
         return;
       }
       // A different track is selected in the queue — load it
       invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
-      setLoadedHash(queueTrack.hash);
-      setDurationMs(queueTrack.duration_ms);
+      useStore.getState().setLoaded(queueTrack.hash, queueTrack.duration_ms);
       sr.current.durationMs = queueTrack.duration_ms;
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-      setIsPlaying(true);
+      useStore.getState().setPlaying(true);
       return;
     }
     // Nothing loaded yet — load the selected track from the queue
     const track = playQueue.find(t => t.id === activeTrackId);
     if (!track?.hash) return;
     invoke('track_play', { hash: track.hash }).catch(console.error);
-    setLoadedHash(track.hash);
-    setDurationMs(track.duration_ms);
+    useStore.getState().setLoaded(track.hash, track.duration_ms);
     sr.current.durationMs = track.duration_ms;
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-    setIsPlaying(true);
+    useStore.getState().setPlaying(true);
   };
 
   return (
@@ -1158,7 +1156,7 @@ export default function DesktopApp(): JSX.Element {
                   });
                   fetchedHashesRef.current.add(newHash);
                   fetchedHashesRef.current.delete(oldHash);
-                  if (loadedHash === oldHash) setLoadedHash(newHash);
+                  if (loadedHash === oldHash) useStore.getState().setLoaded(newHash, durationMs);
                   setMeloToast('Metadata saved · committed to all branches');
                   setTimeout(() => setMeloToast(null), 3000);
                   setCommitRefreshKey(k => k + 1);
@@ -1379,8 +1377,8 @@ export default function DesktopApp(): JSX.Element {
             onCollapse={() => setMiniPlayerCollapsed(true)}
             onStop={() => {
               invoke('audio_stop').catch(console.error);
-              setIsPlaying(false);
-              setLoadedHash(null);
+              useStore.getState().setPlaying(false);
+              useStore.getState().setLoaded(null, 0);
               setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
             }}
           />

@@ -10,7 +10,7 @@ export type PlaybackSlice = {
   // audio://event listener. Putting it here would re-render the entire component tree on every tick.
 
   setPlaying: (v: boolean) => void
-  setLoaded: (hash: string, duration_ms: number) => void
+  setLoaded: (hash: string | null, duration_ms: number) => void
   setVolume: (v: number) => void
 }
 
