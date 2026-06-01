@@ -122,6 +122,7 @@ export default function DesktopApp(): JSX.Element {
   const openPairingDisplay       = useStore(s => s.openPairingDisplay);
   const syncToast                = useStore(s => s.syncToast);
   const refreshLivePeers         = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices      = useStore(s => s.refreshKnownDevices);
   const loadPlaylists            = useStore(s => s.loadPlaylists);
   const artworkVersion           = useStore(s => s.artworkVersion);
   const syncVersion              = useStore(s => s.syncVersion);
@@ -300,6 +301,7 @@ export default function DesktopApp(): JSX.Element {
   // state to compare against before the first poll fires.
   useEffect(() => {
     loadPlaylists().then(() => refreshLivePeers())
+    refreshKnownDevices()
     const id = setInterval(refreshLivePeers, 15_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -310,20 +312,14 @@ export default function DesktopApp(): JSX.Element {
     if (syncVersion > 0) setCommitRefreshKey(k => k + 1)
   }, [syncVersion]);
 
-  // Fetch the persisted commit author name from the backend on mount
+  // Push commit author to the backend on mount and whenever the setting changes.
+  // We do NOT read back from get_commit_author: Rust initialises from $USER (not
+  // persisted to disk), so fetching it on startup would overwrite the user's
+  // localStorage value with their OS username.
   useEffect(() => {
-    invoke<string>('get_commit_author')
-      .then(name => { if (name) updateSetting('commitAuthor', name); })
-      .catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Push commit author changes to the backend whenever the setting is updated
-  useEffect(() => {
-    if (settings.commitAuthor) {
-      invoke('set_commit_author', { name: settings.commitAuthor }).catch(console.error);
-    }
+    invoke('set_commit_author', { name: settings.commitAuthor }).catch(console.error);
   }, [settings.commitAuthor]);
+
 
   // ── Load real tracks from storage on mount ───────────────────────────────
   const reloadLibrary = useCallback(() => {
@@ -483,18 +479,25 @@ export default function DesktopApp(): JSX.Element {
   }, [playlistTracks]);
 
   // ── Discord Rich Presence ─────────────────────────────────────────────────
+  // Connect/disconnect the client first, then set the current activity so the
+  // now-playing status is live immediately on startup and on every track change.
+  // Chaining ensures discord_set_activity never races against an unfinished connect.
   useEffect(() => {
-    if (!settings.discordEnabled) return;
-    const track = trackOrder.find(t => t.hash === loadedHash);
-    if (track) {
-      invoke('discord_set_activity', {
-        title: track.title,
-        artist: track.artist,
-        album: track.album ?? null,
-      }).catch(console.error);
-    } else {
-      invoke('discord_clear_activity').catch(console.error);
-    }
+    invoke('discord_apply_settings', { enabled: settings.discordEnabled })
+      .then(() => {
+        if (!settings.discordEnabled) return;
+        const track = trackOrder.find(t => t.hash === loadedHash);
+        if (track) {
+          invoke('discord_set_activity', {
+            title: track.title,
+            artist: track.artist,
+            album: track.album ?? null,
+          }).catch(console.error);
+        } else {
+          invoke('discord_clear_activity').catch(console.error);
+        }
+      })
+      .catch(console.error);
   }, [loadedHash, settings.discordEnabled]);
 
   // ── Global Stats Listener ────────────────────────────────────────────────

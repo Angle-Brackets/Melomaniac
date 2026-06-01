@@ -44,6 +44,7 @@ export default function MobileApp() {
   const syncToast            = useStore(s => s.syncToast);
   const setDownloadProgress  = useStore(s => s.setDownloadProgress);
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices  = useStore(s => s.refreshKnownDevices);
 
   useEffect(() => {
     const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
@@ -142,6 +143,7 @@ export default function MobileApp() {
   // ── Background peer poll — drives auto-sync when a known device comes online ──
   useEffect(() => {
     refreshLivePeers()
+    refreshKnownDevices()
     // Second poll after 4 s catches mDNS re-discovery lag after app resume —
     // NWBrowser can take a few seconds to re-find peers on the local network.
     const earlyId = setTimeout(refreshLivePeers, 4_000)

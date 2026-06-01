@@ -101,9 +101,13 @@ const THEME_PILLS: { id: ThemeName; label: string }[] = [
 export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const openPairingDisplay      = useStore(s => s.openPairingDisplay);
   const livePeers               = useStore(s => s.livePeers);
+  const knownDevices            = useStore(s => s.knownDevices);
   const refreshLivePeers        = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices     = useStore(s => s.refreshKnownDevices);
   const openPeerManifest        = useStore(s => s.openPeerManifest);
+
+  const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
+  const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const playlists               = useStore(s => s.playlists);
   const reopenConflict          = useStore(s => s.reopenConflict);
@@ -408,7 +412,23 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
               detail={peer.latency_ms != null ? `${peer.latency_ms}ms` : undefined}
               onClick={() => openPeerManifest(peer)}
             >
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'oklch(0.72 0.17 142)', flexShrink: 0, display: 'inline-block' }}/>
               <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>Sync</span>
+            </Row>
+          ))}
+          {offlineDevices.map((device) => (
+            <Row
+              key={device.public_key_b64}
+              title={device.display_name}
+              muted
+            >
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--border-2)', flexShrink: 0, display: 'inline-block' }}/>
+              <button
+                onClick={() => invoke('sync_remove_device', { publicKeyB64: device.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
+                style={{ fontSize: 12, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Remove
+              </button>
             </Row>
           ))}
           <Row title="Pair a device" chev isLast onClick={() => { openPairingDisplay().catch(console.error); }}>

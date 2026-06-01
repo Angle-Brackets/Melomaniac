@@ -1,9 +1,9 @@
 import { useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import type { AppSettings } from '../types';
 import { NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
 import { useStore } from '../../store';
+import { invoke } from '@tauri-apps/api/core';
 
 type NamedThemeName = Exclude<ThemeName, 'custom'>;
 const NAMED_THEME_ENTRIES = Object.entries(NAMED_THEMES) as [NamedThemeName, typeof NAMED_THEMES[NamedThemeName]][];
@@ -20,9 +20,14 @@ interface SettingsModalProps {
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
 
 export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing }: SettingsModalProps) {
-  const livePeers        = useStore(s => s.livePeers);
-  const refreshLivePeers = useStore(s => s.refreshLivePeers);
-  const openPeerManifest = useStore(s => s.openPeerManifest);
+  const livePeers           = useStore(s => s.livePeers);
+  const knownDevices        = useStore(s => s.knownDevices);
+  const refreshLivePeers    = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
+  const openPeerManifest    = useStore(s => s.openPeerManifest);
+
+  const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
+  const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
 
   useEffect(() => {
     refreshLivePeers();
@@ -183,11 +188,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               <input
                 type="checkbox"
                 checked={settings.discordEnabled}
-                onChange={e => {
-                  const enabled = e.target.checked;
-                  updateSetting('discordEnabled', enabled);
-                  invoke('discord_apply_settings', { enabled }).catch(console.error);
-                }}
+                onChange={e => updateSetting('discordEnabled', e.target.checked)}
                 className="toggle toggle-primary toggle-sm"
               />
             </div>
@@ -197,29 +198,35 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
           <section>
             <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Sync</p>
 
-            {/* Reachable peers */}
-            {livePeers.length > 0 && (
-              <div className="mb-2">
-                <div className="flex flex-col gap-1">
-                  {livePeers.map(peer => (
-                    <div key={peer.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2">
-                      <div>
-                        <span className="text-xs text-mm-t0">{peer.display_name}</span>
-                        {peer.latency_ms != null && (
-                          <span className="font-mono text-[9px] text-mm-t2 ml-2">{peer.latency_ms}ms</span>
-                        )}
-                      </div>
-                      <button
-                        className="btn btn-xs btn-primary"
-                        onClick={() => openPeerManifest(peer)}
-                      >
-                        Sync
-                      </button>
-                    </div>
-                  ))}
+            {/* Online peers */}
+            {livePeers.map(peer => (
+              <div key={peer.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2 mb-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                  <span className="text-xs text-mm-t0">{peer.display_name}</span>
+                  {peer.latency_ms != null && (
+                    <span className="font-mono text-[9px] text-mm-t2">{peer.latency_ms}ms</span>
+                  )}
                 </div>
+                <button className="btn btn-xs btn-primary" onClick={() => openPeerManifest(peer)}>Sync</button>
               </div>
-            )}
+            ))}
+
+            {/* Known but offline devices */}
+            {offlineDevices.map(device => (
+              <div key={device.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2 mb-1 opacity-50">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-mm-t3 shrink-0" />
+                  <span className="text-xs text-mm-t1">{device.display_name}</span>
+                </div>
+                <button
+                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2"
+                  onClick={() => invoke('sync_remove_device', { publicKeyB64: device.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
 
             {/* Pair button */}
             <div className="flex items-center justify-between py-2 border-t border-mm-b0 mt-1">
