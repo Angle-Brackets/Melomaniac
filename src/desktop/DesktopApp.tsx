@@ -257,6 +257,13 @@ export default function DesktopApp(): JSX.Element {
   const skipPrevRef  = useRef<() => void>(() => {});
   const abCommitRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  type SavedPlaybackState = {
+    hash: string; durationMs: number;
+    playlistId: string | null; branchName: string | null;
+    isShuffle: boolean; shuffleMode: ShuffleMode;
+  };
+  const pendingRestoreRef = useRef<SavedPlaybackState | null>(null);
+
   // ── Theme effect — all palette logic lives in shared/themes.ts ──────────
   useEffect(() => {
     applyTheme(settings.theme, settings.accentHue);
@@ -270,6 +277,20 @@ export default function DesktopApp(): JSX.Element {
   // Sync initial volume to the audio backend on mount
   useEffect(() => {
     invoke('audio_set_volume', { volume }).catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // On mount, check whether audio is still playing from a previous session (e.g. after a
+  // WebView2 restart on Windows). If audio_position resolves, the bridge still has a track
+  // loaded — mark the saved state for restoration once the library/playlist data arrives.
+  useEffect(() => {
+    const raw = localStorage.getItem('melomaniac.playback_state');
+    if (!raw) return;
+    let saved: SavedPlaybackState;
+    try { saved = JSON.parse(raw); } catch { return; }
+    invoke<number>('audio_position')
+      .then(() => { pendingRestoreRef.current = saved; })
+      .catch(() => { localStorage.removeItem('melomaniac.playback_state'); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -311,6 +332,27 @@ export default function DesktopApp(): JSX.Element {
   }, []);
 
   useEffect(() => { reloadLibrary(); }, []);
+
+  // Restore playback state if audio is still playing and the track came from the library
+  // (no playlist context). Playlist-context restore happens in the playlistTracks effect.
+  useEffect(() => {
+    const r = pendingRestoreRef.current;
+    if (!r || r.playlistId !== null || trackOrder.length === 0) return;
+    const track = trackOrder.find(t => t.hash === r.hash);
+    if (!track) { pendingRestoreRef.current = null; return; }
+    setLoadedHash(r.hash);
+    setActiveTrackId(track.id);
+    setDurationMs(r.durationMs);
+    sr.current.durationMs = r.durationMs;
+    hasRecordedPlayRef.current = true;
+    setIsPlaying(true);
+    if (r.isShuffle) {
+      setIsShuffle(true);
+      setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode));
+    }
+    pendingRestoreRef.current = null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackOrder]);
 
   // ── Refresh library when a download completes ────────────────────────────
   useEffect(() => {
@@ -401,6 +443,29 @@ export default function DesktopApp(): JSX.Element {
       .then(meta => setBranchMeta({ description: meta.description }))
       .catch(() => setBranchMeta(null));
   }, [activePlaylistId, activeBranch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Restore playback state if audio is still playing and the track came from a playlist.
+  // Runs after playlistTracks loads; the playlist change effect may have reset isShuffle
+  // to false, but we override it here since we're restoring a prior session.
+  useEffect(() => {
+    const r = pendingRestoreRef.current;
+    if (!r || r.playlistId === null || !playlistTracks) return;
+    if (activePlaylistId !== r.playlistId || activeBranch !== r.branchName) return;
+    const track = playlistTracks.find(t => t.hash === r.hash);
+    if (!track) { pendingRestoreRef.current = null; return; }
+    setLoadedHash(r.hash);
+    setActiveTrackId(track.id);
+    setDurationMs(r.durationMs);
+    sr.current.durationMs = r.durationMs;
+    hasRecordedPlayRef.current = true;
+    setIsPlaying(true);
+    if (r.isShuffle) {
+      setIsShuffle(true);
+      setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode));
+    }
+    pendingRestoreRef.current = null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlistTracks]);
 
   // ── Discord Rich Presence ─────────────────────────────────────────────────
   useEffect(() => {
@@ -604,6 +669,19 @@ export default function DesktopApp(): JSX.Element {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylist?.id, activeBranch]);
+
+  // ── Persist playback state for WebView-restart recovery ─────────────────
+  useEffect(() => {
+    if (loadedHash) {
+      localStorage.setItem('melomaniac.playback_state', JSON.stringify({
+        hash: loadedHash, durationMs,
+        playlistId: activePlaylistId, branchName: activeBranch,
+        isShuffle, shuffleMode: settings.shuffleMode,
+      } satisfies SavedPlaybackState));
+    } else {
+      localStorage.removeItem('melomaniac.playback_state');
+    }
+  }, [loadedHash, durationMs, activePlaylistId, activeBranch, isShuffle, settings.shuffleMode]);
 
   // ── Persist sidebar state to localStorage ────────────────────────────────
   useEffect(() => {

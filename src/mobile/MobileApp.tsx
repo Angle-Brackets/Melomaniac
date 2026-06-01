@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import './style.css';
 import { applyTheme, writeCustomHue } from '../shared/themes';
 import { useStore } from '../store';
+import { ShuffleMode } from '../store/types';
 import { positionMsRef, loopStateRef } from './playerContext';
 import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
@@ -17,6 +18,12 @@ import type { TabId } from './components/common';
 
 // TAB_ORDER defines the spatial layout used to derive slide direction.
 const TAB_ORDER: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
+
+type MobileSavedPlaybackState = {
+  hash: string; durationMs: number;
+  playlistId: string | null; branchName: string | null;
+  shuffle: ShuffleMode;
+};
 
 export default function MobileApp() {
   const [tab, setTab] = useState<TabId>('now');
@@ -42,17 +49,31 @@ export default function MobileApp() {
     if (theme === 'custom') { writeCustomHue(saved.customAccentHue ?? saved.accentHue ?? 28); applyTheme('custom'); }
     else { applyTheme(theme); }
     // Load library then eagerly prefetch all track artwork into the cache.
-    // By the time the user sees Library or NowPlaying the images are ready.
     loadLibrary().then(() => {
       const { tracks } = useStore.getState();
       tracks.forEach(t => { if (t.artwork_hash) getTrackArtwork(t.hash, t.artwork_hash); });
     });
-    // Restore last-selected playlist after playlists load and pre-populate the queue
-    loadPlaylists().then(() => {
+
+    // Check if audio is still running from a previous session (e.g. after a WebView restart).
+    // audio_position resolving means the bridge still has a track loaded — pair with saved state.
+    const savedPlayback = (() => {
+      try {
+        const raw = localStorage.getItem('melomaniac.playback_state');
+        return raw ? JSON.parse(raw) as MobileSavedPlaybackState : null;
+      } catch { return null; }
+    })();
+    const audioCheckPromise: Promise<MobileSavedPlaybackState | null> = savedPlayback
+      ? invoke<number>('audio_position')
+          .then(() => savedPlayback)
+          .catch(() => { localStorage.removeItem('melomaniac.playback_state'); return null; })
+      : Promise.resolve(null);
+
+    // Restore last-selected playlist and queue, then apply playback restore if needed.
+    Promise.all([loadPlaylists(), audioCheckPromise]).then(([, restore]) => {
       const { playlists, setCurrentPlaylist, setPlayingBranch, loadQueue, branchByPlaylist } = useStore.getState();
       if (!playlists.length) return;
-      const saved = localStorage.getItem('mm_last_playlist');
-      const targetId = (saved && playlists.find(p => p.id === saved)) ? saved : playlists[0].id;
+      const savedPl = localStorage.getItem('mm_last_playlist');
+      const targetId = (savedPl && playlists.find(p => p.id === savedPl)) ? savedPl : playlists[0].id;
       const pl = playlists.find(p => p.id === targetId)!;
       setCurrentPlaylist(targetId);
       const branchName = useStore.getState().currentBranchName;
@@ -62,6 +83,17 @@ export default function MobileApp() {
         .then(ptracks => {
           loadQueue(ptracks.map(t => t.hash));
           useStore.getState().hydrateTracksFromPlaylist(ptracks);
+          if (restore && restore.playlistId === targetId && restore.branchName === validBranch) {
+            const track = ptracks.find(t => t.hash === restore.hash);
+            if (track) {
+              const s = useStore.getState();
+              s.setLoaded(restore.hash, restore.durationMs);
+              s.setPlaying(true);
+              if (restore.shuffle !== ShuffleMode.Off) s.setShuffle(restore.shuffle);
+              const idx = ptracks.findIndex(t => t.hash === restore.hash);
+              if (idx >= 0) s.jumpTo(idx);
+            }
+          }
         })
         .catch(() => {});
       playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
@@ -73,6 +105,23 @@ export default function MobileApp() {
     return useStore.subscribe(state => {
       const id = state.currentPlaylistId;
       if (id) localStorage.setItem('mm_last_playlist', id);
+    });
+  }, []);
+
+  // Persist playback state for WebView-restart recovery
+  useEffect(() => {
+    return useStore.subscribe(state => {
+      if (state.loadedTrackHash) {
+        localStorage.setItem('melomaniac.playback_state', JSON.stringify({
+          hash: state.loadedTrackHash,
+          durationMs: state.duration_ms,
+          playlistId: state.currentPlaylistId,
+          branchName: state.playingBranchName,
+          shuffle: state.shuffle,
+        } satisfies MobileSavedPlaybackState));
+      } else {
+        localStorage.removeItem('melomaniac.playback_state');
+      }
     });
   }, []);
 
