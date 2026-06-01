@@ -482,10 +482,14 @@ export default function DesktopApp(): JSX.Element {
   // Connect/disconnect the client first, then set the current activity so the
   // now-playing status is live immediately on startup and on every track change.
   // Chaining ensures discord_set_activity never races against an unfinished connect.
+  // The stale flag guards against out-of-order resolution when tracks change rapidly:
+  // React runs the cleanup function before the next effect fires, so by the time a
+  // superseded promise chain resolves, stale=true and the set_activity call is skipped.
   useEffect(() => {
+    let stale = false;
     invoke('discord_apply_settings', { enabled: settings.discordEnabled })
       .then(() => {
-        if (!settings.discordEnabled) return;
+        if (stale || !settings.discordEnabled) return;
         const track = trackOrder.find(t => t.hash === loadedHash);
         if (track) {
           invoke('discord_set_activity', {
@@ -498,6 +502,7 @@ export default function DesktopApp(): JSX.Element {
         }
       })
       .catch(console.error);
+    return () => { stale = true; };
   }, [loadedHash, settings.discordEnabled]);
 
   // ── Global Stats Listener ────────────────────────────────────────────────
@@ -610,8 +615,7 @@ export default function DesktopApp(): JSX.Element {
           lastSeekTime.current = Date.now();
           setPositionMs(aMs);
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
-          invoke('audio_play').catch(console.error);
-          useStore.getState().setPlaying(true);
+          useStore.getState().resumeAudio().catch(console.error);
           return;
         }
 
@@ -646,9 +650,9 @@ export default function DesktopApp(): JSX.Element {
           loadTrack(pq[nextIdx]);
         }
       }
-      if (payload === 'RemotePlay')  useStore.getState().setPlaying(true);
-      if (payload === 'RemotePause') useStore.getState().setPlaying(false);
-      if (payload === 'RemoteTogglePlayPause') { const s = useStore.getState(); s.setPlaying(!s.isPlaying); }
+      if (payload === 'RemotePlay')             useStore.getState().resumeAudio().catch(console.error);
+      if (payload === 'RemotePause')            useStore.getState().pauseAudio().catch(console.error);
+      if (payload === 'RemoteTogglePlayPause')  useStore.getState().toggleAudio().catch(console.error);
       if (payload === 'RemoteNextTrack')     skipNextRef.current();
       if (payload === 'RemotePreviousTrack') skipPrevRef.current();
     }).then(fn => { unlisten = fn; });
@@ -989,13 +993,7 @@ export default function DesktopApp(): JSX.Element {
     if (!track?.hash) return;
     if (track.hash === loadedHash) {
       // Already loaded — just toggle pause/resume
-      if (isPlaying) {
-        invoke('audio_pause').catch(console.error);
-        useStore.getState().setPlaying(false);
-      } else {
-        invoke('audio_play').catch(console.error);
-        useStore.getState().setPlaying(true);
-      }
+      useStore.getState().toggleAudio().catch(console.error);
     } else {
       // Different track — load and play it
       setActiveTrackId(id);
@@ -1068,13 +1066,7 @@ export default function DesktopApp(): JSX.Element {
     if (loadedHash) {
       const queueTrack = playQueue.find(t => t.id === activeTrackId);
       if (!queueTrack || queueTrack.hash === loadedHash) {
-        if (isPlaying) {
-          invoke('audio_pause').catch(console.error);
-          useStore.getState().setPlaying(false);
-        } else {
-          invoke('audio_play').catch(console.error);
-          useStore.getState().setPlaying(true);
-        }
+        useStore.getState().toggleAudio().catch(console.error);
         return;
       }
       // A different track is selected in the queue — load it

@@ -274,20 +274,15 @@ export default function MobileApp() {
           const aMs = Math.round(a * dur);
           positionMsRef.current = aMs;
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
-          invoke('audio_play').catch(console.error);
-          useStore.getState().setPlaying(true);
+          useStore.getState().resumeAudio().catch(console.error);
           return;
         }
         playNext();
         return;
       }
-      if (payload === 'RemotePlay')  { useStore.getState().setPlaying(true); return; }
-      if (payload === 'RemotePause') { useStore.getState().setPlaying(false); return; }
-      if (payload === 'RemoteTogglePlayPause') {
-        const s = useStore.getState();
-        s.setPlaying(!s.isPlaying);
-        return;
-      }
+      if (payload === 'RemotePlay')            { useStore.getState().resumeAudio().catch(console.error); return; }
+      if (payload === 'RemotePause')           { useStore.getState().pauseAudio().catch(console.error);  return; }
+      if (payload === 'RemoteTogglePlayPause') { useStore.getState().toggleAudio().catch(console.error); return; }
       if (payload === 'RemoteNextTrack')     { playNext(true); return; }
       if (payload === 'RemotePreviousTrack') { playPrev(); return; }
       if (typeof payload === 'object' && 'RemoteSeek' in payload) {
