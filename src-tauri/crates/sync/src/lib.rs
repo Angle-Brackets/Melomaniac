@@ -335,6 +335,9 @@ pub trait SyncBridge: Send + Sync {
     /// Remove a device from the trust list. The public key must be base64-encoded.
     fn remove_device(&self, public_key_b64: &str) -> Result<(), SyncError>;
 
+    /// Rename a device in the trust list.
+    fn rename_device(&self, public_key_b64: &str, new_name: &str) -> Result<(), SyncError>;
+
     // ── Sync ──────────────────────────────────────────────────────────────────
 
     /// Pull the given playlist branch from the best available trusted peer.

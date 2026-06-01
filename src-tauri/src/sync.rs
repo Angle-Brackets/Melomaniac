@@ -68,6 +68,18 @@ pub async fn sync_remove_device(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn sync_rename_device(
+    public_key_b64: String,
+    new_name: String,
+    state: State<'_, SyncState>,
+) -> Result<(), String> {
+    state
+        .bridge
+        .rename_device(&public_key_b64, &new_name)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Clone, serde::Serialize)]
 struct ProgressPayload {
     playlist_id: String,

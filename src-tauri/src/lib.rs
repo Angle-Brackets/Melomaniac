@@ -286,6 +286,7 @@ pub fn run() {
             sync::sync_accept_qr_pairing,
             sync::sync_known_devices,
             sync::sync_remove_device,
+            sync::sync_rename_device,
             sync::sync_playlist,
             sync::sync_playlist_branches,
             sync::sync_with_peer,

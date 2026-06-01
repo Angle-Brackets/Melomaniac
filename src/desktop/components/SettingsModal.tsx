@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../types';
 import { NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
@@ -28,6 +28,22 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
 
   const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
   const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
+
+  const [editingKey,  setEditingKey]  = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editingKey) editInputRef.current?.focus(); }, [editingKey]);
+
+  const commitRename = (pk: string, name: string) => {
+    const trimmed = name.trim();
+    if (trimmed) {
+      invoke('sync_rename_device', { publicKeyB64: pk, newName: trimmed })
+        .then(refreshKnownDevices)
+        .catch(console.error);
+    }
+    setEditingKey(null);
+  };
 
   useEffect(() => {
     refreshLivePeers();
@@ -201,26 +217,62 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
             {/* Online peers */}
             {livePeers.map(peer => (
               <div key={peer.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2 mb-1">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                  <span className="text-xs text-mm-t0">{peer.display_name}</span>
+                  {editingKey === peer.public_key_b64 ? (
+                    <input
+                      ref={editInputRef}
+                      className="input input-xs bg-mm-3 text-mm-t0 w-28"
+                      value={editingName}
+                      onChange={e => setEditingName(e.target.value)}
+                      onBlur={() => setEditingKey(null)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') commitRename(peer.public_key_b64, editingName);
+                        if (e.key === 'Escape') setEditingKey(null);
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="text-xs text-mm-t0 cursor-pointer hover:text-mm-t1 truncate"
+                      title="Click to rename"
+                      onClick={() => { setEditingKey(peer.public_key_b64); setEditingName(peer.display_name); }}
+                    >{peer.display_name}</span>
+                  )}
                   {peer.latency_ms != null && (
-                    <span className="font-mono text-[9px] text-mm-t2">{peer.latency_ms}ms</span>
+                    <span className="font-mono text-[9px] text-mm-t2 shrink-0">{peer.latency_ms}ms</span>
                   )}
                 </div>
-                <button className="btn btn-xs btn-primary" onClick={() => openPeerManifest(peer)}>Sync</button>
+                <button className="btn btn-xs btn-primary shrink-0" onClick={() => openPeerManifest(peer)}>Sync</button>
               </div>
             ))}
 
             {/* Known but offline devices */}
             {offlineDevices.map(device => (
               <div key={device.public_key_b64} className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2 mb-1 opacity-50">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <span className="w-1.5 h-1.5 rounded-full bg-mm-t3 shrink-0" />
-                  <span className="text-xs text-mm-t1">{device.display_name}</span>
+                  {editingKey === device.public_key_b64 ? (
+                    <input
+                      ref={editingKey === device.public_key_b64 ? editInputRef : undefined}
+                      className="input input-xs bg-mm-3 text-mm-t0 w-28"
+                      value={editingName}
+                      onChange={e => setEditingName(e.target.value)}
+                      onBlur={() => setEditingKey(null)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') commitRename(device.public_key_b64, editingName);
+                        if (e.key === 'Escape') setEditingKey(null);
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className="text-xs text-mm-t1 cursor-pointer hover:text-mm-t0 truncate"
+                      title="Click to rename"
+                      onClick={() => { setEditingKey(device.public_key_b64); setEditingName(device.display_name); }}
+                    >{device.display_name}</span>
+                  )}
                 </div>
                 <button
-                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2"
+                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2 shrink-0"
                   onClick={() => invoke('sync_remove_device', { publicKeyB64: device.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
                 >
                   Remove

@@ -786,6 +786,16 @@ impl SyncBridge for IosSyncBridge {
         Ok(())
     }
 
+    fn rename_device(&self, public_key_b64: &str, new_name: &str) -> Result<(), SyncError> {
+        let mut list = self
+            .trust_list
+            .write()
+            .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
+        list.rename(public_key_b64, new_name.to_string());
+        list.save(&self.identity)?;
+        Ok(())
+    }
+
     fn sync_playlist(
         &self,
         playlist_id: &str,

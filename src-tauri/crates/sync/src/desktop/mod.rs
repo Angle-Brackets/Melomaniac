@@ -857,6 +857,17 @@ impl SyncBridge for DesktopSyncBridge {
         })
     }
 
+    fn rename_device(&self, public_key_b64: &str, new_name: &str) -> Result<(), SyncError> {
+        let pk   = public_key_b64.to_string();
+        let name = new_name.to_string();
+        let identity = Arc::clone(&self.identity);
+        block(async {
+            let mut tl = self.trust_list.write().await;
+            tl.rename(&pk, name);
+            tl.save(&identity)
+        })
+    }
+
     fn sync_playlist(
         &self,
         playlist_id: &str,

@@ -108,6 +108,22 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
 
   const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
   const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
+
+  const [editingKey,  setEditingKey]  = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editingKey) editInputRef.current?.focus(); }, [editingKey]);
+
+  const commitRename = (pk: string, name: string) => {
+    const trimmed = name.trim();
+    if (trimmed) {
+      invoke('sync_rename_device', { publicKeyB64: pk, newName: trimmed })
+        .then(refreshKnownDevices)
+        .catch(console.error);
+    }
+    setEditingKey(null);
+  };
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const playlists               = useStore(s => s.playlists);
   const reopenConflict          = useStore(s => s.reopenConflict);
@@ -406,30 +422,56 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* Sync */}
         <SettingsGroup label="Sync">
           {livePeers.map((peer) => (
-            <Row
-              key={peer.public_key_b64}
-              title={peer.display_name}
-              detail={peer.latency_ms != null ? `${peer.latency_ms}ms` : undefined}
-              onClick={() => openPeerManifest(peer)}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'oklch(0.72 0.17 142)', flexShrink: 0, display: 'inline-block' }}/>
-              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>Sync</span>
-            </Row>
+            <div key={peer.public_key_b64} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'oklch(0.72 0.17 142)', flexShrink: 0 }}/>
+              {editingKey === peer.public_key_b64 ? (
+                <input
+                  ref={editInputRef}
+                  value={editingName}
+                  onChange={e => setEditingName(e.target.value)}
+                  onBlur={() => setEditingKey(null)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename(peer.public_key_b64, editingName);
+                    if (e.key === 'Escape') setEditingKey(null);
+                  }}
+                  style={{ flex: 1, fontSize: 14, background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 6, padding: '2px 6px', color: 'var(--text-0)', outline: 'none' }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setEditingKey(peer.public_key_b64); setEditingName(peer.display_name); }}
+                  style={{ flex: 1, fontSize: 14, color: 'var(--text-0)', cursor: 'pointer' }}
+                >{peer.display_name}</span>
+              )}
+              {peer.latency_ms != null && <span style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{peer.latency_ms}ms</span>}
+              <span onClick={() => openPeerManifest(peer)} style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer' }}>Sync</span>
+            </div>
           ))}
           {offlineDevices.map((device) => (
-            <Row
-              key={device.public_key_b64}
-              title={device.display_name}
-              muted
-            >
-              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--border-2)', flexShrink: 0, display: 'inline-block' }}/>
+            <div key={device.public_key_b64} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)', opacity: 0.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--border-2)', flexShrink: 0 }}/>
+              {editingKey === device.public_key_b64 ? (
+                <input
+                  ref={editingKey === device.public_key_b64 ? editInputRef : undefined}
+                  value={editingName}
+                  onChange={e => setEditingName(e.target.value)}
+                  onBlur={() => setEditingKey(null)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename(device.public_key_b64, editingName);
+                    if (e.key === 'Escape') setEditingKey(null);
+                  }}
+                  style={{ flex: 1, fontSize: 14, background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 6, padding: '2px 6px', color: 'var(--text-0)', outline: 'none' }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setEditingKey(device.public_key_b64); setEditingName(device.display_name); }}
+                  style={{ flex: 1, fontSize: 14, color: 'var(--text-0)', cursor: 'pointer' }}
+                >{device.display_name}</span>
+              )}
               <button
                 onClick={() => invoke('sync_remove_device', { publicKeyB64: device.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
-                style={{ fontSize: 12, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-              >
-                Remove
-              </button>
-            </Row>
+                style={{ fontSize: 12, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+              >Remove</button>
+            </div>
           ))}
           <Row title="Pair a device" chev isLast onClick={() => { openPairingDisplay().catch(console.error); }}>
             <span style={{ fontSize: 13, color: 'var(--text-2)' }}>QR</span>
