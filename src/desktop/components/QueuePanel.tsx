@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import type { Track } from '../data';
 import { ALBUMS } from '../data';
 import { FiX } from 'react-icons/fi';
+import ScrollText from './ScrollText';
 
 interface QueuePanelProps {
-  playQueue:      Track[];
-  manualQueue:    Track[];
-  loadedHash:     string | null;
-  artworkUrls:    Record<string, string>;
-  onRemoveManual: (idx: number) => void;
-  onClearManual:  () => void;
-  onClose:        () => void;
+  playQueue:        Track[];
+  manualQueue:      Track[];
+  loadedHash:       string | null;
+  artworkUrls:      Record<string, string>;
+  onRemoveManual:   (idx: number) => void;
+  onClearManual:    () => void;
+  onRemoveUpcoming: (hash: string) => void;
+  onClose:          () => void;
 }
 
 const ENTER_MS = 200;
@@ -57,16 +59,15 @@ function TrackRow({
         border: '1px solid var(--border-0)',
       }} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{
-          fontSize: 11, fontWeight: 500, color: 'var(--text-0)',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          fontFamily: "'Outfit', sans-serif",
-        }}>{track.title}</div>
-        <div style={{
-          fontSize: 10, color: 'var(--text-2)',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          fontFamily: "'Outfit', sans-serif",
-        }}>{track.artist}</div>
+        <ScrollText
+          text={track.title}
+          textStyle={{ fontSize: 11, fontWeight: 500, color: 'var(--text-0)', fontFamily: "'Outfit', sans-serif" }}
+        />
+        <ScrollText
+          text={track.artist}
+          style={{ marginTop: 1 }}
+          textStyle={{ fontSize: 10, color: 'var(--text-2)', fontFamily: "'Outfit', sans-serif" }}
+        />
       </div>
       {onRemove && (
         <button
@@ -84,7 +85,7 @@ function TrackRow({
 
 export default function QueuePanel({
   playQueue, manualQueue, loadedHash,
-  artworkUrls, onRemoveManual, onClearManual, onClose,
+  artworkUrls, onRemoveManual, onClearManual, onRemoveUpcoming, onClose,
 }: QueuePanelProps): JSX.Element {
   const panelRef   = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
@@ -227,6 +228,7 @@ export default function QueuePanel({
                   track={t}
                   artworkUrls={artworkUrls}
                   animDelay={rowDelay()}
+                  onRemove={() => onRemoveUpcoming(t.hash)}
                 />
               ))}
             </div>

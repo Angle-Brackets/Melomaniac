@@ -78,6 +78,11 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      - name: Set build number
+        run: |
+          find src-tauri/gen/apple -name "Info.plist" -exec \
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" {} \; 2>/dev/null || true
+
       - name: Inject signing overrides via xcodebuild wrapper
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -126,8 +131,6 @@ jobs:
               exec /usr/bin/xcodebuild "\${new_args[@]}" -exportOptionsPlist /tmp/ExportOptions.plist
             fi
           done
-          find . -name "Info.plist" -path "*/apple/*" -exec \
-            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" {} \; 2>/dev/null || true
           exec /usr/bin/xcodebuild "\$@" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \

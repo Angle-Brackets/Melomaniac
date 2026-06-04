@@ -485,8 +485,17 @@ export function MiniPlayer({ onTab, bottomOffset = 0 }: { onTab?: (id: TabId) =>
       </div>
       <MMArt src={artUrl ?? undefined} size={44} radius={9}/>
       <div style={{ flex: 1, minWidth: 0 }} onClick={() => onTab?.('now')}>
-        <div style={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack?.title ?? ''}</div>
-        <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentTrack?.artist ?? ''}</div>
+        <MarqueeText
+          text={currentTrack?.title ?? ''}
+          active={isPlaying}
+          textStyle={{ fontSize: 13, color: 'var(--text-0)', fontWeight: 500 }}
+        />
+        <MarqueeText
+          text={currentTrack?.artist ?? ''}
+          active={isPlaying}
+          style={{ marginTop: 2 }}
+          textStyle={{ fontSize: 11, color: 'var(--text-2)' }}
+        />
       </div>
       <button onClick={handlePlayPause} style={{ width: 36, height: 36, borderRadius: 18, background: 'var(--bg-3)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-0)', flexShrink: 0 }}>
         {isPlaying ? <Icons.pause size={17}/> : <Icons.play size={17}/>}

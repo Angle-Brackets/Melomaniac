@@ -24,6 +24,7 @@ export type QueueSlice = {
   setShuffle: (mode: ShuffleMode) => void
   setRepeat: (mode: RepeatMode) => void
   refillShuffleQueue: () => void
+  removeUpcomingTrack: (hash: string) => void
 }
 
 // How many recent artists to consider when penalising same-artist picks
@@ -92,6 +93,19 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   },
 
   setRepeat: (mode) => set({ repeat: mode }),
+
+  removeUpcomingTrack: (hash) => {
+    const { shuffle, shuffledQueue, shuffleIndex, queueTracks, currentIndex } = get()
+    if (shuffle !== ShuffleMode.Off) {
+      const before = shuffledQueue.slice(0, shuffleIndex + 1)
+      const after  = shuffledQueue.slice(shuffleIndex + 1).filter(h => h !== hash)
+      set({ shuffledQueue: [...before, ...after] })
+    } else {
+      const before = queueTracks.slice(0, currentIndex + 1)
+      const after  = queueTracks.slice(currentIndex + 1).filter(h => h !== hash)
+      set({ queueTracks: [...before, ...after] })
+    }
+  },
 
   refillShuffleQueue: () => {
     const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks } = get()

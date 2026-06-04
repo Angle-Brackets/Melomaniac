@@ -212,6 +212,10 @@
   from { transform: translateX(0); }
   to   { transform: translateX(var(--mm-dist, -200px)); }
 }
+@keyframes mm-play-shimmer {
+  0%   { background-position: 0% 0%; }
+  100% { background-position: 100% 100%; }
+}
 .tl-context-menu { animation: fadeInScale 0.12s ease; }
 
 /* ── Modal enter / exit ────────────────────────────────────────────────────── */

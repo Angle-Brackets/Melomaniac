@@ -5,6 +5,9 @@ import type { ThemeName } from '../shared/themes';
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { check as checkForUpdate } from '@tauri-apps/plugin-updater';
+import type { Update } from '@tauri-apps/plugin-updater';
+import { useAccentsFromUrl, useGlowFade, withAlpha } from '../shared/artworkAccents';
 import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
 import type { AppSettings, ShuffleMode } from './types';
@@ -52,30 +55,35 @@ function fisherYates<T>(arr: T[]): T[] {
   return a;
 }
 
-function balancedShuffle(tracks: Track[]): Track[] {
-  const groups = new Map<string, Track[]>();
-  for (const t of tracks) {
-    const key = t.artist || '?';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(t);
+const ARTIST_PENALTY    = 0.25;
+const ARTIST_LOOKBEHIND = 4;
+
+function smartShuffle(tracks: Track[]): Track[] {
+  type Candidate = { track: Track; artist: string };
+  const pool: Candidate[] = tracks.map(t => ({ track: t, artist: t.artist || '?' }));
+  const result: Track[] = [];
+  const recentArtists: string[] = [];
+
+  while (pool.length > 0) {
+    const freq = new Map<string, number>();
+    for (const a of recentArtists.slice(-ARTIST_LOOKBEHIND)) {
+      freq.set(a, (freq.get(a) ?? 0) + 1);
+    }
+    const weights = pool.map(c => Math.pow(ARTIST_PENALTY, freq.get(c.artist) ?? 0));
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break; } }
+    result.push(pool[idx].track);
+    recentArtists.push(pool[idx].artist);
+    pool.splice(idx, 1);
   }
-  const shuffledGroups = [...groups.values()].map(g => fisherYates(g));
-  const n = tracks.length;
-  const result: { track: Track; pos: number }[] = [];
-  for (const group of shuffledGroups) {
-    const spacing = n / group.length;
-    const offset = Math.random() * spacing;
-    group.forEach((t, i) => {
-      result.push({ track: t, pos: offset + i * spacing + (Math.random() - 0.5) * spacing * 0.4 });
-    });
-  }
-  result.sort((a, b) => a.pos - b.pos);
-  return result.map(r => r.track);
+  return result;
 }
 
 function buildShuffledQueue(tracks: Track[], mode: ShuffleMode): Track[] {
-  if (mode === 'balanced') return balancedShuffle(tracks);
-  return fisherYates(tracks); // fisher-yates and random both produce a permutation; random re-rolls on every advance
+  if (mode === 'smart') return smartShuffle(tracks);
+  return fisherYates(tracks);
 }
 
 // ── Default settings ──────────────────────────────────────────────────────────
@@ -197,13 +205,24 @@ export default function DesktopApp(): JSX.Element {
   const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
   const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
+  const [bigPicture, setBigPicture] = useState(false);
+  const [carouselBigPicture, setCarouselBigPicture] = useState(false);
+  // trackListSlide: drives translateY (visual slide, has CSS transition)
+  // trackListSpace: drives max-height (layout space, instant — no transition)
+  // Decoupled so close = slide then collapse, open = expand then slide up simultaneously
+  const [trackListSlide, setTrackListSlide] = useState(true);
+  const [trackListSpace, setTrackListSpace] = useState(true);
+  const bigPictureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [manualQueue, setManualQueue] = useState<Track[]>([]);
+  const [sessionExcluded, setSessionExcluded] = useState<Set<string>>(new Set());
   const [showQueue, setShowQueue] = useState(false);
   const [vibeText, setVibeText] = useState('chill ambient music for focus');
   const [meloToast, setMeloToast] = useState<string | null>(null);
   const [commitRefreshKey, setCommitRefreshKey] = useState(0);
   const [showStats, setShowStats] = useState(false);
   const [appStats, setAppStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [isInstalling, setIsInstalling] = useState(false);
 
   const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
   // Override description with the branch-specific value from the tree blob.
@@ -231,6 +250,9 @@ export default function DesktopApp(): JSX.Element {
     [playQueue, artworkUrls],
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
+  const activeArtworkUrl = artworkUrls[playQueue[carouselIdx]?.hash ?? ''] ?? null;
+  const artworkAccents = useAccentsFromUrl(activeArtworkUrl);
+  const { slots: glowSlots, activeSlot: glowActive } = useGlowFade(artworkAccents);
 
   // Stale-closure ref — updated synchronously each render so the audio event
   // listener (which is registered once) always reads the latest values.
@@ -262,7 +284,10 @@ export default function DesktopApp(): JSX.Element {
     hash: string; durationMs: number;
     playlistId: string | null; branchName: string | null;
     isShuffle: boolean; shuffleMode: ShuffleMode;
-    shuffledHashes?: string[]; // persisted queue order when shuffle is on
+    shuffledHashes?: string[];
+    loopMode?: LoopMode;
+    positionMs?: number;
+    coldStart?: boolean;
   };
   const pendingRestoreRef = useRef<SavedPlaybackState | null>(null);
 
@@ -270,6 +295,32 @@ export default function DesktopApp(): JSX.Element {
   useEffect(() => {
     applyTheme(settings.theme, settings.accentHue);
   }, [settings.theme, settings.accentHue]);
+
+  // Sequential big-picture animations to avoid the carousel bouncing mid-layout.
+  // ENTER: collapse tracklist first (380ms), then expand pane + carousel.
+  // EXIT:  shrink pane + carousel first (380ms), then reveal tracklist.
+  const enterBigPicture = useCallback(() => {
+    if (bigPictureTimerRef.current) clearTimeout(bigPictureTimerRef.current);
+    setBigPicture(true);
+    setTrackListSlide(false);  // Phase 1: slide down (visual, 380ms)
+    bigPictureTimerRef.current = setTimeout(() => {
+      setTrackListSpace(false);  // Phase 2: collapse space instantly (content already off-screen)
+      setCarouselBigPicture(true);
+      bigPictureTimerRef.current = null;
+    }, 380);
+  }, []);
+
+  const exitBigPicture = useCallback(() => {
+    if (bigPictureTimerRef.current) clearTimeout(bigPictureTimerRef.current);
+    setBigPicture(false);
+    setCarouselBigPicture(false);
+    bigPictureTimerRef.current = setTimeout(() => {
+      // Both in same React batch: space appears instantly, slide-up begins simultaneously
+      setTrackListSpace(true);
+      setTrackListSlide(true);
+      bigPictureTimerRef.current = null;
+    }, 380);
+  }, []);
 
   // Keep top pane tall enough whenever carousel size changes
   useEffect(() => {
@@ -292,7 +343,11 @@ export default function DesktopApp(): JSX.Element {
     try { saved = JSON.parse(raw); } catch { return; }
     invoke<number>('audio_position')
       .then(() => { pendingRestoreRef.current = saved; })
-      .catch(() => { localStorage.removeItem('melomaniac.playback_state'); });
+      .catch(() => {
+        // Cold start — audio engine is not running, but we still restore the track
+        // as a paused restore (load without play, seek to saved position).
+        pendingRestoreRef.current = { ...saved, coldStart: true };
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -340,8 +395,22 @@ export default function DesktopApp(): JSX.Element {
     useStore.getState().setLoaded(r.hash, r.durationMs);
     setActiveTrackId(track.id);
     sr.current.durationMs = r.durationMs;
+    if (r.loopMode) { setLoopMode(r.loopMode); sr.current.loopMode = r.loopMode; }
     hasRecordedPlayRef.current = true;
-    useStore.getState().setPlaying(true);
+    if (r.coldStart) {
+      invoke('track_load_paused', { hash: r.hash })
+        .then(() => {
+          if (r.positionMs && r.positionMs > 0) {
+            livePositionMsRef.current = r.positionMs;
+            setPositionMs(r.positionMs);
+            invoke('audio_seek', { positionMs: r.positionMs }).catch(console.error);
+          }
+        })
+        .catch(console.error);
+      useStore.getState().setPlaying(false);
+    } else {
+      useStore.getState().setPlaying(true);
+    }
     if (r.isShuffle) {
       setIsShuffle(true);
       if (r.shuffledHashes?.length) {
@@ -448,6 +517,9 @@ export default function DesktopApp(): JSX.Element {
       .catch(() => setBranchMeta(null));
   }, [activePlaylistId, activeBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Clear session-excluded hashes whenever the active playlist or branch changes.
+  useEffect(() => { setSessionExcluded(new Set()); }, [activePlaylistId, activeBranch]);
+
   // Restore playback state if audio is still playing and the track came from a playlist.
   // Runs after playlistTracks loads; the playlist change effect may have reset isShuffle
   // to false, but we override it here since we're restoring a prior session.
@@ -460,8 +532,22 @@ export default function DesktopApp(): JSX.Element {
     useStore.getState().setLoaded(r.hash, r.durationMs);
     setActiveTrackId(track.id);
     sr.current.durationMs = r.durationMs;
+    if (r.loopMode) { setLoopMode(r.loopMode); sr.current.loopMode = r.loopMode; }
     hasRecordedPlayRef.current = true;
-    useStore.getState().setPlaying(true);
+    if (r.coldStart) {
+      invoke('track_load_paused', { hash: r.hash })
+        .then(() => {
+          if (r.positionMs && r.positionMs > 0) {
+            livePositionMsRef.current = r.positionMs;
+            setPositionMs(r.positionMs);
+            invoke('audio_seek', { positionMs: r.positionMs }).catch(console.error);
+          }
+        })
+        .catch(console.error);
+      useStore.getState().setPlaying(false);
+    } else {
+      useStore.getState().setPlaying(true);
+    }
     if (r.isShuffle) {
       setIsShuffle(true);
       if (r.shuffledHashes?.length) {
@@ -541,6 +627,17 @@ export default function DesktopApp(): JSX.Element {
     return () => clearInterval(interval);
   }, [showStats]);
 
+  // ── Update check — runs once on startup, skipped in dev builds ──────────
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    const timer = setTimeout(() => {
+      checkForUpdate()
+        .then(update => { if (update?.available) setPendingUpdate(update); })
+        .catch(() => {});
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, []);
+
   // ── Audio event listener ─────────────────────────────────────────────────
   useEffect(() => {
     type AudioPayload =
@@ -607,6 +704,7 @@ export default function DesktopApp(): JSX.Element {
 
         if (lm === 'one') {
           if (lh) invoke('track_play', { hash: lh }).catch(console.error);
+          hasRecordedPlayRef.current = false; // reset so each loop iteration counts
           useStore.getState().setPlaying(true);
           return;
         }
@@ -695,7 +793,7 @@ export default function DesktopApp(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylist?.id, activeBranch]);
 
-  // ── Persist playback state for WebView-restart recovery ─────────────────
+  // ── Persist playback state for restart recovery ──────────────────────────
   useEffect(() => {
     return useStore.subscribe(state => {
       if (state.loadedTrackHash) {
@@ -704,13 +802,32 @@ export default function DesktopApp(): JSX.Element {
           playlistId: activePlaylistId, branchName: activeBranch,
           isShuffle, shuffleMode: settings.shuffleMode,
           shuffledHashes: isShuffle && shuffledQueue ? shuffledQueue.map(t => t.hash) : undefined,
+          loopMode,
         } satisfies SavedPlaybackState));
       } else {
         localStorage.removeItem('melomaniac.playback_state');
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode, shuffledQueue]);
+  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode, shuffledQueue, loopMode]);
+
+  // Persist playback position periodically and on unload so cold-start restore
+  // can seek back to where the user left off (mirrors Spotify's behaviour).
+  useEffect(() => {
+    const patchPosition = () => {
+      const raw = localStorage.getItem('melomaniac.playback_state');
+      if (!raw) return;
+      try {
+        const s = JSON.parse(raw);
+        s.positionMs = livePositionMsRef.current;
+        localStorage.setItem('melomaniac.playback_state', JSON.stringify(s));
+      } catch { /* ignore */ }
+    };
+    const id = setInterval(patchPosition, 10_000);
+    window.addEventListener('beforeunload', patchPosition);
+    return () => { clearInterval(id); window.removeEventListener('beforeunload', patchPosition); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Persist sidebar state to localStorage ────────────────────────────────
   useEffect(() => {
@@ -806,17 +923,11 @@ export default function DesktopApp(): JSX.Element {
       setIsShuffle(true);
       toast('Shuffle: True Shuffle');
     } else if (settings.shuffleMode === 'fisher-yates') {
-      updateSetting('shuffleMode', 'balanced');
-      const newQ = buildShuffledQueue(activeQueue, 'balanced');
+      updateSetting('shuffleMode', 'smart');
+      const newQ = buildShuffledQueue(activeQueue, 'smart');
       sr.current.playQueue = newQ;
       setShuffledQueue(newQ);
-      toast('Shuffle: Balanced');
-    } else if (settings.shuffleMode === 'balanced') {
-      updateSetting('shuffleMode', 'random');
-      const newQ = buildShuffledQueue(activeQueue, 'random');
-      sr.current.playQueue = newQ;
-      setShuffledQueue(newQ);
-      toast('Shuffle: Random');
+      toast('Shuffle: Smart');
     } else {
       sr.current.playQueue = activeQueue;
       sr.current.isShuffle = false;
@@ -1008,6 +1119,7 @@ export default function DesktopApp(): JSX.Element {
   const handleSkipNext = () => {
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
+    setLoopMode('off'); sr.current.loopMode = 'off';
     // Manual queue takes priority
     if (manualQueue.length > 0) {
       const [next, ...rest] = manualQueue;
@@ -1020,7 +1132,7 @@ export default function DesktopApp(): JSX.Element {
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       return;
     }
-    const q = playQueue;
+    const q = playQueue.filter(t => !sessionExcluded.has(t.hash));
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
     if (q.length === 0) return;
@@ -1045,6 +1157,7 @@ export default function DesktopApp(): JSX.Element {
     }
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
+    setLoopMode('off'); sr.current.loopMode = 'off';
     const q = playQueue;
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
@@ -1212,8 +1325,34 @@ export default function DesktopApp(): JSX.Element {
 
                 {activeTab === 'Tracks' && (
                   <>
-                    <div style={{ height: topPaneHeight, flexShrink: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: 0 }}>
+                    <div style={{
+                      position: 'relative',
+                      height: topPaneHeight,
+                      flexGrow: carouselBigPicture ? 1 : 0,
+                      flexShrink: 0,
+                      minHeight: 0,
+                      overflow: 'hidden', display: 'flex', flexDirection: 'column',
+                      background: 'var(--bg-2)',
+                      paddingBottom: carouselBigPicture ? 28 : 0,
+                      transition: 'flex-grow 0.38s cubic-bezier(0.4,0,0.2,1), padding-bottom 0.38s ease',
+                    }}>
+                      {/* Artwork bloom — two slots cross-fade so gradient changes animate smoothly
+                           (CSS can't interpolate between gradient values, opacity cross-fade instead) */}
+                      {glowSlots.map((slot, i) => slot[0] && (
+                        <div key={i} style={{
+                          position: 'absolute', left: '50%', top: carouselBigPicture ? '45%' : '38%',
+                          transform: 'translate(-50%, -50%)',
+                          width: '75%', height: carouselBigPicture ? '70%' : '160%',
+                          borderRadius: '50%',
+                          background: `radial-gradient(ellipse at center, ${withAlpha(slot[0], 0.35)} 0%, ${withAlpha(slot[1], 0.16)} 45%, transparent 70%)`,
+                          filter: 'blur(30px)',
+                          pointerEvents: 'none',
+                          zIndex: 0,
+                          opacity: glowActive === i ? 1 : 0,
+                          transition: 'opacity 0.9s ease',
+                        }} />
+                      ))}
+                      <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: carouselBigPicture ? undefined : 0, flex: carouselBigPicture ? 1 : undefined, minHeight: carouselBigPicture ? 0 : undefined, position: 'relative', zIndex: 1 }}>
                         <Carousel
                           albums={carouselAlbums}
                           activeIndex={carouselIdx}
@@ -1222,61 +1361,81 @@ export default function DesktopApp(): JSX.Element {
                             if (t) handleSelectTrack(t.id);
                           }}
                           size={settings.carouselSize}
+                          activeGlowColors={artworkAccents}
+                          bigPicture={carouselBigPicture}
                         />
                       </div>
-                      <PlayerControls
-                        track={playQueue.find(t => t.id === activeTrackId) ?? null}
-                        positionMsRef={livePositionMsRef}
-                        durationMs={durationMs}
-                        isPlaying={isPlaying} onPlayPause={handlePlayPause}
-                        onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
-                        isFav={favorites.has(playQueue.find(t => t.id === activeTrackId)?.hash ?? '')}
-                        onFav={() => {
-                          const hash = playQueue.find(t => t.id === activeTrackId)?.hash;
-                          if (!hash) return;
-                          setFavorites(prev => {
-                            const next = new Set(prev);
-                            next.has(hash) ? next.delete(hash) : next.add(hash);
-                            return next;
-                          });
-                        }}
-                        loopMode={loopMode} onLoopCycle={handleLoopCycle}
-                        isShuffle={isShuffle} shuffleMode={settings.shuffleMode} onShuffle={handleShuffle}
-                        showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
-                        onSeek={pct => {
-                          const ms = Math.floor(pct * durationMs);
-                          lastSeekTime.current = Date.now();
-                          setPositionMs(ms); livePositionMsRef.current = ms;
-                          invoke('audio_seek', { positionMs: ms }).catch(console.error);
-                        }}
-                        volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
-                        abA={abA} abB={abB} onAbChange={handleAbChange}
-                      />
+                      <div style={{ position: 'relative', zIndex: 1 }}>
+                        <PlayerControls
+                          track={playQueue.find(t => t.id === activeTrackId) ?? null}
+                          positionMsRef={livePositionMsRef}
+                          durationMs={durationMs}
+                          isPlaying={isPlaying} onPlayPause={handlePlayPause}
+                          onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
+                          isFav={favorites.has(playQueue.find(t => t.id === activeTrackId)?.hash ?? '')}
+                          onFav={() => {
+                            const hash = playQueue.find(t => t.id === activeTrackId)?.hash;
+                            if (!hash) return;
+                            setFavorites(prev => {
+                              const next = new Set(prev);
+                              next.has(hash) ? next.delete(hash) : next.add(hash);
+                              return next;
+                            });
+                          }}
+                          loopMode={loopMode} onLoopCycle={handleLoopCycle}
+                          isShuffle={isShuffle} shuffleMode={settings.shuffleMode} onShuffle={handleShuffle}
+                          showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
+                          bigPicture={bigPicture} onBigPicture={() => bigPicture ? exitBigPicture() : enterBigPicture()}
+                          onSeek={pct => {
+                            const ms = Math.floor(pct * durationMs);
+                            lastSeekTime.current = Date.now();
+                            setPositionMs(ms); livePositionMsRef.current = ms;
+                            invoke('audio_seek', { positionMs: ms }).catch(console.error);
+                          }}
+                          volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+                          abA={abA} abB={abB} onAbChange={handleAbChange}
+                          artworkAccents={artworkAccents}
+                        />
+                      </div>
                     </div>
-                    <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
-                    <TrackList
-                      tracks={playlistTracks ?? trackOrder}
-                      activeTrackId={activeTrackId}
-                      loadedHash={loadedHash}
-                      isPlaying={isPlaying}
-                      onSelect={handleSelectTrack}
-                      onPlayPause={handleTrackPlayPause}
-                      onReorder={playlistTracks ? handlePlaylistReorder : handleReorder}
-                      hasUncommitted={hasUncommitted}
-                      onCommitChanges={handleCommitReorder}
-                      onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
-                      artworkUrls={artworkUrls}
-                      onRemoveTrack={playlistTracks ? handleRemoveFromPlaylist : undefined}
-                      onAddTracks={playlistTracks ? () => {
-                        setRailItem('library');
-                        setMeloToast('Select tracks in the library, then use "Add to Playlist"');
-                        setTimeout(() => setMeloToast(null), 3000);
-                      } : undefined}
-                      onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
-                      onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
-                      favorites={favorites}
-                      density={settings.density}
-                    />
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden',
+                      maxHeight: trackListSpace ? 2000 : 0,
+                      // No transition — space collapses/expands instantly so only the slide is visible
+                      pointerEvents: trackListSlide ? undefined : 'none',
+                    }}>
+                      <div style={{
+                        display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0,
+                        transform: trackListSlide ? 'translateY(0)' : 'translateY(100%)',
+                        transition: 'transform 0.38s cubic-bezier(0.4,0,0.2,1)',
+                      }}>
+                      <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
+                      <TrackList
+                        tracks={playlistTracks ?? trackOrder}
+                        activeTrackId={activeTrackId}
+                        loadedHash={loadedHash}
+                        isPlaying={isPlaying}
+                        onSelect={handleSelectTrack}
+                        onPlayPause={handleTrackPlayPause}
+                        onReorder={playlistTracks ? handlePlaylistReorder : handleReorder}
+                        hasUncommitted={hasUncommitted}
+                        onCommitChanges={handleCommitReorder}
+                        onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
+                        artworkUrls={artworkUrls}
+                        onRemoveTrack={playlistTracks ? handleRemoveFromPlaylist : undefined}
+                        onAddTracks={playlistTracks ? () => {
+                          setRailItem('library');
+                          setMeloToast('Select tracks in the library, then use "Add to Playlist"');
+                          setTimeout(() => setMeloToast(null), 3000);
+                        } : undefined}
+                        onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
+                        onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
+                        favorites={favorites}
+                        density={settings.density}
+                        onCollapse={enterBigPicture}
+                      />
+                      </div>
+                    </div>
                   </>
                 )}
 
@@ -1353,12 +1512,13 @@ export default function DesktopApp(): JSX.Element {
         {/* Queue panel */}
         {showQueue && (
           <QueuePanel
-            playQueue={playQueue}
+            playQueue={playQueue.filter(t => !sessionExcluded.has(t.hash))}
             manualQueue={manualQueue}
             loadedHash={loadedHash}
             artworkUrls={artworkUrls}
             onRemoveManual={idx => setManualQueue(q => q.filter((_, i) => i !== idx))}
             onClearManual={() => setManualQueue([])}
+            onRemoveUpcoming={hash => setSessionExcluded(s => new Set([...s, hash]))}
             onClose={() => setShowQueue(false)}
           />
         )}
@@ -1386,6 +1546,7 @@ export default function DesktopApp(): JSX.Element {
               invoke('audio_seek', { positionMs: ms }).catch(console.error);
             }}
             onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+            artworkAccents={artworkAccents}
             showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
             onCollapse={() => setMiniPlayerCollapsed(true)}
             onStop={() => {
@@ -1420,6 +1581,42 @@ export default function DesktopApp(): JSX.Element {
             <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" style={{ color: 'var(--text-3)', flexShrink: 0 }}>
               <polyline points="2,6.5 5,3.5 8,6.5" />
             </svg>
+          </div>
+        )}
+
+        {/* Update banner */}
+        {pendingUpdate && (
+          <div style={{
+            height: 24, flexShrink: 0,
+            background: 'var(--accent-dim)', borderTop: '1px solid var(--accent)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 12px', gap: 8,
+          }}>
+            <span style={{ fontSize: 10, color: 'var(--accent-light)', fontFamily: "'JetBrains Mono', monospace" }}>
+              {isInstalling ? 'Installing update…' : `Update v${pendingUpdate.version} available`}
+            </span>
+            {!isInstalling && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button
+                  onClick={async () => {
+                    setIsInstalling(true);
+                    await pendingUpdate.downloadAndInstall().catch(console.error);
+                    toast('Update installed — restart the app to apply', 6000);
+                    setPendingUpdate(null);
+                    setIsInstalling(false);
+                  }}
+                  style={{ fontSize: 10, color: 'var(--accent-light)', fontFamily: "'JetBrains Mono', monospace", textDecoration: 'underline', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+                >
+                  Install
+                </button>
+                <button
+                  onClick={() => setPendingUpdate(null)}
+                  style={{ fontSize: 10, color: 'var(--text-3)', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
         )}
 

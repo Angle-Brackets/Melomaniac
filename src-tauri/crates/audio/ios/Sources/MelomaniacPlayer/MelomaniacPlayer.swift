@@ -319,6 +319,8 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
         c.previousTrackCommand.isEnabled           = true
         c.togglePlayPauseCommand.isEnabled         = true
         c.changePlaybackPositionCommand.isEnabled  = true
+        c.likeCommand.isEnabled                    = true
+        c.changeShuffleModeCommand.isEnabled       = true
 
         remoteCommandTokens = [
             c.playCommand.addTarget            { _ in callback(0, 0.0); return .success },
@@ -340,8 +342,32 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
                 callback(5, secs)
                 return .success
             },
+            c.likeCommand.addTarget { _ in callback(6, 0.0); return .success },
+            c.changeShuffleModeCommand.addTarget { event in
+                guard let e = event as? MPChangeShuffleModeCommandEvent else { return .commandFailed }
+                callback(7, Double(e.shuffleType.rawValue))
+                return .success
+            },
         ]
         NSLog("[Melo] Remote commands registered (\(remoteCommandTokens.count) tokens)")
+    }
+}
+
+/// Reflects the current shuffle mode on the lock-screen shuffle button.
+/// 0 = off (.off), 1 = random (.items), 2 = smart (.collections)
+@_cdecl("melo_set_shuffle_state")
+public func meloSetShuffleState(_ mode: Int32) {
+    onMain {
+        let type: MPShuffleType = mode == 1 ? .items : mode == 2 ? .collections : .off
+        MPRemoteCommandCenter.shared().changeShuffleModeCommand.currentShuffleType = type
+    }
+}
+
+/// Reflects the current track's liked state on the lock-screen heart button.
+@_cdecl("melo_set_like_state")
+public func meloSetLikeState(_ isActive: Bool) {
+    onMain {
+        MPRemoteCommandCenter.shared().likeCommand.isActive = isActive
     }
 }
 

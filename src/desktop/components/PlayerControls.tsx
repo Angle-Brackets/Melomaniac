@@ -1,11 +1,13 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import type { Track } from '../data';
 import type { ShuffleMode } from '../types';
 import {
   IcoPlay, IcoPause, IcoNext, IcoPrev,
-  IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue, IcoDice,
+  IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue,
 } from '../icons';
 import { FiLayers } from 'react-icons/fi';
+import { withAlpha } from '../../shared/artworkAccents';
+import ScrollText from './ScrollText';
 
 export type LoopMode = 'off' | 'one' | 'ab';
 
@@ -24,25 +26,49 @@ interface PlayerControlsProps {
   loopMode:        LoopMode; onLoopCycle: () => void;
   isShuffle:       boolean; shuffleMode: ShuffleMode; onShuffle: () => void;
   showQueue:       boolean; onQueueToggle: () => void;
+  bigPicture:      boolean; onBigPicture: () => void;
   onSkipNext?:     () => void;
   onSkipPrev?:     () => void;
   onSeek:          (pct: number) => void;
   volume:          number;  onVolume:    (vol: number) => void;
   abA:             number;  abB:         number;
   onAbChange:      (handle: 'A' | 'B', val: number) => void;
+  artworkAccents?: [string, string];
+}
+
+function CtrlBtn({ active = false, onClick, title, children }: {
+  active?: boolean; onClick?: () => void; title?: string; children: React.ReactNode;
+}) {
+  const [hov, setHov] = useState(false);
+  const btn = (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 30, height: 30, borderRadius: 6, flexShrink: 0,
+        background: 'none', border: 'none', cursor: 'pointer', padding: 0, outline: 'none',
+        color: active ? 'var(--accent)' : hov ? 'var(--text-0)' : 'var(--text-2)',
+        transition: 'color 0.12s ease',
+      }}
+    >
+      {children}
+    </button>
+  );
+  if (!title) return btn;
+  return <div className="tooltip tooltip-top" data-tip={title} style={{ flexShrink: 0, display: 'flex' }}>{btn}</div>;
 }
 
 function ShuffleIcon({ isShuffle, mode, size = 16 }: { isShuffle: boolean; mode: ShuffleMode; size?: number }) {
   if (!isShuffle || mode === 'fisher-yates') return <IcoShuffle size={size} />;
-  if (mode === 'balanced') return <FiLayers size={size} />;
-  return <IcoDice size={size} />;
+  return <FiLayers size={size} />;
 }
 
 function shuffleLabel(isShuffle: boolean, mode: ShuffleMode) {
   if (!isShuffle)              return 'Shuffle: Off — click for True Shuffle';
-  if (mode === 'fisher-yates') return 'True Shuffle — click for Balanced';
-  if (mode === 'balanced')     return 'Balanced Shuffle — click for Random';
-  return 'Random — click to turn off';
+  if (mode === 'fisher-yates') return 'True Shuffle — click for Smart';
+  return 'Smart Shuffle — click to turn off';
 }
 
 function Tip({ tip, children }: { tip: string; children: React.ReactNode }) {
@@ -57,11 +83,26 @@ export default function PlayerControls({
   track, positionMsRef, durationMs,
   isPlaying, onPlayPause, isFav, onFav,
   loopMode, onLoopCycle, isShuffle, shuffleMode, onShuffle,
-  showQueue, onQueueToggle,
+  showQueue, onQueueToggle, bigPicture, onBigPicture,
   onSkipNext, onSkipPrev,
   onSeek, volume, onVolume,
   abA, abB, onAbChange,
+  artworkAccents,
 }: PlayerControlsProps): JSX.Element {
+  const [accent1, accent2] = artworkAccents ?? ['', ''];
+  const playBtnStyle = accent1 ? {
+    ['--mm-bg-c1' as string]: accent1,
+    ['--mm-bg-c2' as string]: accent2 || accent1,
+    background: 'linear-gradient(135deg, var(--mm-bg-c1) 0%, var(--mm-bg-c2) 50%, var(--mm-bg-c1) 100%)',
+    backgroundSize: '200% 200%',
+    animation: isPlaying ? 'mm-play-shimmer 2s ease-in-out infinite alternate' : 'none',
+    boxShadow: `0 0 18px ${withAlpha(accent1, 0.55)}, 0 2px 8px rgba(0,0,0,0.4)`,
+    border: 'none',
+    color: '#fff',
+  } : undefined;
+  const seekFillColor = accent1
+    ? `linear-gradient(90deg, ${accent1}, ${accent2 || accent1})`
+    : 'var(--accent)';
   const seekRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
   // DOM refs for rAF-driven updates (no React re-render needed)
@@ -120,13 +161,16 @@ export default function PlayerControls({
   return (
     <div className="shrink-0">
       {/* Track info */}
-      <div className="text-center px-5 pt-1.5 pb-0.5">
-        <p className="text-[13px] font-semibold text-mm-t0">
-          {track ? track.title : '—'}
-        </p>
-        <p className="text-[11px] text-mm-t2 mt-px">
-          {track ? `${track.artist} · ${track.album}` : 'Select a track and press play'}
-        </p>
+      <div className="px-5 pt-1.5 pb-0.5">
+        <ScrollText
+          text={track ? track.title : '—'}
+          textStyle={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}
+        />
+        <ScrollText
+          text={track ? `${track.artist} · ${track.album}` : 'Select a track and press play'}
+          style={{ marginTop: 1 }}
+          textStyle={{ fontSize: 11, color: 'var(--text-2)', textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}
+        />
         {abActive && durationMs > 0 && (
           <p className="font-mono text-[10px] text-mm-accent-lit mt-0.5">
             A·B Loop: {fmtMs(abA * durationMs)} → {fmtMs(abB * durationMs)}
@@ -137,29 +181,21 @@ export default function PlayerControls({
       {/* Controls — left | play | right */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center px-6 py-1.5">
         <div className="flex items-center gap-2 justify-end">
-          <Tip tip="Queue">
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${showQueue ? 'text-primary' : ''}`}
-              onClick={onQueueToggle}
-            ><IcoQueue size={16} /></button>
-          </Tip>
-          <Tip tip={shuffleLabel(isShuffle, shuffleMode)}>
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${isShuffle ? 'text-primary' : ''}`}
-              onClick={onShuffle}
-            >
-              <ShuffleIcon isShuffle={isShuffle} mode={shuffleMode} />
-            </button>
-          </Tip>
-          <Tip tip="Previous (hold: restart track)">
-            <button className="btn btn-ghost btn-square btn-sm" onClick={onSkipPrev}><IcoPrev size={16} /></button>
-          </Tip>
+          <CtrlBtn active={showQueue} onClick={onQueueToggle} title="Queue">
+            <IcoQueue size={16} />
+          </CtrlBtn>
+          <CtrlBtn active={isShuffle} onClick={onShuffle} title={shuffleLabel(isShuffle, shuffleMode)}>
+            <ShuffleIcon isShuffle={isShuffle} mode={shuffleMode} />
+          </CtrlBtn>
+          <CtrlBtn onClick={onSkipPrev} title="Previous (hold: restart track)">
+            <IcoPrev size={16} />
+          </CtrlBtn>
         </div>
 
         <Tip tip={isPlaying ? 'Pause' : 'Play'}>
           <button
-            className="btn btn-ghost btn-circle mx-3 border-2 border-mm-b2 bg-mm-3"
-            style={{ width: 44, height: 44, minHeight: 'unset' }}
+            className="btn btn-circle mx-3"
+            style={{ width: 44, height: 44, minHeight: 'unset', transition: 'box-shadow 0.6s ease, background 0.6s ease', ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
             onClick={onPlayPause}
           >
             {isPlaying ? <IcoPause size={18} /> : <IcoPlay size={18} />}
@@ -167,21 +203,21 @@ export default function PlayerControls({
         </Tip>
 
         <div className="flex items-center gap-2">
-          <Tip tip="Next">
-            <button className="btn btn-ghost btn-square btn-sm" onClick={onSkipNext}><IcoNext size={16} /></button>
-          </Tip>
-          <Tip tip={isFav ? 'Unfavorite' : 'Favorite'}>
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${isFav ? 'text-primary' : ''}`}
-              onClick={onFav}
-            ><IcoHeart size={16} /></button>
-          </Tip>
-          <Tip tip={loopTip}>
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${loopMode !== 'off' ? 'text-primary' : ''}`}
-              onClick={onLoopCycle}
-            ><IcoLoop mode={loopMode} /></button>
-          </Tip>
+          <CtrlBtn onClick={onSkipNext} title="Next">
+            <IcoNext size={16} />
+          </CtrlBtn>
+          <CtrlBtn active={isFav} onClick={onFav} title={isFav ? 'Unfavorite' : 'Favorite'}>
+            <IcoHeart size={16} />
+          </CtrlBtn>
+          <CtrlBtn active={loopMode !== 'off'} onClick={onLoopCycle} title={loopTip}>
+            <IcoLoop mode={loopMode} />
+          </CtrlBtn>
+          <CtrlBtn active={bigPicture} onClick={onBigPicture} title={bigPicture ? 'Shrink artwork' : 'Expand artwork'}>
+            {bigPicture
+              ? <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><line x1="2" y1="5" x2="5" y2="5"/><line x1="5" y1="2" x2="5" y2="5"/><line x1="9" y1="5" x2="12" y2="5"/><line x1="9" y1="2" x2="9" y2="5"/><line x1="2" y1="9" x2="5" y2="9"/><line x1="5" y1="9" x2="5" y2="12"/><line x1="9" y1="9" x2="12" y2="9"/><line x1="9" y1="9" x2="9" y2="12"/></svg>
+              : <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><line x1="1" y1="5" x2="1" y2="1"/><line x1="1" y1="1" x2="5" y2="1"/><line x1="9" y1="1" x2="13" y2="1"/><line x1="13" y1="1" x2="13" y2="5"/><line x1="1" y1="9" x2="1" y2="13"/><line x1="1" y1="13" x2="5" y2="13"/><line x1="9" y1="13" x2="13" y2="13"/><line x1="13" y1="9" x2="13" y2="13"/></svg>
+            }
+          </CtrlBtn>
         </div>
       </div>
 
@@ -222,7 +258,8 @@ export default function PlayerControls({
               style={{
                 position: 'absolute', left: 0, top: 0, bottom: 0,
                 width: '0%',
-                background: 'var(--accent)', borderRadius: 2,
+                background: seekFillColor, borderRadius: 2,
+                transition: 'background-color 0.6s ease',
               }}
             />
           </div>

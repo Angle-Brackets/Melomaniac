@@ -115,6 +115,52 @@ pub async fn track_play(
     .map_err(|e| e.to_string())?
 }
 
+/// Like `track_play` but skips `bridge.play()` — loads the audio engine and
+/// positions metadata (lock screen, now-playing) without starting playback.
+/// Used by the cold-start restore path to show a paused track on startup.
+#[tauri::command]
+pub async fn track_load_paused(
+    hash: String,
+    storage: State<'_, crate::storage::StorageState>,
+    audio: State<'_, AudioState>,
+) -> Result<(), String> {
+    let record = storage
+        .db
+        .get_track(&hash)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let path = storage.cas.blob_path(&hash);
+
+    let meta = match record {
+        Some(r) => TrackMetadata {
+            title:       r.title,
+            artist:      r.artist,
+            album:       r.album,
+            artwork_path: r.artwork_hash.as_deref().map(|h| storage.cas.blob_path(h)),
+            duration_ms: Some(r.duration_ms as u64),
+            mime_type:   r.mime_type,
+        },
+        None => TrackMetadata {
+            title:       hash[..hash.len().min(8)].to_string(),
+            artist:      String::new(),
+            album:       None,
+            artwork_path: None,
+            duration_ms: None,
+            mime_type:   None,
+        },
+    };
+
+    let source = AudioSource::File(path);
+    let bridge = Arc::clone(&audio.bridge);
+    tauri::async_runtime::spawn_blocking(move || {
+        bridge.load(&source, meta).map_err(|e| e.to_string())
+        // No bridge.play() — load only
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 //
 // All commands convert AudioError → String at the boundary so Tauri can
@@ -163,4 +209,14 @@ pub fn audio_set_volume(volume: f32, state: State<'_, AudioState>) -> Result<(),
 #[tauri::command]
 pub fn audio_position(state: State<'_, AudioState>) -> Result<u64, String> {
     state.bridge.position_ms().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn audio_set_like_state(is_active: bool, state: State<'_, AudioState>) {
+    state.bridge.set_like_active(is_active);
+}
+
+#[tauri::command]
+pub fn audio_set_shuffle_state(mode: u8, state: State<'_, AudioState>) {
+    state.bridge.set_shuffle_mode(mode);
 }

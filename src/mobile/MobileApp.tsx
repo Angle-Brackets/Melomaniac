@@ -140,6 +140,33 @@ export default function MobileApp() {
     });
   }, []);
 
+  // ── Keep lock-screen like button in sync with favorites ──────────────────────
+  useEffect(() => {
+    let prevHash: string | null = null;
+    let prevFavorited: boolean | undefined;
+    return useStore.subscribe(state => {
+      const hash = state.loadedTrackHash;
+      const favorited = hash ? (state.tracks.find(t => t.hash === hash)?.favorited ?? false) : false;
+      if (hash !== prevHash || favorited !== prevFavorited) {
+        if (hash) invoke('audio_set_like_state', { isActive: favorited }).catch(() => {});
+        prevHash = hash;
+        prevFavorited = favorited;
+      }
+    });
+  }, []);
+
+  // ── Keep lock-screen shuffle button in sync with in-app shuffle state ────────
+  useEffect(() => {
+    let prevShuffle: ShuffleMode | undefined;
+    return useStore.subscribe(state => {
+      if (state.shuffle !== prevShuffle) {
+        const mode = state.shuffle === ShuffleMode.Random ? 1 : state.shuffle === ShuffleMode.Smart ? 2 : 0;
+        invoke('audio_set_shuffle_state', { mode }).catch(() => {});
+        prevShuffle = state.shuffle;
+      }
+    });
+  }, []);
+
   // ── Background peer poll — drives auto-sync when a known device comes online ──
   useEffect(() => {
     refreshLivePeers()
@@ -170,6 +197,8 @@ export default function MobileApp() {
     type AudioPayload =
       | 'TrackEnded' | 'RemotePlay' | 'RemotePause'
       | 'RemoteNextTrack' | 'RemotePreviousTrack' | 'RemoteTogglePlayPause'
+      | 'RemoteLike'
+      | { RemoteShuffleChange: number }
       | { PositionChanged: number }
       | { DurationKnown: number }
       | { RemoteSeek: number }
@@ -285,6 +314,23 @@ export default function MobileApp() {
       if (payload === 'RemoteTogglePlayPause') { useStore.getState().toggleAudio().catch(console.error); return; }
       if (payload === 'RemoteNextTrack')     { playNext(true); return; }
       if (payload === 'RemotePreviousTrack') { playPrev(); return; }
+      if (typeof payload === 'object' && 'RemoteShuffleChange' in payload) {
+        const mode = payload.RemoteShuffleChange;
+        const shuffleMode = mode === 1 ? ShuffleMode.Random : mode === 2 ? ShuffleMode.Smart : ShuffleMode.Off;
+        useStore.getState().setShuffle(shuffleMode);
+        invoke('audio_set_shuffle_state', { mode }).catch(console.error);
+        return;
+      }
+      if (payload === 'RemoteLike') {
+        const s = useStore.getState();
+        const hash = s.loadedTrackHash;
+        if (!hash) return;
+        // Compute new state before toggling so we don't need to re-read the store
+        const nowFavorited = !(s.tracks.find(t => t.hash === hash)?.favorited ?? false);
+        s.toggleFavorite(hash);
+        invoke('audio_set_like_state', { isActive: nowFavorited }).catch(console.error);
+        return;
+      }
       if (typeof payload === 'object' && 'RemoteSeek' in payload) {
         const posMs = payload.RemoteSeek;
         positionMsRef.current = posMs;

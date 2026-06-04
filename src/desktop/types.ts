@@ -1,7 +1,7 @@
 import type { ThemeName } from '../shared/themes';
 export type { ThemeName };
 
-export type ShuffleMode = 'fisher-yates' | 'balanced' | 'random';
+export type ShuffleMode = 'fisher-yates' | 'smart';
 
 // App-wide settings persisted in memory (no disk storage yet)
 export interface AppSettings {

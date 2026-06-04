@@ -10,7 +10,7 @@ import { positionMsRef, loopStateRef } from '../playerContext';
 import { Icons } from '../icons';
 import { MMArt, MMSheet, MMTabBar, MarqueeText } from './common';
 import type { TabId } from './common';
-import { useTrackAccents, withAlpha } from '../hooks/useTrackAccent';
+import { useTrackAccents, withAlpha, useGlowFade } from '../hooks/useTrackAccent';
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -23,14 +23,62 @@ const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow }: {
 });
 
 
+function SwipeToRemove({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) {
+  const [dx, setDx] = useState(0);
+  const [snapping, setSnapping] = useState(false);
+  const startXRef = useRef(0);
+
+  return (
+    <div
+      style={{ position: 'relative', overflow: 'hidden' }}
+      onTouchStart={e => { startXRef.current = e.touches[0].clientX; setSnapping(false); }}
+      onTouchMove={e => {
+        const d = e.touches[0].clientX - startXRef.current;
+        if (d > 0) setDx(Math.min(d, 120));
+      }}
+      onTouchEnd={() => {
+        if (dx > 80) onRemove();
+        setSnapping(true);
+        setDx(0);
+      }}
+    >
+      <div style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%',
+        background: '#ef4444', display: 'flex', alignItems: 'center', paddingLeft: 16,
+        opacity: Math.min(1, dx / 60),
+      }}>
+        <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>Remove</span>
+      </div>
+      <div style={{
+        transform: `translateX(${dx}px)`,
+        transition: snapping ? 'transform 0.2s ease' : 'none',
+        background: 'var(--bg-1)',
+      }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function QueueSheetRow({ track }: { track: TrackRecord }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
       <MMArt src={artUrl ?? undefined} size={36} radius={6}/>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
-        {track.artist && <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist}</div>}
+        <MarqueeText
+          text={track.title}
+          active={true}
+          textStyle={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)' }}
+        />
+        {track.artist && (
+          <MarqueeText
+            text={track.artist}
+            active={true}
+            style={{ marginTop: 1 }}
+            textStyle={{ fontSize: 11, color: 'var(--text-2)' }}
+          />
+        )}
       </div>
     </div>
   );
@@ -325,8 +373,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const setShuffle         = useStore(s => s.setShuffle);
   const setRepeat          = useStore(s => s.setRepeat);
   const shuffledQueue      = useStore(s => s.shuffledQueue);
-  const shuffleIndex       = useStore(s => s.shuffleIndex);
-  const toggleFavorite     = useStore(s => s.toggleFavorite);
+  const shuffleIndex          = useStore(s => s.shuffleIndex);
+  const removeUpcomingTrack   = useStore(s => s.removeUpcomingTrack);
+  const toggleFavorite        = useStore(s => s.toggleFavorite);
   const playlists          = useStore(s => s.playlists);
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
   const setCurrentPlaylist = useStore(s => s.setCurrentPlaylist);
@@ -667,6 +716,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     browseTrack?.artwork_hash ?? currentTrack?.artwork_hash ?? null,
   );
   const accent = accent1;
+  const { slots: haloSlots, activeSlot: haloActive } = useGlowFade([accent1, accent2]);
   const nextTrack: TrackRecord | null = shuffle !== ShuffleMode.Off
     ? (shuffledQueue[shuffleIndex + 1] ? tracks.find(t => t.hash === shuffledQueue[shuffleIndex + 1]) ?? null : null)
     : (queueRecords[activeListIndex + 1] ?? null);
@@ -790,13 +840,17 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      {/* Halo — centered behind the album art, not off at the top */}
-      <div style={{
-        position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)',
-        width: 560, height: 560, borderRadius: '50%',
-        background: `radial-gradient(circle, ${withAlpha(accent1, 0.40)} 0%, ${withAlpha(accent2, 0.18)} 42%, transparent 68%)`,
-        filter: 'blur(40px)', pointerEvents: 'none',
-      }}/>
+      {/* Halo — two slots cross-fade so the glow smoothly transitions between tracks */}
+      {haloSlots.map((slot, i) => (
+        <div key={i} style={{
+          position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)',
+          width: 560, height: 560, borderRadius: '50%',
+          background: `radial-gradient(circle, ${withAlpha(slot[0], 0.40)} 0%, ${withAlpha(slot[1], 0.18)} 42%, transparent 68%)`,
+          filter: 'blur(40px)', pointerEvents: 'none',
+          opacity: haloActive === i ? 1 : 0,
+          transition: 'opacity 0.7s ease',
+        }}/>
+      ))}
 
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 'calc(16px + var(--safe-top))', overflow: 'hidden', paddingBottom: `calc(var(--tab-h) + ${queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0}px)`, transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
 
@@ -1141,7 +1195,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Coming Up</div>
                   {comingUp.map((t, i) => (
                     <div key={t.hash} style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: `${i * 40}ms` }}>
-                      <QueueSheetRow track={t}/>
+                      <SwipeToRemove onRemove={() => removeUpcomingTrack(t.hash)}>
+                        <QueueSheetRow track={t}/>
+                      </SwipeToRemove>
                     </div>
                   ))}
                 </>

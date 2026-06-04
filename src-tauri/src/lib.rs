@@ -28,6 +28,11 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     }
 
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
     builder
         .setup(|app| {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<AudioEvent>();
@@ -214,7 +219,10 @@ pub fn run() {
             audio::audio_seek,
             audio::audio_set_volume,
             audio::audio_position,
+            audio::audio_set_like_state,
+            audio::audio_set_shuffle_state,
             audio::track_play,
+            audio::track_load_paused,
             storage::library_get_all,
             storage::library_set_favorite,
             storage::library_import_folder,
