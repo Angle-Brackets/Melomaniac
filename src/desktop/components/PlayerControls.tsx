@@ -102,9 +102,10 @@ export default function PlayerControls({
   const seekRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
   // DOM refs for rAF-driven updates (no React re-render needed)
-  const seekFillRef = useRef<HTMLDivElement>(null);
-  const posTextRef  = useRef<HTMLSpanElement>(null);
-  const rafRef      = useRef<number>(0);
+  const seekFillRef  = useRef<HTMLDivElement>(null);
+  const seekThumbRef = useRef<HTMLDivElement>(null);
+  const posTextRef   = useRef<HTMLSpanElement>(null);
+  const rafRef       = useRef<number>(0);
 
   const seekingRef  = useRef(false);
   const volumingRef = useRef(false);
@@ -117,11 +118,13 @@ export default function PlayerControls({
       if (durationMs > 0) {
         const posMs = positionMsRef.current;
         const pct = Math.min(1, Math.max(0, posMs / durationMs));
-        if (seekFillRef.current) seekFillRef.current.style.width = `${pct * 100}%`;
-        if (posTextRef.current)  posTextRef.current.textContent  = fmtMs(posMs);
+        if (seekFillRef.current)  seekFillRef.current.style.width = `${pct * 100}%`;
+        if (seekThumbRef.current) seekThumbRef.current.style.left = `${pct * 100}%`;
+        if (posTextRef.current)   posTextRef.current.textContent  = fmtMs(posMs);
       } else {
-        if (seekFillRef.current) seekFillRef.current.style.width = '0%';
-        if (posTextRef.current)  posTextRef.current.textContent  = '0:00';
+        if (seekFillRef.current)  seekFillRef.current.style.width = '0%';
+        if (seekThumbRef.current) seekThumbRef.current.style.left = '0%';
+        if (posTextRef.current)   posTextRef.current.textContent  = '0:00';
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -271,6 +274,16 @@ export default function PlayerControls({
               }}
             />
           </div>
+
+          <div ref={seekThumbRef} style={{
+            position: 'absolute', left: '0%', top: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 9, height: 9, borderRadius: '50%',
+            background: accent1 || 'var(--text-0)',
+            border: '2px solid rgba(255,255,255,0.85)',
+            boxShadow: `0 1px 4px rgba(0,0,0,0.5), 0 0 8px ${accent1 ? withAlpha(accent1, 0.6) : 'rgba(255,255,255,0.3)'}`,
+            pointerEvents: 'none', zIndex: 2,
+          }} />
 
           {abActive && (
             <>
