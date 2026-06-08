@@ -320,6 +320,8 @@ The tree schema has an `includes` array (reserved field). After design review, p
 
 ### Completed since 2026-05-09 (fourth pass)
 
+- **Play button shimmer fix** — Replaced `repeating-linear-gradient` with an oversized 200% `span` rotated 45 degrees using a standard `linear-gradient` to eliminate "weird tiling" grid lines while keeping the infinite shimmering animation seamless.
+
 - **A/B loop backend wired** — `playlist_get_tracks` returns committed `ab_start_ms`/`ab_end_ms` per track entry; `playlist_set_ab_loop` writes them to the tree blob with amend-style commits; `playlist_reorder_tracks` preserves them via hash→entry map. Frontend seeds `trackAbPoints` from the committed tree on every branch load (backend wins over localStorage). Clearing A/B (drag to full range) now sends `null` to erase the committed values; commit graph refreshes and a toast fires on write/clear.
 - **Playlist descriptions** — per-branch description stored in tree blob; `playlist_get_meta` reads from tree (not SQL cache); `playlist_set_description` commits and updates SQL cache; description shown in `PlaylistHeader` subtitle and editable in `PlaylistSettingsPanel`; `branchMeta` state in `DesktopApp` overrides SQL-cached description so each branch shows its own value
 - **Merge description conflicts** — `MergeBranchModal` fetches both branches' descriptions and shows a conflict chooser when they differ; `branch_merge` accepts `description_override: Option<String>`; `branchMeta` refreshes after merge

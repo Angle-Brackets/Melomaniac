@@ -8,7 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { check as checkForUpdate } from '@tauri-apps/plugin-updater';
 import type { Update } from '@tauri-apps/plugin-updater';
 import { useAccentsFromUrl, useGlowFade, withAlpha } from '../shared/artworkAccents';
-import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
+import { ALBUMS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
 import type { AppSettings, ShuffleMode } from './types';
 
@@ -170,7 +170,7 @@ export default function DesktopApp(): JSX.Element {
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('melomaniac.pinned') ?? '[]') as string[]); } catch { return new Set(); }
   });
-  const [trackOrder, setTrackOrder] = useState<Track[]>(TRACKS);
+  const [trackOrder, setTrackOrder] = useState<Track[]>([]);
   const [hasUncommitted, setHasUncommitted] = useState(false);
   const [abA, setAbA] = useState(0);
   const [abB, setAbB] = useState(1);
@@ -304,8 +304,10 @@ export default function DesktopApp(): JSX.Element {
     setBigPicture(true);
     setTrackListSlide(false);  // Phase 1: slide down (visual, 380ms)
     bigPictureTimerRef.current = setTimeout(() => {
-      setTrackListSpace(false);  // Phase 2: collapse space instantly (content already off-screen)
-      setCarouselBigPicture(true);
+      setTrackListSpace(false);  // Phase 2a: collapse space instantly (content already off-screen)
+      // Phase 2b: one rAF so the browser computes the freed space before the
+      // flex-grow transition starts — prevents the carousel jump on enter.
+      requestAnimationFrame(() => setCarouselBigPicture(true));
       bigPictureTimerRef.current = null;
     }, 380);
   }, []);
@@ -894,11 +896,9 @@ export default function DesktopApp(): JSX.Element {
 
   const handleReorder = (newOrder: Track[] | null) => {
     if (newOrder === null) {
-      // Discard: restore the last committed state from the backend if available,
-      // otherwise fall back to static mock data.
       invoke<TrackRecord[]>('library_get_all')
-        .then(records => setTrackOrder(records.length > 0 ? records.map(trackRecordToTrack) : TRACKS))
-        .catch(() => setTrackOrder(TRACKS));
+        .then(records => setTrackOrder(records.map(trackRecordToTrack)))
+        .catch(() => setTrackOrder([]));
       setHasUncommitted(false);
     } else {
       setTrackOrder(newOrder);
@@ -1210,7 +1210,7 @@ export default function DesktopApp(): JSX.Element {
 
           {/* Sidebar */}
           <LibrarySidebar
-            playlists={playlistRecords.length > 0 ? playlistRecords.map(playlistRecordToPlaylist) : PLAYLISTS}
+            playlists={playlistRecords.map(playlistRecordToPlaylist)}
             activePlaylistId={activePlaylistId}
             onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab('Tracks'); setRailItem('playlists'); }}
             activeRailItem={railItem}

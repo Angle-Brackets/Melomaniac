@@ -91,11 +91,7 @@ export default function PlayerControls({
 }: PlayerControlsProps): JSX.Element {
   const [accent1, accent2] = artworkAccents ?? ['', ''];
   const playBtnStyle = accent1 ? {
-    ['--mm-bg-c1' as string]: accent1,
-    ['--mm-bg-c2' as string]: accent2 || accent1,
-    background: 'linear-gradient(135deg, var(--mm-bg-c1) 0%, var(--mm-bg-c2) 50%, var(--mm-bg-c1) 100%)',
-    backgroundSize: '200% 200%',
-    animation: isPlaying ? 'mm-play-shimmer 2s ease-in-out infinite alternate' : 'none',
+    background: accent1,
     boxShadow: `0 0 18px ${withAlpha(accent1, 0.55)}, 0 2px 8px rgba(0,0,0,0.4)`,
     border: 'none',
     color: '#fff',
@@ -195,10 +191,22 @@ export default function PlayerControls({
         <Tip tip={isPlaying ? 'Pause' : 'Play'}>
           <button
             className="btn btn-circle mx-3"
-            style={{ width: 44, height: 44, minHeight: 'unset', transition: 'box-shadow 0.6s ease, background 0.6s ease', ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
+            style={{ width: 44, height: 44, minHeight: 'unset', position: 'relative', overflow: 'hidden', transition: 'box-shadow 0.6s ease', ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
             onClick={onPlayPause}
           >
-            {isPlaying ? <IcoPause size={18} /> : <IcoPlay size={18} />}
+            {accent1 && (
+              <span style={{
+                position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100,
+                marginLeft: -500, marginTop: -50, zIndex: 0,
+                background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2 || accent1} 50px, ${accent1} 100px)`,
+                animation: 'mm-play-shimmer 8s linear infinite',
+                animationPlayState: isPlaying ? 'running' : 'paused',
+                pointerEvents: 'none',
+              }} />
+            )}
+            <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {isPlaying ? <IcoPause size={18} /> : <IcoPlay size={18} />}
+            </span>
           </button>
         </Tip>
 
