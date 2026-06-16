@@ -1065,7 +1065,11 @@ export default function DesktopApp(): JSX.Element {
   const handleRailChange = (item: string) => {
     setRailItem(item);
     if (item === 'melo') setShowCommitGraph(true);
-    if (item === 'editor') setActiveTab('Tracks');
+    if (item === 'editor') {
+      setActiveTab('Tracks');
+      // Lock in a concrete track so playback changes never hijack the editor display.
+      setEditorTrackId(prev => prev ?? activeTrackId);
+    }
   };
 
   const handleSelectTrack = (id: number) => {
@@ -1235,7 +1239,7 @@ export default function DesktopApp(): JSX.Element {
               />
             ) : railItem === 'editor' ? (
               <EditorView
-                track={trackOrder.find(t => t.id === (editorTrackId ?? activeTrackId))}
+                track={trackOrder.find(t => t.id === editorTrackId)}
                 tracks={trackOrder}
                 artworkUrls={artworkUrls}
                 onTrackUpdated={(oldHash, newHash, patch) => {
