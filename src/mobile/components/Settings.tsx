@@ -259,7 +259,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* Header */}
         <div style={{ padding: '12px 22px 6px' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, letterSpacing: -0.5 }}>Settings</h1>
-          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v1.0 alpha · mobile</div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v{__APP_VERSION__} · mobile</div>
         </div>
 
         {/* Conflict resolution banner — shown when any playlist has an unresolved merge */}
