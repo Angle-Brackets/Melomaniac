@@ -1,4 +1,4 @@
-export const SHIMMER_DURATION = '12s';  // play button gradient sweep
+export const SHIMMER_DURATION = '18s';  // play button gradient sweep
 export const TRANSITION_FAST = '0.12s ease';
 export const TRANSITION_GLOW = '0.6s ease';
 export const MODAL_IN_DURATION = '190ms';

@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "melomaniac"
-version = "0.1.0-alpha"
+version = "1.0.1-alpha"
 dependencies = [
  "base64 0.22.1",
  "discord-rich-presence",
