@@ -121,15 +121,15 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               </div>
             </div>
 
-            {/* Right panel — always on, not user-togglable */}
-            <div className="flex items-center justify-between py-2 border-b border-mm-b0" title="AI & Metrics panel is always enabled">
+            {/* Right panel — coming soon, not yet available */}
+            <div className="flex items-center justify-between py-2 border-b border-mm-b0" title="AI & Metrics panel is not yet available">
               <div>
                 <span className="text-xs text-mm-t1">Show AI & Metrics panel</span>
-                <span className="text-[10px] text-mm-t2 ml-2 font-mono">always on</span>
+                <span className="text-[10px] text-mm-t2 ml-2 font-mono">coming soon</span>
               </div>
               <input
                 type="checkbox"
-                checked
+                checked={false}
                 readOnly
                 disabled
                 className="toggle toggle-primary toggle-sm opacity-40"

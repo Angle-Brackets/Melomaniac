@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { FiTrash2 } from 'react-icons/fi';
 import { Icons } from '../icons';
 import { MMTabBar, usePullToRefresh, PullSpinner } from './common';
 import type { TabId } from './common';
@@ -56,10 +57,13 @@ function saveSettings(patch: Partial<StoredSettings>) {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function SettingsGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingsGroup({ label, action, children }: { label: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ margin: '14px 16px 0' }}>
-      <div style={{ padding: '0 8px 6px', fontSize: 11, letterSpacing: 0.15, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{label}</div>
+      <div style={{ padding: '0 8px 6px', display: 'flex', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, letterSpacing: 0.15, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{label}</span>
+        {action && <div style={{ marginLeft: 'auto' }}>{action}</div>}
+      </div>
       <div style={{ background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', borderRadius: 14, overflow: 'hidden' }}>
         {children}
       </div>
@@ -138,6 +142,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const [stats, setStats]         = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
   const [storageBytes, setStorageBytes] = useState<number | null>(null);
   const [topTracks, setTopTracks] = useState<Array<{ hash: string; stats: TrackStats; track: TrackRecord | null }>>([]);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   // Apply persisted theme once on mount
   useEffect(() => {
@@ -167,8 +172,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
     invoke<number>('library_get_storage_bytes').then(setStorageBytes).catch(() => {});
   }, []);
 
-  // Top tracks — loaded once on mount
-  useEffect(() => {
+  const loadTopTracks = useCallback(() => {
     Promise.all([
       invoke<[string, TrackStats][]>('library_get_top_tracks', { limit: 10 }),
       invoke<TrackRecord[]>('library_get_all'),
@@ -181,6 +185,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
       })));
     }).catch(() => {});
   }, []);
+
+  useEffect(() => { loadTopTracks(); }, []);
 
   // Focus author input when entering edit mode
   useEffect(() => {
@@ -341,26 +347,29 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
             {/* Accent hue */}
             <div style={{ fontSize: 11, letterSpacing: 0.12, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', marginBottom: 8 }}>Accent hue</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {/* Rainbow track */}
-              <div style={{ flex: 1, position: 'relative', height: 20, display: 'flex', alignItems: 'center' }}>
+              {/* Rainbow track with circle thumb */}
+              <div style={{ flex: 1, position: 'relative', height: 22, display: 'flex', alignItems: 'center' }}>
                 <div style={{
                   position: 'absolute', left: 0, right: 0, height: 6, borderRadius: 3,
                   background: 'linear-gradient(90deg, oklch(0.62 0.15 0), oklch(0.62 0.15 60), oklch(0.62 0.15 120), oklch(0.62 0.15 180), oklch(0.62 0.15 240), oklch(0.62 0.15 300), oklch(0.62 0.15 360))',
                   pointerEvents: 'none',
                 }}/>
+                {/* Circle thumb positioned along the track */}
+                <div style={{
+                  position: 'absolute',
+                  left: `calc(${(settings.accentHue / 360) * 100}% - 11px)`,
+                  width: 22, height: 22, borderRadius: 11,
+                  background: `oklch(0.62 0.15 ${settings.accentHue})`,
+                  border: '2px solid rgba(255,255,255,0.55)',
+                  boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
+                  pointerEvents: 'none',
+                }}/>
                 <input
                   type="range" min={0} max={360} value={settings.accentHue}
                   onChange={e => handleHueChange(Number(e.target.value))}
-                  style={{ position: 'relative', width: '100%', margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 1 }}
+                  style={{ position: 'relative', width: '100%', margin: 0, opacity: 0, cursor: 'pointer', height: 22, zIndex: 1 }}
                 />
               </div>
-              {/* Live preview dot — white ring ensures visibility on any hue */}
-              <div style={{
-                width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                background: `oklch(0.62 0.15 ${settings.accentHue})`,
-                border: '2px solid rgba(255,255,255,0.55)',
-                boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
-              }}/>
               <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', width: 28, textAlign: 'right' }}>{settings.accentHue}°</span>
             </div>
           </div>
@@ -373,9 +382,42 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           <Row title="Crossfade" detail="N/A" chev={false} isLast muted/>
         </SettingsGroup>
 
-        {/* Top Tracks */}
+        {/* History */}
         {topTracks.length > 0 && (
-          <SettingsGroup label="Most Played">
+          <SettingsGroup
+            label="History"
+            action={
+              confirmClear ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-1)' }}>Are you sure?</span>
+                  <button
+                    onClick={async () => {
+                      await invoke('library_clear_history');
+                      setConfirmClear(false);
+                      loadTopTracks();
+                    }}
+                    style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #c0392b', background: '#c0392b22', color: '#e05050', cursor: 'pointer' }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => setConfirmClear(false)}
+                    style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-2)', background: 'none', color: 'var(--text-2)', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmClear(true)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4, display: 'flex', alignItems: 'center' }}
+                  title="Clear listening history"
+                >
+                  <FiTrash2 size={13} />
+                </button>
+              )
+            }
+          >
             {topTracks.map(({ hash, stats: trackStats, track }, idx) => (
               <div
                 key={hash}
