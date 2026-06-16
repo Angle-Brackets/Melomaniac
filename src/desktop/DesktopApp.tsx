@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { check as checkForUpdate } from '@tauri-apps/plugin-updater';
 import type { Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { useAccentsFromUrl, useGlowFade, withAlpha } from '../shared/artworkAccents';
 import { ALBUMS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
@@ -217,6 +218,8 @@ export default function DesktopApp(): JSX.Element {
   const [appStats, setAppStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
   const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateReady, setUpdateReady] = useState(false);
 
   const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
   // Override description with the branch-specific value from the tree blob.
@@ -1211,6 +1214,7 @@ export default function DesktopApp(): JSX.Element {
             }}
             onDeleteFolder={deleteFolder}
             onOpenSettings={() => setShowSettings(true)}
+            hasUpdate={!!pendingUpdate}
             onAddToFolderClick={setFolderPopupItem}
             onNewPlaylist={() => setShowNewPlaylist(true)}
           />
@@ -1565,42 +1569,6 @@ export default function DesktopApp(): JSX.Element {
           </div>
         )}
 
-        {/* Update banner */}
-        {pendingUpdate && (
-          <div style={{
-            height: 24, flexShrink: 0,
-            background: 'var(--accent-dim)', borderTop: '1px solid var(--accent)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0 12px', gap: 8,
-          }}>
-            <span style={{ fontSize: 10, color: 'var(--accent-light)', fontFamily: "'JetBrains Mono', monospace" }}>
-              {isInstalling ? 'Installing update…' : `Update v${pendingUpdate.version} available`}
-            </span>
-            {!isInstalling && (
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <button
-                  onClick={async () => {
-                    setIsInstalling(true);
-                    await pendingUpdate.downloadAndInstall().catch(console.error);
-                    toast('Update installed — restart the app to apply', 6000);
-                    setPendingUpdate(null);
-                    setIsInstalling(false);
-                  }}
-                  style={{ fontSize: 10, color: 'var(--accent-light)', fontFamily: "'JetBrains Mono', monospace", textDecoration: 'underline', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-                >
-                  Install
-                </button>
-                <button
-                  onClick={() => setPendingUpdate(null)}
-                  style={{ fontSize: 10, color: 'var(--text-3)', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Status bar */}
         <div style={{
           height: 22, background: 'var(--bg-0)', borderTop: '1px solid var(--border-0)',
@@ -1767,6 +1735,30 @@ export default function DesktopApp(): JSX.Element {
             onClose={() => setShowSettings(false)}
             onReset={() => { updateSetting(SETTING_DEFAULTS); setShowSettings(false); }}
             onPairDevice={() => { setShowSettings(false); openPairingDisplay().catch(console.error); }}
+            pendingUpdate={pendingUpdate}
+            isInstalling={isInstalling}
+            onInstallUpdate={async () => {
+              if (!pendingUpdate) return;
+              setIsInstalling(true);
+              setUpdateProgress(0);
+              let downloaded = 0;
+              let total = 0;
+              await pendingUpdate.downloadAndInstall(event => {
+                if (event.event === 'Started') {
+                  total = event.data.contentLength ?? 0;
+                } else if (event.event === 'Progress') {
+                  downloaded += event.data.chunkLength;
+                  setUpdateProgress(total > 0 ? Math.round((downloaded / total) * 100) : null);
+                } else if (event.event === 'Finished') {
+                  setUpdateProgress(100);
+                }
+              }).catch(console.error);
+              setIsInstalling(false);
+              setUpdateReady(true);
+            }}
+            updateReady={updateReady}
+            updateProgress={updateProgress}
+            onRelaunch={() => relaunch()}
           />
         )}
 

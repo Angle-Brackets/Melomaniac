@@ -15,11 +15,17 @@ interface SettingsModalProps {
   onReset: () => void;
   onPairDevice?: () => void;
   closing?: boolean;
+  pendingUpdate?: { version: string } | null;
+  isInstalling?: boolean;
+  updateProgress?: number | null;
+  updateReady?: boolean;
+  onInstallUpdate?: () => void;
+  onRelaunch?: () => void;
 }
 
 const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
 
-export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing }: SettingsModalProps) {
+export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing, pendingUpdate, isInstalling, updateProgress, updateReady, onInstallUpdate, onRelaunch }: SettingsModalProps) {
   const livePeers           = useStore(s => s.livePeers);
   const knownDevices        = useStore(s => s.knownDevices);
   const refreshLivePeers    = useStore(s => s.refreshLivePeers);
@@ -313,7 +319,31 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               <p className="text-xs text-mm-t1">Melomaniac v{__APP_VERSION__}</p>
               <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Tauri 2 · React · Rust · GPLv3</p>
             </div>
-            <button onClick={onReset} className="btn btn-ghost btn-xs">Reset to defaults</button>
+            <div className="flex items-center gap-2">
+              {updateReady ? (
+                <button onClick={onRelaunch} className="btn btn-primary btn-xs">
+                  Relaunch
+                </button>
+              ) : pendingUpdate && (
+                isInstalling ? (
+                  <div className="flex items-center gap-2">
+                    <progress
+                      className="progress progress-primary w-20 h-1.5"
+                      value={updateProgress ?? undefined}
+                      max={100}
+                    />
+                    <span className="font-mono text-[10px] text-mm-t2">
+                      {updateProgress != null ? `${updateProgress}%` : '…'}
+                    </span>
+                  </div>
+                ) : (
+                  <button onClick={onInstallUpdate} className="btn btn-primary btn-xs">
+                    Update to v{pendingUpdate.version}
+                  </button>
+                )
+              )}
+              <button onClick={onReset} className="btn btn-ghost btn-xs">Reset to defaults</button>
+            </div>
           </section>
 
         </div>
