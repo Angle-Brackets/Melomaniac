@@ -1,7 +1,7 @@
 {
-  "productName": "Melomaniac Alpha",
-  "version": "1.0.1-alpha",
-  "identifier": "com.melomaniac.app.alpha",
+  "productName": "Melomaniac",
+  "version": "1.0.0",
+  "identifier": "com.melomaniac.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "Melomaniac Alpha",
+        "title": "Melomaniac",
         "width": 1340,
         "height": 840,
         "minWidth": 900,
