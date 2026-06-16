@@ -71,7 +71,9 @@ function ShuffleIcon({ isShuffle, mode, size = 16 }: { isShuffle: boolean; mode:
 function shuffleLabel(isShuffle: boolean, mode: ShuffleMode) {
   if (!isShuffle)              return 'Shuffle: Off — click for True Shuffle';
   if (mode === 'fisher-yates') return 'True Shuffle — click for Smart';
-  return 'Smart Shuffle — click to turn off';
+  if (mode === 'smart')        return 'Smart Shuffle — click for Weighted';
+  if (mode === 'weighted')     return 'Weighted Shuffle — click for Discovery';
+  return 'Discovery Shuffle — click to turn off';
 }
 
 function Tip({ tip, children }: { tip: string; children: React.ReactNode }) {

@@ -2,9 +2,11 @@
 // without a lookup table. Vite's isolatedModules mode also rules out const enums across files.
 
 export enum ShuffleMode {
-  Off    = 'Off',
-  Random = 'Random', // Fisher-Yates permutation over the candidate pool; no repeats until the cycle exhausts
-  Smart  = 'Smart',  // weighted selection that penalises same-artist back-to-back picks
+  Off       = 'Off',
+  Random    = 'Random',    // Fisher-Yates permutation over the candidate pool; no repeats until the cycle exhausts
+  Smart     = 'Smart',     // weighted selection that penalises same-artist back-to-back picks
+  Weighted  = 'Weighted',  // inversely weighted by play count — less-heard tracks surface more often
+  Discovery = 'Discovery', // extreme bias toward unheard tracks; falls back to least-played when exhausted
 }
 
 export enum RepeatMode {

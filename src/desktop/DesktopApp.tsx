@@ -82,8 +82,37 @@ function smartShuffle(tracks: Track[]): Track[] {
   return result;
 }
 
-function buildShuffledQueue(tracks: Track[], mode: ShuffleMode): Track[] {
+function weightedShuffle(tracks: Track[], playCounts: Map<string, number>): Track[] {
+  const pool = [...tracks];
+  const result: Track[] = [];
+  while (pool.length > 0) {
+    const weights = pool.map(t => 1 / ((playCounts.get(t.hash) ?? 0) + 1));
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break; } }
+    result.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return result;
+}
+
+function discoveryShuffle(tracks: Track[], playCounts: Map<string, number>): Track[] {
+  if (tracks.length === 0) return [];
+  const minPlays = Math.min(...tracks.map(t => playCounts.get(t.hash) ?? 0));
+  const tier = tracks.filter(t => (playCounts.get(t.hash) ?? 0) === minPlays);
+  const pool = tier.length >= Math.min(20, tracks.length) ? [...tier] : [...tracks];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool;
+}
+
+function buildShuffledQueue(tracks: Track[], mode: ShuffleMode, playCounts?: Map<string, number>): Track[] {
   if (mode === 'smart') return smartShuffle(tracks);
+  if (mode === 'weighted') return weightedShuffle(tracks, playCounts ?? new Map());
+  if (mode === 'discovery') return discoveryShuffle(tracks, playCounts ?? new Map());
   return fisherYates(tracks);
 }
 
@@ -275,9 +304,10 @@ export default function DesktopApp(): JSX.Element {
 
   // Refs that hold the latest skip handlers so the audio event listener can
   // call them without stale closures.
-  const skipNextRef  = useRef<() => void>(() => {});
-  const skipPrevRef  = useRef<() => void>(() => {});
-  const abCommitRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextRef    = useRef<() => void>(() => {});
+  const skipPrevRef    = useRef<() => void>(() => {});
+  const abCommitRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playCountsRef  = useRef<Map<string, number>>(new Map());
 
   type SavedPlaybackState = {
     hash: string; durationMs: number;
@@ -397,9 +427,9 @@ export default function DesktopApp(): JSX.Element {
         const restored = r.shuffledHashes
           .filter(h => validSet.has(h))
           .map(h => trackOrder.find(t => t.hash === h)!);
-        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode));
+        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current));
       } else {
-        setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode));
+        setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current));
       }
     }
     pendingRestoreRef.current = null;
@@ -483,7 +513,7 @@ export default function DesktopApp(): JSX.Element {
         }
         // Branch switch within same playlist — rebuild shuffled queue from new tracks
         if (!playlistChanged && newTracks.length > 0) {
-          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode) : null);
+          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode, playCountsRef.current) : null);
         }
       })
       .catch(() => setPlaylistTracks([]));
@@ -534,9 +564,9 @@ export default function DesktopApp(): JSX.Element {
         const restored = r.shuffledHashes
           .filter(h => validSet.has(h))
           .map(h => playlistTracks.find(t => t.hash === h)!);
-        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode));
+        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current));
       } else {
-        setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode));
+        setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current));
       }
     }
     pendingRestoreRef.current = null;
@@ -718,7 +748,7 @@ export default function DesktopApp(): JSX.Element {
         if (nextIdx >= pq.length) {
           // End of queue — reshuffle or wrap
           if (shuffle && aq.length > 0) {
-            const newQ = buildShuffledQueue(aq, sm);
+            const newQ = buildShuffledQueue(aq, sm, playCountsRef.current);
             // Avoid immediately repeating the just-finished track at position 0.
             if (newQ.length > 1 && newQ[0].hash === lh) [newQ[0], newQ[1]] = [newQ[1], newQ[0]];
             setShuffledQueue(newQ);
@@ -893,22 +923,30 @@ export default function DesktopApp(): JSX.Element {
     setTimeout(() => setMeloToast(null), ms);
   };
 
-  // off → fisher-yates → balanced → random → off
-  const handleShuffle = () => {
-    if (!isShuffle) {
-      updateSetting('shuffleMode', 'fisher-yates');
-      const newQ = buildShuffledQueue(activeQueue, 'fisher-yates');
-      sr.current.playQueue = newQ; // sync update so TrackEnded sees it before next render
+  // off → fisher-yates → smart → weighted → discovery → off
+  const handleShuffle = async () => {
+    const applyMode = (mode: ShuffleMode, label: string) => {
+      updateSetting('shuffleMode', mode);
+      const newQ = buildShuffledQueue(activeQueue, mode, playCountsRef.current);
+      sr.current.playQueue = newQ;
       sr.current.isShuffle = true;
       setShuffledQueue(newQ);
       setIsShuffle(true);
-      toast('Shuffle: True Shuffle');
+      toast(`Shuffle: ${label}`);
+    };
+
+    if (!isShuffle) {
+      applyMode('fisher-yates', 'True Shuffle');
     } else if (settings.shuffleMode === 'fisher-yates') {
-      updateSetting('shuffleMode', 'smart');
-      const newQ = buildShuffledQueue(activeQueue, 'smart');
-      sr.current.playQueue = newQ;
-      setShuffledQueue(newQ);
-      toast('Shuffle: Smart');
+      applyMode('smart', 'Smart');
+    } else if (settings.shuffleMode === 'smart') {
+      try {
+        const stats = await invoke<[string, { play_count: number }][]>('library_get_all_track_stats');
+        playCountsRef.current = new Map(stats.map(([h, s]) => [h, s.play_count]));
+      } catch { /* fall back to empty map — treats all counts as 0 */ }
+      applyMode('weighted', 'Weighted');
+    } else if (settings.shuffleMode === 'weighted') {
+      applyMode('discovery', 'Discovery');
     } else {
       sr.current.playQueue = activeQueue;
       sr.current.isShuffle = false;

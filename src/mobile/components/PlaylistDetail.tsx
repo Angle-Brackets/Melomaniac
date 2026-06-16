@@ -1262,7 +1262,7 @@ function ActionTile({ Icon, label, badge, onPress }: {
   );
 }
 
-const SHUFFLE_CYCLE = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random] as const;
+const SHUFFLE_CYCLE = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery] as const;
 
 // ── Main PlaylistDetail component ────────────────────────────────────────────
 // `onBack`  — navigates up to the playlist library list.

@@ -637,7 +637,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // currentIndex only changes via advance/retreat/explicit play so auto-advance stays correct.
 
   const handleShuffle = () => {
-    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random] as const;
+    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery] as const;
     setShuffle(cycle[(cycle.indexOf(shuffle) + 1) % cycle.length]);
   };
 
@@ -1135,7 +1135,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                       )}
                     </div>
                     <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
-                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
+                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : shuffle === ShuffleMode.Weighted ? ' · weighted' : shuffle === ShuffleMode.Discovery ? ' · discovery' : ''}
                     </span>
                   </div>
                 </div>
