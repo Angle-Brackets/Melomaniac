@@ -18,9 +18,23 @@ function fmtMs(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow }: { track: TrackRecord; size: number; glow: boolean }) {
+const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow, privacyMode, accent1, accent2 }: {
+  track: TrackRecord; size: number; glow: boolean;
+  privacyMode?: boolean; accent1?: string; accent2?: string;
+}) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
-  return <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>;
+  return (
+    <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', width: size, height: size, flexShrink: 0 }}>
+      <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>
+      {privacyMode && glow && accent1 && accent2 && (
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: 14,
+          background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+          opacity: 0.92, transition: 'opacity 0.3s ease',
+        }}/>
+      )}
+    </div>
+  );
 });
 
 
@@ -187,11 +201,14 @@ function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 4
 
 const COVERFLOW_WINDOW = 4; // cards mounted on each side of the visible center
 
-function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
+function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200, privacyMode, accent1, accent2 }: {
   tracks: TrackRecord[];
   activeIndex: number;
   onBrowse?: (idx: number) => void;
   size?: number;
+  privacyMode?: boolean;
+  accent1?: string;
+  accent2?: string;
 }) {
   const wrapRef       = useRef<HTMLDivElement>(null);
   const cardRefs      = useRef<(HTMLDivElement | null)[]>([]);
@@ -346,7 +363,7 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
               zIndex: hidden ? undefined : Math.round(10 - abs),
             }}
           >
-            <CoverflowCard track={track} size={size} glow={i === windowCenter}/>
+            <CoverflowCard track={track} size={size} glow={i === windowCenter} privacyMode={privacyMode} accent1={accent1} accent2={accent2}/>
           </div>
         );
       })}
@@ -902,14 +919,15 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           overflow: 'visible', display: 'flex', alignItems: 'center',
           position: 'relative',
         }}>
-          <div style={{ filter: privacyMode ? 'blur(24px) saturate(0.3)' : undefined, transition: 'filter 0.4s ease', width: '100%' }}>
-            <MMCoverflow
-              tracks={coverflowItems}
-              activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
-              onBrowse={setBrowseIndex}
-              size={queueExpanded ? 130 : 260}
-            />
-          </div>
+          <MMCoverflow
+            tracks={coverflowItems}
+            activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
+            onBrowse={setBrowseIndex}
+            size={queueExpanded ? 130 : 260}
+            privacyMode={privacyMode}
+            accent1={accent1}
+            accent2={accent2}
+          />
         </div>
 
         {/* track info */}
