@@ -997,7 +997,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`,
                   position: 'relative', overflow: 'hidden',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 0 18px ${withAlpha(accent1, 0.45)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  boxShadow: `0 0 24px ${withAlpha(accent1, 0.75)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
                   <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, pointerEvents: 'none' }} />
@@ -1023,7 +1023,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`,
                   position: 'relative', overflow: 'hidden',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 0 28px ${withAlpha(accent1, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  boxShadow: `0 0 36px ${withAlpha(accent1, 0.8)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
                   <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, pointerEvents: 'none' }} />
