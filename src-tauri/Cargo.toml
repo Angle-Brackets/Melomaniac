@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "melomaniac"
-version = "0.1.0-alpha"
+version = "1.0.0-alpha"
 description = "An app for infinite music"
 authors = ["Soupa"]
 edition = "2024"
