@@ -448,7 +448,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   // ── AB loop state ─────────────────────────────────────────────────────────
   type LoopMode = 'off' | 'one' | 'ab';
-  const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  const [loopMode, setLoopMode] = useState<LoopMode>(() => loopStateRef.loopMode);
   // abA and abB are fractional positions (0.0–1.0) of total duration, not ms.
   // This makes them resolution-independent and trivial to render on the seek bar.
   const [abA, setAbA] = useState(0);

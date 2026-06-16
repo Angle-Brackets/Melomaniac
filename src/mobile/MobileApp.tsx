@@ -25,6 +25,8 @@ type MobileSavedPlaybackState = {
   shuffle: ShuffleMode;
   shuffledQueue?: string[];
   shuffleIndex?: number;
+  positionMs?: number;
+  loopMode?: 'off' | 'one' | 'ab';
 };
 
 export default function MobileApp() {
@@ -105,6 +107,12 @@ export default function MobileApp() {
                 const idx = ptracks.findIndex(t => t.hash === restore.hash);
                 if (idx >= 0) s.jumpTo(idx);
               }
+              if (restore.loopMode && restore.loopMode !== 'off') {
+                loopStateRef.loopMode = restore.loopMode;
+              }
+              if (restore.positionMs && restore.positionMs > 0) {
+                invoke('audio_seek', { positionMs: restore.positionMs }).catch(console.error);
+              }
             }
           }
         })
@@ -138,6 +146,31 @@ export default function MobileApp() {
         localStorage.removeItem('melomaniac.playback_state');
       }
     });
+  }, []);
+
+  // Patch position and loop mode into the saved state periodically and when the
+  // app is backgrounded — these change without going through the Zustand store.
+  useEffect(() => {
+    const patch = () => {
+      const raw = localStorage.getItem('melomaniac.playback_state');
+      if (!raw) return;
+      try {
+        const s = JSON.parse(raw);
+        s.positionMs = positionMsRef.current;
+        s.loopMode   = loopStateRef.loopMode;
+        localStorage.setItem('melomaniac.playback_state', JSON.stringify(s));
+      } catch {}
+    };
+    const id = setInterval(patch, 10_000);
+    const onHide = () => patch();
+    const onVisibility = () => { if (document.visibilityState === 'hidden') patch(); };
+    window.addEventListener('pagehide', onHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('pagehide', onHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // ── Keep lock-screen like button in sync with favorites ──────────────────────
