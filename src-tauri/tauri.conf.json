@@ -26,7 +26,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_OUTPUT_OF_tauri_signer_generate",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg0MUE3NjFBNzUyRTdFNApSV1RrNTFLbllhZEJDSnQzWmZoZ2R3TnEyNzN2QXB0YnRqMGZIdE1TNnlUZmtRcUZYR3BpSXNvawo=",
       "endpoints": [
         "https://github.com/Angle-Brackets/Melomaniac/releases/latest/download/latest.json"
       ]
