@@ -93,7 +93,8 @@ export default function MobileApp() {
             if (track) {
               const s = useStore.getState();
               s.setLoaded(restore.hash, restore.durationMs);
-              s.setPlaying(true);
+              s.setPlaying(false);
+              invoke('audio_pause').catch(console.error);
               if (restore.shuffle !== ShuffleMode.Off) {
                 s.setShuffle(restore.shuffle); // sets mode + refills queue
                 if (restore.shuffledQueue?.length && restore.shuffleIndex != null) {
