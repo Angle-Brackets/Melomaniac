@@ -206,13 +206,6 @@ export default function DesktopApp(): JSX.Element {
   const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
   const [bigPicture, setBigPicture] = useState(false);
-  const [carouselBigPicture, setCarouselBigPicture] = useState(false);
-  // trackListSlide: drives translateY (visual slide, has CSS transition)
-  // trackListSpace: drives max-height (layout space, instant — no transition)
-  // Decoupled so close = slide then collapse, open = expand then slide up simultaneously
-  const [trackListSlide, setTrackListSlide] = useState(true);
-  const [trackListSpace, setTrackListSpace] = useState(true);
-  const bigPictureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [manualQueue, setManualQueue] = useState<Track[]>([]);
   const [sessionExcluded, setSessionExcluded] = useState<Set<string>>(new Set());
   const [showQueue, setShowQueue] = useState(false);
@@ -250,6 +243,8 @@ export default function DesktopApp(): JSX.Element {
     [playQueue, artworkUrls],
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
+  const activeTrackHash = playQueue.find(t => t.id === activeTrackId)?.hash ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
+  const isActiveLoaded = !!loadedHash && activeTrackHash === loadedHash;
   const activeArtworkUrl = artworkUrls[playQueue[carouselIdx]?.hash ?? ''] ?? null;
   const artworkAccents = useAccentsFromUrl(activeArtworkUrl);
   const { slots: glowSlots, activeSlot: glowActive } = useGlowFade(artworkAccents);
@@ -299,30 +294,8 @@ export default function DesktopApp(): JSX.Element {
   // Sequential big-picture animations to avoid the carousel bouncing mid-layout.
   // ENTER: collapse tracklist first (380ms), then expand pane + carousel.
   // EXIT:  shrink pane + carousel first (380ms), then reveal tracklist.
-  const enterBigPicture = useCallback(() => {
-    if (bigPictureTimerRef.current) clearTimeout(bigPictureTimerRef.current);
-    setBigPicture(true);
-    setTrackListSlide(false);  // Phase 1: slide down (visual, 380ms)
-    bigPictureTimerRef.current = setTimeout(() => {
-      setTrackListSpace(false);  // Phase 2a: collapse space instantly (content already off-screen)
-      // Phase 2b: one rAF so the browser computes the freed space before the
-      // flex-grow transition starts — prevents the carousel jump on enter.
-      requestAnimationFrame(() => setCarouselBigPicture(true));
-      bigPictureTimerRef.current = null;
-    }, 380);
-  }, []);
-
-  const exitBigPicture = useCallback(() => {
-    if (bigPictureTimerRef.current) clearTimeout(bigPictureTimerRef.current);
-    setBigPicture(false);
-    setCarouselBigPicture(false);
-    bigPictureTimerRef.current = setTimeout(() => {
-      // Both in same React batch: space appears instantly, slide-up begins simultaneously
-      setTrackListSpace(true);
-      setTrackListSlide(true);
-      bigPictureTimerRef.current = null;
-    }, 380);
-  }, []);
+  const enterBigPicture = useCallback(() => setBigPicture(true), []);
+  const exitBigPicture = useCallback(() => setBigPicture(false), []);
 
   // Keep top pane tall enough whenever carousel size changes
   useEffect(() => {
@@ -1324,35 +1297,33 @@ export default function DesktopApp(): JSX.Element {
                 />
 
                 {activeTab === 'Tracks' && (
-                  <>
+                  <div style={{ position: 'relative', flex: 1 }}>
                     <div style={{
-                      position: 'relative',
-                      height: topPaneHeight,
-                      flexGrow: carouselBigPicture ? 1 : 0,
-                      flexShrink: 0,
-                      minHeight: 0,
+                      position: 'absolute', left: 0, right: 0, top: 0,
+                      bottom: bigPicture ? 0 : `calc(100% - ${topPaneHeight}px)`,
                       overflow: 'hidden', display: 'flex', flexDirection: 'column',
                       background: 'var(--bg-2)',
-                      paddingBottom: carouselBigPicture ? 28 : 0,
-                      transition: 'flex-grow 0.38s cubic-bezier(0.4,0,0.2,1), padding-bottom 0.38s ease',
+                      paddingBottom: bigPicture ? 28 : 0,
+                      transition: 'bottom 0.4s cubic-bezier(0.4,0,0.2,1), padding-bottom 0.4s ease',
+                      zIndex: 2,
                     }}>
                       {/* Artwork bloom — two slots cross-fade so gradient changes animate smoothly
                            (CSS can't interpolate between gradient values, opacity cross-fade instead) */}
                       {glowSlots.map((slot, i) => slot[0] && (
                         <div key={i} style={{
-                          position: 'absolute', left: '50%', top: carouselBigPicture ? '45%' : '38%',
+                          position: 'absolute', left: '50%', top: bigPicture ? '45%' : '38%',
                           transform: 'translate(-50%, -50%)',
-                          width: '75%', height: carouselBigPicture ? '70%' : '160%',
+                          width: '75%', height: bigPicture ? '70%' : '160%',
                           borderRadius: '50%',
                           background: `radial-gradient(ellipse at center, ${withAlpha(slot[0], 0.35)} 0%, ${withAlpha(slot[1], 0.16)} 45%, transparent 70%)`,
                           filter: 'blur(30px)',
                           pointerEvents: 'none',
                           zIndex: 0,
                           opacity: glowActive === i ? 1 : 0,
-                          transition: 'opacity 0.9s ease',
+                          transition: 'opacity 0.9s ease, top 0.4s cubic-bezier(0.4,0,0.2,1), height 0.4s cubic-bezier(0.4,0,0.2,1)',
                         }} />
                       ))}
-                      <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: carouselBigPicture ? undefined : 0, flex: carouselBigPicture ? 1 : undefined, minHeight: carouselBigPicture ? 0 : undefined, position: 'relative', zIndex: 1 }}>
+                      <div style={{ paddingTop: 14, paddingBottom: 4, flex: 1, minHeight: 0, position: 'relative', zIndex: 1 }}>
                         <Carousel
                           albums={carouselAlbums}
                           activeIndex={carouselIdx}
@@ -1362,7 +1333,7 @@ export default function DesktopApp(): JSX.Element {
                           }}
                           size={settings.carouselSize}
                           activeGlowColors={artworkAccents}
-                          bigPicture={carouselBigPicture}
+                          bigPicture={bigPicture}
                         />
                       </div>
                       <div style={{ position: 'relative', zIndex: 1 }}>
@@ -1395,20 +1366,20 @@ export default function DesktopApp(): JSX.Element {
                           volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
                           abA={abA} abB={abB} onAbChange={handleAbChange}
                           artworkAccents={artworkAccents}
+                          isActiveLoaded={isActiveLoaded}
                         />
                       </div>
                     </div>
                     <div style={{
-                      display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden',
-                      maxHeight: trackListSpace ? 2000 : 0,
-                      // No transition — space collapses/expands instantly so only the slide is visible
-                      pointerEvents: trackListSlide ? undefined : 'none',
+                      position: 'absolute', left: 0, right: 0, bottom: 0, top: topPaneHeight,
+                      display: 'flex', flexDirection: 'column',
+                      transform: bigPicture ? 'translateY(100%)' : 'translateY(0)',
+                      opacity: bigPicture ? 0 : 1,
+                      pointerEvents: bigPicture ? 'none' : undefined,
+                      transition: 'transform 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease',
+                      zIndex: 1,
                     }}>
-                      <div style={{
-                        display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0,
-                        transform: trackListSlide ? 'translateY(0)' : 'translateY(100%)',
-                        transition: 'transform 0.38s cubic-bezier(0.4,0,0.2,1)',
-                      }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                       <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
                       <TrackList
                         tracks={playlistTracks ?? trackOrder}
@@ -1436,7 +1407,7 @@ export default function DesktopApp(): JSX.Element {
                       />
                       </div>
                     </div>
-                  </>
+                  </div>
                 )}
 
                 {activeTab === 'History' && (

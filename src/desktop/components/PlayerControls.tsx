@@ -34,6 +34,8 @@ interface PlayerControlsProps {
   abA:             number;  abB:         number;
   onAbChange:      (handle: 'A' | 'B', val: number) => void;
   artworkAccents?: [string, string];
+  /** False when the user has browsed to a different track than the one loaded/playing. */
+  isActiveLoaded:  boolean;
 }
 
 function CtrlBtn({ active = false, onClick, title, children }: {
@@ -88,6 +90,7 @@ export default function PlayerControls({
   onSeek, volume, onVolume,
   abA, abB, onAbChange,
   artworkAccents,
+  isActiveLoaded,
 }: PlayerControlsProps): JSX.Element {
   const [accent1, accent2] = artworkAccents ?? ['', ''];
   const playBtnStyle = accent1 ? {
@@ -107,20 +110,28 @@ export default function PlayerControls({
   const posTextRef   = useRef<HTMLSpanElement>(null);
   const rafRef       = useRef<number>(0);
 
-  const seekingRef  = useRef(false);
-  const volumingRef = useRef(false);
-  const abDragging  = useRef<'A' | 'B' | null>(null);
-  const abActive    = loopMode === 'ab';
+  const seekingRef       = useRef(false);
+  const volumingRef      = useRef(false);
+  const abDragging       = useRef<'A' | 'B' | null>(null);
+  const seekHoveredRef   = useRef(false);
+  const isActiveLoadedRef = useRef(isActiveLoaded);
+  const abActive         = loopMode === 'ab';
 
-  // rAF loop — updates seek fill and time text directly without React re-renders
+  useEffect(() => { isActiveLoadedRef.current = isActiveLoaded; }, [isActiveLoaded]);
+
+  // rAF loop — updates seek fill and time text directly without React re-renders.
+  // When the browsed track differs from the playing track, show 0 unless the
+  // user hovers the seek bar (hover = peek at the live position of the playing song).
   useEffect(() => {
     const tick = () => {
-      if (durationMs > 0) {
-        const posMs = positionMsRef.current;
-        const pct = Math.min(1, Math.max(0, posMs / durationMs));
+      const showLive = isActiveLoadedRef.current || seekHoveredRef.current;
+      const refDur   = durationMs;
+      if (refDur > 0) {
+        const posMs = showLive ? positionMsRef.current : 0;
+        const pct   = showLive ? Math.min(1, Math.max(0, posMs / refDur)) : 0;
         if (seekFillRef.current)  seekFillRef.current.style.width = `${pct * 100}%`;
         if (seekThumbRef.current) seekThumbRef.current.style.left = `${pct * 100}%`;
-        if (posTextRef.current)   posTextRef.current.textContent  = fmtMs(posMs);
+        if (posTextRef.current)   posTextRef.current.textContent  = showLive ? fmtMs(posMs) : '0:00';
       } else {
         if (seekFillRef.current)  seekFillRef.current.style.width = '0%';
         if (seekThumbRef.current) seekThumbRef.current.style.left = '0%';
@@ -191,7 +202,7 @@ export default function PlayerControls({
           </CtrlBtn>
         </div>
 
-        <Tip tip={isPlaying ? 'Pause' : 'Play'}>
+        <Tip tip={isPlaying && isActiveLoaded ? 'Pause' : 'Play'}>
           <button
             className="btn btn-circle mx-3"
             style={{ width: 44, height: 44, minHeight: 'unset', position: 'relative', overflow: 'hidden', transition: 'box-shadow 0.6s ease', ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
@@ -203,12 +214,12 @@ export default function PlayerControls({
                 marginLeft: -500, marginTop: -50, zIndex: 0,
                 background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2 || accent1} 50px, ${accent1} 100px)`,
                 animation: 'mm-play-shimmer 8s linear infinite',
-                animationPlayState: isPlaying ? 'running' : 'paused',
+                animationPlayState: isPlaying && isActiveLoaded ? 'running' : 'paused',
                 pointerEvents: 'none',
               }} />
             )}
             <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {isPlaying ? <IcoPause size={18} /> : <IcoPlay size={18} />}
+              {isPlaying && isActiveLoaded ? <IcoPause size={18} /> : <IcoPlay size={18} />}
             </span>
           </button>
         </Tip>
@@ -242,6 +253,8 @@ export default function PlayerControls({
         <div
           className="flex-1 relative h-[18px] flex items-center cursor-pointer"
           ref={seekRef}
+          onMouseEnter={() => { seekHoveredRef.current = true; }}
+          onMouseLeave={() => { seekHoveredRef.current = false; }}
           onMouseDown={e => {
             if (!seekRef.current) return;
             const r = seekRef.current.getBoundingClientRect();
@@ -278,10 +291,9 @@ export default function PlayerControls({
           <div ref={seekThumbRef} style={{
             position: 'absolute', left: '0%', top: '50%',
             transform: 'translate(-50%, -50%)',
-            width: 9, height: 9, borderRadius: '50%',
-            background: accent1 || 'var(--text-0)',
-            border: '2px solid rgba(255,255,255,0.85)',
-            boxShadow: `0 1px 4px rgba(0,0,0,0.5), 0 0 8px ${accent1 ? withAlpha(accent1, 0.6) : 'rgba(255,255,255,0.3)'}`,
+            width: 12, height: 12, borderRadius: '50%',
+            background: 'var(--text-0)',
+            boxShadow: `0 0 10px ${withAlpha(accent1 || '#ffffff', 0.7)}, 0 2px 4px rgba(0,0,0,0.5)`,
             pointerEvents: 'none', zIndex: 2,
           }} />
 
@@ -318,7 +330,9 @@ export default function PlayerControls({
         </div>
 
         <span className="font-mono text-[10px] text-mm-t2 min-w-[32px]">
-          {durationMs > 0 ? fmtMs(durationMs) : '—'}
+          {isActiveLoaded
+            ? (durationMs > 0 ? fmtMs(durationMs) : '—')
+            : (track?.duration_ms ? fmtMs(track.duration_ms) : '—')}
         </span>
 
         {/* Volume */}
