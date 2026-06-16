@@ -24,13 +24,12 @@ const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow, pri
 }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
   return (
-    <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', width: size, height: size, flexShrink: 0 }}>
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>
       {privacyMode && glow && accent1 && accent2 && (
         <div style={{
-          position: 'absolute', inset: 0, borderRadius: 14,
+          position: 'absolute', inset: 0, borderRadius: 14, pointerEvents: 'none',
           background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
-          opacity: 0.92, transition: 'opacity 0.3s ease',
         }}/>
       )}
     </div>

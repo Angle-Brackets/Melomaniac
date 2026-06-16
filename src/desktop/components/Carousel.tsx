@@ -269,7 +269,7 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
                 ...cardStyle,
               }}
             >
-              <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ position: 'relative' }}>
                 <AlbumArt album={album} size={effectiveSize} tilt={tilt} style={{
                   boxShadow: isActive
                     ? `0 8px 36px rgba(0,0,0,0.7), 0 0 0 2px var(--accent), 0 0 28px ${withAlpha(glowColor, 0.5)}`
@@ -278,10 +278,8 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
                 }} />
                 {isActive && privacyMode && activeGlowColors && (
                   <div style={{
-                    position: 'absolute', inset: 0,
+                    position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none',
                     background: `linear-gradient(135deg, ${activeGlowColors[0]}, ${activeGlowColors[1]})`,
-                    opacity: 0.92,
-                    transition: 'opacity 0.3s ease',
                   }} />
                 )}
               </div>
