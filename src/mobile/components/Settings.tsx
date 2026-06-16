@@ -523,7 +523,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* About */}
         <SettingsGroup label="About">
           <div style={{ padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)' }}>
-            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>Melomaniac v1.0 Alpha</div>
+            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>Melomaniac v{__APP_VERSION__}</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', marginTop: 3 }}>Tauri 2 · React · Rust · GPLv3</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 3 }}>By Soupa · built {BUILD_DATE}</div>
           </div>
