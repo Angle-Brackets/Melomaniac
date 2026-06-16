@@ -7,6 +7,7 @@ import {
 } from '../icons';
 import { FiLayers } from 'react-icons/fi';
 import { withAlpha } from '../../shared/artworkAccents';
+import { SHIMMER_DURATION, TRANSITION_FAST, TRANSITION_GLOW } from '../animations';
 import ScrollText from './ScrollText';
 
 export type LoopMode = 'off' | 'one' | 'ab';
@@ -52,7 +53,7 @@ function CtrlBtn({ active = false, onClick, title, children }: {
         width: 30, height: 30, borderRadius: 6, flexShrink: 0,
         background: 'none', border: 'none', cursor: 'pointer', padding: 0, outline: 'none',
         color: active ? 'var(--accent)' : hov ? 'var(--text-0)' : 'var(--text-2)',
-        transition: 'color 0.12s ease',
+        transition: `color ${TRANSITION_FAST}`,
       }}
     >
       {children}
@@ -205,7 +206,7 @@ export default function PlayerControls({
         <Tip tip={isPlaying && isActiveLoaded ? 'Pause' : 'Play'}>
           <button
             className="btn btn-circle mx-3"
-            style={{ width: 44, height: 44, minHeight: 'unset', position: 'relative', overflow: 'hidden', transition: 'box-shadow 0.6s ease', ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
+            style={{ width: 44, height: 44, minHeight: 'unset', position: 'relative', overflow: 'hidden', transition: `box-shadow ${TRANSITION_GLOW}`, ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
             onClick={onPlayPause}
           >
             {accent1 && (
@@ -213,7 +214,7 @@ export default function PlayerControls({
                 position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100,
                 marginLeft: -500, marginTop: -50, zIndex: 0,
                 background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2 || accent1} 50px, ${accent1} 100px)`,
-                animation: 'mm-play-shimmer 8s linear infinite',
+                animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`,
                 animationPlayState: isPlaying && isActiveLoaded ? 'running' : 'paused',
                 pointerEvents: 'none',
               }} />
@@ -283,7 +284,7 @@ export default function PlayerControls({
                 position: 'absolute', left: 0, top: 0, bottom: 0,
                 width: '0%',
                 background: seekFillColor, borderRadius: 2,
-                transition: 'background-color 0.6s ease',
+                transition: `background-color ${TRANSITION_GLOW}`,
               }}
             />
           </div>

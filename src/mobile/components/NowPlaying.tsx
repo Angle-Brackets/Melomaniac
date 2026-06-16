@@ -11,6 +11,7 @@ import { Icons } from '../icons';
 import { MMArt, MMSheet, MMTabBar, MarqueeText } from './common';
 import type { TabId } from './common';
 import { useTrackAccents, withAlpha, useGlowFade } from '../hooks/useTrackAccent';
+import { SPRING, SHEET_IN, FADE_SLOW, TRANSITION_FAST, TRANSITION_MED, QUEUE_STAGGER_MS, PLAYLIST_STAGGER_MS } from '../animations';
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -51,7 +52,7 @@ function SwipeToRemove({ children, onRemove }: { children: React.ReactNode; onRe
       </div>
       <div style={{
         transform: `translateX(${dx}px)`,
-        transition: snapping ? 'transform 0.2s ease' : 'none',
+        transition: snapping ? `transform ${TRANSITION_FAST}` : 'none',
         background: 'var(--bg-1)',
       }}>
         {children}
@@ -848,7 +849,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           background: `radial-gradient(circle, ${withAlpha(slot[0], 0.40)} 0%, ${withAlpha(slot[1], 0.18)} 42%, transparent 68%)`,
           filter: 'blur(40px)', pointerEvents: 'none',
           opacity: haloActive === i ? 1 : 0,
-          transition: 'opacity 0.7s ease',
+          transition: `opacity ${FADE_SLOW}`,
         }}/>
       ))}
 
@@ -987,7 +988,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               <button onClick={onClick} style={{ width: 44, height: 44, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 22, flexShrink: 0 }}>{children}</button>
             );
             return (
-              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: `all ${SPRING}`, flexShrink: 0 }}>
                 <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={34}/>
                 <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
                 {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
@@ -1010,7 +1011,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             <button onClick={onClick} style={{ width: 52, height: 52, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 26, flexShrink: 0 }}>{children}</button>
           );
           return (
-            <div style={{ padding: '4px 16px 8px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)', flexShrink: 0 }}>
+            <div style={{ padding: '4px 16px 8px', transition: `all ${SPRING}`, flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
                 {tPrimary(handlePrev, <Icons.prev size={28} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
@@ -1043,7 +1044,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           <div style={{
             position: 'absolute', left: 0, right: 0,
             bottom: listScrolled ? 0 : 'var(--tab-h)',
-            transition: 'bottom 0.35s ease',
+            transition: `bottom ${SPRING}`,
             zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
           }}>
             {/* Queue header — drag up/down to expand/collapse; tap to toggle. */}
@@ -1101,7 +1102,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {!queueExpanded && nextTrack && <NextTrackArt track={nextTrack}/>}
-                  <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.25s ease' }}>
+                  <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: `transform ${TRANSITION_MED}` }}>
                     <Icons.chevDown size={13} stroke="var(--text-3)"/>
                   </div>
                 </div>
@@ -1147,7 +1148,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
       <MMTabBar active="now" onTab={onTab} style={{
         transform: listScrolled ? 'translateY(var(--tab-h))' : 'translateY(0)',
-        transition: 'transform 0.35s ease',
+        transition: `transform ${SPRING}`,
       }}/>
 
       {/* Drag ghost */}
@@ -1181,11 +1182,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         return (
           <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
             <div onClick={() => setShowQueue(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" expandable animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowQueue(false)}>
+            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" expandable animStyle={{ animation: `mmSheetUp ${SHEET_IN} both` }} onClose={() => setShowQueue(false)}>
               {nowPlaying && (
                 <>
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginBottom: 2 }}>Now Playing</div>
-                  <div style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: '0ms' }}>
+                  <div style={{ animation: `mmFadeSlide ${TRANSITION_MED} both`, animationDelay: '0ms' }}>
                     <QueueSheetRow track={nowPlaying}/>
                   </div>
                 </>
@@ -1194,7 +1195,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 <>
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Coming Up</div>
                   {comingUp.map((t, i) => (
-                    <div key={t.hash} style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: `${i * 40}ms` }}>
+                    <div key={t.hash} style={{ animation: `mmFadeSlide ${TRANSITION_MED} both`, animationDelay: `${i * QUEUE_STAGGER_MS}ms` }}>
                       <SwipeToRemove onRemove={() => removeUpcomingTrack(t.hash)}>
                         <QueueSheetRow track={t}/>
                       </SwipeToRemove>
@@ -1218,7 +1219,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             title="Switch Branch"
             subtitle={`${currentPlaylist.branches.length} branch${currentPlaylist.branches.length !== 1 ? 'es' : ''}`}
             height="55%"
-            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+            animStyle={{ animation: `mmSheetUp ${SHEET_IN} both` }}
             onClose={() => setShowBranchSheet(false)}
           >
             <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1243,8 +1244,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                       padding: '11px 4px',
                       borderBottom: i < currentPlaylist.branches.length - 1 ? '0.5px solid var(--border-0)' : 'none',
                       cursor: 'pointer',
-                      animation: `mmFadeSlide 0.22s ease both`,
-                      animationDelay: `${i * 35}ms`,
+                      animation: `mmFadeSlide ${TRANSITION_MED} both`,
+                      animationDelay: `${i * PLAYLIST_STAGGER_MS}ms`,
                     }}
                   >
                     <div style={{
@@ -1279,7 +1280,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       {showSwitcher && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
           <div onClick={() => setShowSwitcher(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-          <MMSheet title="Switch Source" subtitle={`${playlists.length} playlists`} height="70%" animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowSwitcher(false)}>
+          <MMSheet title="Switch Source" subtitle={`${playlists.length} playlists`} height="70%" animStyle={{ animation: `mmSheetUp ${SHEET_IN} both` }} onClose={() => setShowSwitcher(false)}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* Library option */}
               <div onClick={() => {
