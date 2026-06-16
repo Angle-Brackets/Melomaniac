@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import DesktopLoader from './DesktopLoader';
 import { invoke } from '@tauri-apps/api/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { TrackRecord } from '../data';
@@ -159,11 +160,7 @@ export default function StatsView(): JSX.Element {
 
       {/* Virtualized rows */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto' }} className="styled-scroll">
-        {loading && (
-          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
-            Loading…
-          </div>
-        )}
+        {loading && <DesktopLoader />}
 
         {!loading && rows.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center' }}>
