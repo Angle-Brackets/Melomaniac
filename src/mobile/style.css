@@ -84,6 +84,11 @@
   from { transform: translateX(calc(-100% - 24px)); opacity: 0; }
   to   { transform: translateX(0);                  opacity: 1; }
 }
+@keyframes mm-play-shimmer {
+  from { transform: rotate(45deg) translateX(0px); }
+  to   { transform: rotate(45deg) translateX(400px); }
+}
+
 @keyframes mmNoteDance {
   0%   { transform: translateY(0px)   rotate(-15deg) scale(1);    }
   15%  { transform: translateY(-14px) rotate(10deg)  scale(1.2);  }

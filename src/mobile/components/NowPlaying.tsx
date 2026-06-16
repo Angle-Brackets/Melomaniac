@@ -11,7 +11,7 @@ import { Icons } from '../icons';
 import { MMArt, MMSheet, MMTabBar, MarqueeText } from './common';
 import type { TabId } from './common';
 import { useTrackAccents, withAlpha, useGlowFade } from '../hooks/useTrackAccent';
-import { SPRING, SHEET_IN, FADE_SLOW, TRANSITION_FAST, TRANSITION_MED, QUEUE_STAGGER_MS, PLAYLIST_STAGGER_MS } from '../animations';
+import { SHIMMER_DURATION, SPRING, SHEET_IN, FADE_SLOW, TRANSITION_FAST, TRANSITION_MED, QUEUE_STAGGER_MS, PLAYLIST_STAGGER_MS } from '../animations';
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -994,12 +994,16 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
                   width: 58, height: 58, borderRadius: 29, border: 'none', flexShrink: 0,
-                  background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+                  background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`,
+                  position: 'relative', overflow: 'hidden',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 6px 18px ${withAlpha(accent1, 0.45)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  boxShadow: `0 0 18px ${withAlpha(accent1, 0.45)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
-                  {isBrowsing ? <Icons.play size={24}/> : isPlaying ? <Icons.pause size={24}/> : <Icons.play size={24}/>}
+                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, pointerEvents: 'none' }} />
+                  <span style={{ position: 'relative', zIndex: 1, display: 'flex' }}>
+                    {isBrowsing ? <Icons.play size={24}/> : isPlaying ? <Icons.pause size={24}/> : <Icons.play size={24}/>}
+                  </span>
                 </button>
                 {tBtn(handleNext, <Icons.next size={22} stroke="var(--text-0)"/>)}
                 <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={34}/>
@@ -1016,12 +1020,16 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 {tPrimary(handlePrev, <Icons.prev size={28} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
                   width: 72, height: 72, borderRadius: 36, border: 'none', flexShrink: 0,
-                  background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+                  background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`,
+                  position: 'relative', overflow: 'hidden',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 10px 28px ${withAlpha(accent1, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  boxShadow: `0 0 28px ${withAlpha(accent1, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
-                  {isBrowsing ? <Icons.play size={30}/> : isPlaying ? <Icons.pause size={30}/> : <Icons.play size={30}/>}
+                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, pointerEvents: 'none' }} />
+                  <span style={{ position: 'relative', zIndex: 1, display: 'flex' }}>
+                    {isBrowsing ? <Icons.play size={30}/> : isPlaying ? <Icons.pause size={30}/> : <Icons.play size={30}/>}
+                  </span>
                 </button>
                 {tPrimary(handleNext, <Icons.next size={28} stroke="var(--text-0)"/>)}
               </div>
