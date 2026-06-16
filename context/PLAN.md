@@ -261,10 +261,6 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 - **Library**: every audio file in `tests/audio/` is ingested at startup (idempotent — same hash skips the write)
 - **DevelopmentOnly playlist**: `dev_seed_dev_playlist` (called from `lib.rs`) destroys and recreates a "DevelopmentOnly" playlist on every launch, seeded with all test-audio tracks. History does not accumulate — it always starts clean. This is the fixture for exercising the carousel and playback UI. Never appears in production builds.
 
-### Known bugs
-
-- ~~Rail git icon: clicking the git rail icon while the CommitGraph overlay is open doesn't reset the highlighted rail icon when navigating away~~ **Fixed**
-
 ### Remaining desktop UI work
 
 - **Android audio bridge** — ExoPlayer / Media3 implementation (see P0 section)
