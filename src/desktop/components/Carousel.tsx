@@ -59,11 +59,12 @@ interface CarouselProps {
   size?: number; // card size in px (120–240), driven by settings.carouselSize
   activeGlowColors?: [string, string];
   bigPicture?: boolean;
+  privacyMode?: boolean;
 }
 
 const SLOT_GAP = 6; // px gap between card slots
 
-export default function Carousel({ albums, activeIndex, onIndexChange, size = 180, activeGlowColors, bigPicture }: CarouselProps) {
+export default function Carousel({ albums, activeIndex, onIndexChange, size = 180, activeGlowColors, bigPicture, privacyMode }: CarouselProps) {
   const [position,       setPosition]       = useState(activeIndex);
   const [containerWidth, setContainerWidth]  = useState(600);
   const [containerHeight, setContainerHeight] = useState(0);
@@ -273,6 +274,8 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
                   ? `0 8px 36px rgba(0,0,0,0.7), 0 0 0 2px var(--accent), 0 0 28px ${withAlpha(glowColor, 0.5)}`
                   : '0 4px 16px rgba(0,0,0,0.5)',
                 outline: 'none',
+                filter: isActive && privacyMode ? 'blur(20px) saturate(0.3)' : undefined,
+                transition: 'filter 0.4s ease',
               }} />
             </div>
           );

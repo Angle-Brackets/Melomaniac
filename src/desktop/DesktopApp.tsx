@@ -97,6 +97,7 @@ const SETTING_DEFAULTS: AppSettings = {
   discordEnabled: false,
   commitAuthor: '',
   shuffleMode: 'fisher-yates',
+  privacyMode: false,
 };
 
 const SETTINGS_KEY = 'melomaniac.settings';
@@ -565,6 +566,10 @@ export default function DesktopApp(): JSX.Element {
       .catch(console.error);
     return () => { stale = true; };
   }, [loadedHash, settings.discordEnabled]);
+
+  useEffect(() => {
+    invoke('audio_set_privacy_mode', { enabled: settings.privacyMode }).catch(console.error);
+  }, [settings.privacyMode]);
 
   // ── Global Stats Listener ────────────────────────────────────────────────
   useEffect(() => {
@@ -1338,6 +1343,7 @@ export default function DesktopApp(): JSX.Element {
                           size={settings.carouselSize}
                           activeGlowColors={artworkAccents}
                           bigPicture={bigPicture}
+                          privacyMode={settings.privacyMode}
                         />
                       </div>
                       <div style={{ position: 'relative', zIndex: 1 }}>

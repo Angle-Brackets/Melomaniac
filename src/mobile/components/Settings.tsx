@@ -31,6 +31,7 @@ interface StoredSettings {
   accentHue: number;
   customAccentHue: number; // remembers last slider position independently of active theme
   commitAuthor: string;
+  privacyMode: boolean;
   [key: string]: unknown;
 }
 
@@ -39,6 +40,7 @@ const DEFAULTS: StoredSettings = {
   accentHue: 28,
   customAccentHue: 200,
   commitAuthor: '',
+  privacyMode: false,
 };
 
 function loadSettings(): StoredSettings {
@@ -52,7 +54,9 @@ function loadSettings(): StoredSettings {
 function saveSettings(patch: Partial<StoredSettings>) {
   try {
     const existing = (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'); } catch { return {}; } })();
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...existing, ...patch }));
+    const next = { ...existing, ...patch };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent('mm-settings-change', { detail: next }));
   } catch { /* ignore */ }
 }
 
@@ -372,6 +376,28 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
               </div>
               <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', width: 28, textAlign: 'right' }}>{settings.accentHue}°</span>
             </div>
+          </div>
+        </SettingsGroup>
+
+        {/* Privacy */}
+        <SettingsGroup label="Privacy">
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: 'var(--text-0)' }}>Privacy Mode</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>Blur album art so others can't see what's playing</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={!!settings.privacyMode}
+              onChange={e => {
+                const enabled = e.target.checked;
+                const patch = { privacyMode: enabled };
+                setSettings(prev => ({ ...prev, ...patch }));
+                saveSettings(patch);
+                invoke('audio_set_privacy_mode', { enabled }).catch(console.error);
+              }}
+              style={{ width: 44, height: 24, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+            />
           </div>
         </SettingsGroup>
 

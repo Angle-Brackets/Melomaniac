@@ -208,6 +208,19 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                 className="toggle toggle-primary toggle-sm"
               />
             </div>
+
+            <div className="flex items-center justify-between py-2 border-t border-mm-b0">
+              <div>
+                <span className="text-xs text-mm-t1">Privacy Mode</span>
+                <p className="font-mono text-[10px] text-mm-t2 mt-0.5">Blur album art so others can't see what's playing</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.privacyMode}
+                onChange={e => updateSetting('privacyMode', e.target.checked)}
+                className="toggle toggle-primary toggle-sm"
+              />
+            </div>
           </section>
 
           {/* ── Sync ── */}

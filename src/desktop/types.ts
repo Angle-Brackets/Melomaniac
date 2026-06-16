@@ -14,4 +14,5 @@ export interface AppSettings {
   discordEnabled: boolean;
   commitAuthor: string;
   shuffleMode: ShuffleMode;
+  privacyMode: boolean;
 }

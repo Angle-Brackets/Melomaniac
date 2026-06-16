@@ -30,6 +30,7 @@ unsafe extern "C" {
     fn melo_register_remote_commands(callback: extern "C" fn(i32, f64));
     fn melo_set_like_state(active: bool);
     fn melo_set_shuffle_state(mode: i32);
+    fn melo_set_privacy_mode(enabled: bool);
 }
 
 // ── Remote command routing ────────────────────────────────────────────────────
@@ -207,6 +208,10 @@ impl AudioBridge for IosBridge {
 
     fn set_shuffle_mode(&self, mode: u8) {
         unsafe { melo_set_shuffle_state(mode as i32) };
+    }
+
+    fn set_privacy_mode(&self, enabled: bool) {
+        unsafe { melo_set_privacy_mode(enabled) };
     }
 }
 

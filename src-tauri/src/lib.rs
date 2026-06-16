@@ -221,6 +221,7 @@ pub fn run() {
             audio::audio_position,
             audio::audio_set_like_state,
             audio::audio_set_shuffle_state,
+            audio::audio_set_privacy_mode,
             audio::track_play,
             audio::track_load_paused,
             storage::library_get_all,

@@ -220,3 +220,8 @@ pub fn audio_set_like_state(is_active: bool, state: State<'_, AudioState>) {
 pub fn audio_set_shuffle_state(mode: u8, state: State<'_, AudioState>) {
     state.bridge.set_shuffle_mode(mode);
 }
+
+#[tauri::command]
+pub fn audio_set_privacy_mode(enabled: bool, state: State<'_, AudioState>) {
+    state.bridge.set_privacy_mode(enabled);
+}

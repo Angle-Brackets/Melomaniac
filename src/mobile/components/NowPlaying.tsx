@@ -447,6 +447,19 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     inactivityRef.current = setTimeout(() => setListScrolled(false), 2500);
   }, []);
 
+  // ── Privacy mode ──────────────────────────────────────────────────────────
+  const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}').privacyMode ?? false; } catch { return false; }
+  });
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail?.privacyMode === 'boolean') setPrivacyMode(detail.privacyMode);
+    };
+    window.addEventListener('mm-settings-change', handler);
+    return () => window.removeEventListener('mm-settings-change', handler);
+  }, []);
+
   // ── AB loop state ─────────────────────────────────────────────────────────
   type LoopMode = 'off' | 'one' | 'ab';
   const [loopMode, setLoopMode] = useState<LoopMode>(() => loopStateRef.loopMode);
@@ -887,13 +900,16 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           marginTop: 6, marginBottom: 8,
           transition: 'max-height 0.4s cubic-bezier(0.22,1,0.36,1)',
           overflow: 'visible', display: 'flex', alignItems: 'center',
+          position: 'relative',
         }}>
-          <MMCoverflow
-            tracks={coverflowItems}
-            activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
-            onBrowse={setBrowseIndex}
-            size={queueExpanded ? 130 : 260}
-          />
+          <div style={{ filter: privacyMode ? 'blur(24px) saturate(0.3)' : undefined, transition: 'filter 0.4s ease', width: '100%' }}>
+            <MMCoverflow
+              tracks={coverflowItems}
+              activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
+              onBrowse={setBrowseIndex}
+              size={queueExpanded ? 130 : 260}
+            />
+          </div>
         </div>
 
         {/* track info */}
