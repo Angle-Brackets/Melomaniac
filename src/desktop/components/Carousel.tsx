@@ -7,9 +7,11 @@ interface AlbumArtProps {
   size?: number;
   style?: React.CSSProperties;
   tilt?: boolean;
+  privacyOverlay?: boolean;
+  accentColors?: [string, string];
 }
 
-export function AlbumArt({ album, size = 180, style = {}, tilt = true }: AlbumArtProps) {
+export function AlbumArt({ album, size = 180, style = {}, tilt = true, privacyOverlay, accentColors }: AlbumArtProps) {
   const inner = (
     <div style={{
         width: size, height: size,
@@ -39,6 +41,13 @@ export function AlbumArt({ album, size = 180, style = {}, tilt = true }: AlbumAr
           background: `radial-gradient(ellipse at 50% 0%, ${album.accent}44 0%, transparent 70%)`,
           pointerEvents: 'none',
         }} />
+        {privacyOverlay && accentColors && (
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            background: `linear-gradient(135deg, ${accentColors[0]}, ${accentColors[1]})`,
+            transition: 'none',
+          }} />
+        )}
     </div>
   );
   if (!tilt) return inner;
@@ -269,20 +278,17 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
                 ...cardStyle,
               }}
             >
-              <div style={{ position: 'relative' }}>
-                <AlbumArt album={album} size={effectiveSize} tilt={tilt} style={{
+              <AlbumArt
+                album={album} size={effectiveSize} tilt={tilt}
+                privacyOverlay={!!privacyMode}
+                accentColors={[album.accent, album.accent]}
+                style={{
                   boxShadow: isActive
                     ? `0 8px 36px rgba(0,0,0,0.7), 0 0 0 2px var(--accent), 0 0 28px ${withAlpha(glowColor, 0.5)}`
                     : '0 4px 16px rgba(0,0,0,0.5)',
                   outline: 'none',
-                }} />
-                {isActive && privacyMode && activeGlowColors && (
-                  <div style={{
-                    position: 'absolute', inset: 0, borderRadius: 12, pointerEvents: 'none',
-                    background: `linear-gradient(135deg, ${activeGlowColors[0]}, ${activeGlowColors[1]})`,
-                  }} />
-                )}
-              </div>
+                }}
+              />
             </div>
           );
         })}

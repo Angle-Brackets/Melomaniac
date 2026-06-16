@@ -18,18 +18,20 @@ function fmtMs(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow, privacyMode, accent1, accent2 }: {
+const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow, privacyMode }: {
   track: TrackRecord; size: number; glow: boolean;
-  privacyMode?: boolean; accent1?: string; accent2?: string;
+  privacyMode?: boolean;
 }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
+  const [a1, a2] = useTrackAccents(track.hash, track.artwork_hash);
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>
-      {privacyMode && glow && accent1 && accent2 && (
+      {privacyMode && (
         <div style={{
           position: 'absolute', inset: 0, borderRadius: 14, pointerEvents: 'none',
-          background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+          background: `linear-gradient(135deg, ${a1}, ${a2})`,
+          transition: 'none',
         }}/>
       )}
     </div>
@@ -200,14 +202,12 @@ function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 4
 
 const COVERFLOW_WINDOW = 4; // cards mounted on each side of the visible center
 
-function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200, privacyMode, accent1, accent2 }: {
+function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200, privacyMode }: {
   tracks: TrackRecord[];
   activeIndex: number;
   onBrowse?: (idx: number) => void;
   size?: number;
   privacyMode?: boolean;
-  accent1?: string;
-  accent2?: string;
 }) {
   const wrapRef       = useRef<HTMLDivElement>(null);
   const cardRefs      = useRef<(HTMLDivElement | null)[]>([]);
@@ -362,7 +362,7 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200, privacyMode, a
               zIndex: hidden ? undefined : Math.round(10 - abs),
             }}
           >
-            <CoverflowCard track={track} size={size} glow={i === windowCenter} privacyMode={privacyMode} accent1={accent1} accent2={accent2}/>
+            <CoverflowCard track={track} size={size} glow={i === windowCenter} privacyMode={privacyMode}/>
           </div>
         );
       })}
@@ -924,8 +924,6 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             onBrowse={setBrowseIndex}
             size={queueExpanded ? 130 : 260}
             privacyMode={privacyMode}
-            accent1={accent1}
-            accent2={accent2}
           />
         </div>
 
@@ -1033,7 +1031,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   boxShadow: `0 0 24px ${withAlpha(accent1, 0.75)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
-                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, pointerEvents: 'none' }} />
+                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, animationPlayState: isPlaying ? 'running' : 'paused', pointerEvents: 'none' }} />
                   <span style={{ position: 'relative', zIndex: 1, display: 'flex' }}>
                     {isBrowsing ? <Icons.play size={24}/> : isPlaying ? <Icons.pause size={24}/> : <Icons.play size={24}/>}
                   </span>
@@ -1059,7 +1057,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   boxShadow: `0 0 36px ${withAlpha(accent1, 0.8)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
-                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, pointerEvents: 'none' }} />
+                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, animationPlayState: isPlaying ? 'running' : 'paused', pointerEvents: 'none' }} />
                   <span style={{ position: 'relative', zIndex: 1, display: 'flex' }}>
                     {isBrowsing ? <Icons.play size={30}/> : isPlaying ? <Icons.pause size={30}/> : <Icons.play size={30}/>}
                   </span>

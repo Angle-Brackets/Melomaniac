@@ -388,6 +388,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
             </div>
             <input
               type="checkbox"
+              className="toggle toggle-primary toggle-sm"
               checked={!!settings.privacyMode}
               onChange={e => {
                 const enabled = e.target.checked;
@@ -396,7 +397,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
                 saveSettings(patch);
                 invoke('audio_set_privacy_mode', { enabled }).catch(console.error);
               }}
-              style={{ width: 44, height: 24, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+              style={{ flexShrink: 0, cursor: 'pointer' }}
             />
           </div>
         </SettingsGroup>
