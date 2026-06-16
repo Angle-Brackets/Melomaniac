@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { TrackRecord } from '../data';
 import type { TrackStats } from '../../store/types';
 import { IcoMetrics, IcoSync } from '../icons';
+import { FiTrash2 } from 'react-icons/fi';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ const ROW_HEIGHT = 44;
 export default function StatsView(): JSX.Element {
   const [rows, setRows] = useState<Array<{ hash: string; stats: TrackStats; track: TrackRecord | null }>>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
   const fetchedRef = useRef<Set<string>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -96,6 +98,37 @@ export default function StatsView(): JSX.Element {
           Listening Stats
         </span>
         <div style={{ flex: 1 }} />
+        {confirmClear ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-1)' }}>Are you sure?</span>
+            <button
+              onClick={async () => {
+                await invoke('library_clear_history');
+                setConfirmClear(false);
+                load();
+              }}
+              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #c0392b', background: '#c0392b22', color: '#e05050', cursor: 'pointer' }}
+            >
+              Clear
+            </button>
+            <button
+              onClick={() => setConfirmClear(false)}
+              style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-2)', background: 'none', color: 'var(--text-2)', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmClear(true)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#e05050')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-2)')}
+            title="Clear listening history"
+          >
+            <FiTrash2 size={13} />
+          </button>
+        )}
         <button
           onClick={load}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4, borderRadius: 4, display: 'flex', alignItems: 'center' }}

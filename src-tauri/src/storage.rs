@@ -1373,6 +1373,13 @@ pub async fn library_get_all_track_stats(
     storage.db.get_all_track_stats().await.map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn library_clear_history(
+    storage: State<'_, StorageState>,
+) -> Result<(), String> {
+    storage.db.clear_listening_history().await.map_err(|e| e.to_string())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
