@@ -80,8 +80,12 @@ jobs:
 
       - name: Set build number
         run: |
-          find src-tauri/gen/apple -name "Info.plist" -exec \
-            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" {} \; 2>/dev/null || true
+          BUILD=${{ github.run_number + 100 }}
+          while IFS= read -r plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD" "$plist"
+            echo "Set CFBundleVersion=$BUILD in $plist"
+          done < <(find src-tauri/gen/apple -name "Info.plist")
 
       - name: Inject signing overrides via xcodebuild wrapper
         env:
