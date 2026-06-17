@@ -1141,7 +1141,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               text={`${browseTrack.artist}${browseTrack.album ? ` · ${browseTrack.album}` : ''}`}
               active={true}
               style={{ marginTop: 4, textAlign: 'center' }}
-              textStyle={{ fontSize: 13, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', textAlign: 'center' }}
+              textStyle={{ fontSize: 13, color: 'var(--text-0)', textAlign: 'center' }}
             />
           )}
           {loopMode === LoopMode.AB && duration_ms > 0 && (
