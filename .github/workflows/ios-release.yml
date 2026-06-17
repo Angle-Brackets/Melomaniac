@@ -134,6 +134,16 @@ jobs:
           PLIST
 
           mkdir -p /tmp/ci-bin
+
+          cat > /tmp/ci-bin/agvtool << AGVWRAPPER
+          #!/bin/bash
+          if [ "\$1" = "new-version" ]; then
+            exec /usr/bin/agvtool new-version $BUILD
+          fi
+          exec /usr/bin/agvtool "\$@"
+          AGVWRAPPER
+          chmod +x /tmp/ci-bin/agvtool
+
           cat > /tmp/ci-bin/xcodebuild << WRAPPER
           #!/bin/bash
           for arg in "\$@"; do
