@@ -1239,7 +1239,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   </span>
                 </button>
                 {tBtn(handleNext, <Icons.next size={22} stroke="var(--text-0)"/>)}
-                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} color={accent} onClick={handleLoopCycle} size={34}/>
+                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={34}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={34}/>
               </div>
             );
@@ -1269,7 +1269,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 28px' }}>
                 <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={36} accent={accent}/>
                 <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
-                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} color={accent} onClick={handleLoopCycle} size={36}/>
+                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={36}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
               </div>
             </div>
