@@ -217,11 +217,25 @@ export default function MobileApp() {
         playNext();
         return;
       }
-      if (payload === 'RemotePlay')  { useStore.getState().setPlaying(true); return; }
-      if (payload === 'RemotePause') { useStore.getState().setPlaying(false); return; }
+      if (payload === 'RemotePlay') {
+        invoke('audio_play').catch(console.error);
+        useStore.getState().setPlaying(true);
+        return;
+      }
+      if (payload === 'RemotePause') {
+        invoke('audio_pause').catch(console.error);
+        useStore.getState().setPlaying(false);
+        return;
+      }
       if (payload === 'RemoteTogglePlayPause') {
         const s = useStore.getState();
-        s.setPlaying(!s.isPlaying);
+        if (s.isPlaying) {
+          invoke('audio_pause').catch(console.error);
+          s.setPlaying(false);
+        } else {
+          invoke('audio_play').catch(console.error);
+          s.setPlaying(true);
+        }
         return;
       }
       if (payload === 'RemoteNextTrack')     { playNext(true); return; }

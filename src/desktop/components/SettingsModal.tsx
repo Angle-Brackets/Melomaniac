@@ -82,7 +82,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                 {NAMED_THEME_ENTRIES.map(([key, cfg]) => (
                   <button
                     key={key}
-                    onClick={() => updateSetting({ theme: key })}
+                    onClick={() => updateSetting({ theme: key, accentHue: NAMED_THEMES[key].hue })}
                     className={`btn btn-xs ${settings.theme === key ? 'btn-primary' : 'btn-ghost'}`}
                   >
                     {cfg.label}

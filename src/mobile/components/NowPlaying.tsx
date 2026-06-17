@@ -181,22 +181,24 @@ function PlaylistSwitcherCard({ playlist, active, onSelect }: {
   );
 }
 
-function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 40 }: {
+function SecondaryBtn({ Icon, IconActive, active, color = 'var(--accent)', onClick, size = 40 }: {
   Icon: (p: { size?: number }) => React.ReactElement;
+  IconActive?: (p: { size?: number }) => React.ReactElement;
   active: boolean;
   color?: string;
   onClick?: () => void;
   size?: number;
 }) {
+  const Ico = (active && IconActive) ? IconActive : Icon;
   return (
     <button onClick={onClick} style={{
       width: size, height: size, borderRadius: size / 2,
-      background: active ? `${color}1a` : 'transparent',
+      background: 'transparent',
       border: 'none',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'pointer', color: active ? color : 'var(--text-1)',
     }}>
-      <Icon size={Math.round(size * 0.45)}/>
+      <Ico size={Math.round(size * 0.45)}/>
     </button>
   );
 }
@@ -234,6 +236,8 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<ShuffleMode>(mode);
+  // ref mirror so imperative window listeners always read the latest hovered value
+  const hoveredRef = useRef<ShuffleMode>(mode);
   const btnRef = useRef<HTMLButtonElement>(null);
   const centerRef = useRef({ x: 0, y: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -253,16 +257,15 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
     if (!el) return;
     const r = el.getBoundingClientRect();
     centerRef.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    hoveredRef.current = mode;
     setHovered(mode);
     setOpen(true);
     didOpenRef.current = true;
   };
 
-  const closeMenu = (selected: ShuffleMode) => {
-    setOpen(false);
-    if (selected !== mode) onSelect(selected);
-  };
-
+  // Touch events always belong to the element where touchstart fired (the button),
+  // so the overlay never receives them. We register listeners on window instead so
+  // the entire hold-drag-release gesture works without lifting the finger.
   const handleTouchStart = (e: React.TouchEvent) => {
     didOpenRef.current = false;
     const t = e.touches[0];
@@ -270,48 +273,56 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
 
     timerRef.current = setTimeout(openMenu, LONG_PRESS_MS);
 
-    const cancel = () => {
-      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    };
     const onMove = (ev: TouchEvent) => {
-      if (didOpenRef.current) return;
-      const dx = ev.touches[0].clientX - touchStartRef.current.x;
-      const dy = ev.touches[0].clientY - touchStartRef.current.y;
-      if (dx * dx + dy * dy > 64) cancel();
+      if (!didOpenRef.current) {
+        // Cancel long-press if finger moves too much before menu opens
+        const dx = ev.touches[0].clientX - touchStartRef.current.x;
+        const dy = ev.touches[0].clientY - touchStartRef.current.y;
+        if (dx * dx + dy * dy > 64) {
+          if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+        }
+        return;
+      }
+      ev.preventDefault();
+      const touch = ev.touches[0];
+      const { x: cx, y: cy } = centerRef.current;
+      const dist = Math.hypot(touch.clientX - cx, touch.clientY - cy);
+      if (dist < DEAD_ZONE_PX) {
+        hoveredRef.current = mode;
+        setHovered(mode);
+        return;
+      }
+      let closest: ShuffleMode = mode;
+      let minD = Infinity;
+      for (const opt of SHUFFLE_OPTS) {
+        const rad = (opt.angleDeg * Math.PI) / 180;
+        const ix = cx + Math.sin(rad) * RADIAL_R;
+        const iy = cy - Math.cos(rad) * RADIAL_R;
+        const d = Math.hypot(touch.clientX - ix, touch.clientY - iy);
+        if (d < minD) { minD = d; closest = opt.mode; }
+      }
+      hoveredRef.current = closest;
+      setHovered(closest);
     };
-    window.addEventListener('touchmove', onMove, { passive: true });
-    window.addEventListener('touchend', () => {
-      cancel();
+
+    const onEnd = () => {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
       window.removeEventListener('touchmove', onMove);
-    }, { once: true });
+      if (didOpenRef.current) {
+        didOpenRef.current = false;
+        setOpen(false);
+        const selected = hoveredRef.current;
+        if (selected !== mode) onSelect(selected);
+      }
+    };
+
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onEnd, { once: true });
   };
 
   const handleBtnClick = () => {
     if (didOpenRef.current) { didOpenRef.current = false; return; }
     onTap();
-  };
-
-  const handleOverlayMove = (e: React.TouchEvent) => {
-    e.preventDefault();
-    const t = e.touches[0];
-    const { x: cx, y: cy } = centerRef.current;
-    const dist = Math.hypot(t.clientX - cx, t.clientY - cy);
-    if (dist < DEAD_ZONE_PX) { setHovered(mode); return; }
-    let closest: ShuffleMode = mode;
-    let minD = Infinity;
-    for (const opt of SHUFFLE_OPTS) {
-      const rad = (opt.angleDeg * Math.PI) / 180;
-      const ix = cx + Math.sin(rad) * RADIAL_R;
-      const iy = cy - Math.cos(rad) * RADIAL_R;
-      const d = Math.hypot(t.clientX - ix, t.clientY - iy);
-      if (d < minD) { minD = d; closest = opt.mode; }
-    }
-    setHovered(closest);
-  };
-
-  const handleOverlayEnd = (e: React.TouchEvent) => {
-    e.preventDefault();
-    closeMenu(hovered);
   };
 
   const { x: cx, y: cy } = centerRef.current;
@@ -324,7 +335,7 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
         onClick={handleBtnClick}
         style={{
           width: size, height: size, borderRadius: size / 2,
-          background: active ? `${accent}1a` : 'transparent',
+          background: 'transparent',
           border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', color: active ? accent : 'var(--text-1)',
         }}
@@ -333,11 +344,13 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
       </button>
 
       {open && createPortal(
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)' }}
-          onTouchMove={handleOverlayMove}
-          onTouchEnd={handleOverlayEnd}
-        >
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.5)',
+          pointerEvents: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none' as React.CSSProperties['WebkitUserSelect'],
+        }}>
           {SHUFFLE_OPTS.map(opt => {
             const rad = (opt.angleDeg * Math.PI) / 180;
             const ix = cx + Math.sin(rad) * RADIAL_R;
@@ -345,23 +358,42 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
             const isHov = hovered === opt.mode;
             const isCur = mode === opt.mode;
             const bubbleSize = isHov ? 52 : 42;
+            const margin = 8;
+            const bx = Math.max(bubbleSize / 2 + margin, Math.min(window.innerWidth  - bubbleSize / 2 - margin, ix));
+            const by = Math.max(bubbleSize / 2 + margin, Math.min(window.innerHeight - bubbleSize / 2 - margin, iy));
             return (
-              <div key={opt.mode} style={{
-                position: 'absolute',
-                left: ix - bubbleSize / 2,
-                top: iy - bubbleSize / 2,
-                width: bubbleSize, height: bubbleSize,
-                borderRadius: bubbleSize / 2,
-                background: isHov ? accent : isCur ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.10)',
-                border: `1.5px solid ${isHov ? accent : isCur ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.18)'}`,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                transition: 'all 0.1s ease',
-                color: isHov ? '#fff' : isCur ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.55)',
-                boxShadow: isHov ? `0 0 16px ${accent}88` : 'none',
-              }}>
-                <ShuffleModeIcon mode={opt.mode} size={isHov ? 17 : 14}/>
-                {isHov && <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.04em', marginTop: 1 }}>{opt.label.toUpperCase()}</span>}
-              </div>
+              <React.Fragment key={opt.mode}>
+                <div style={{
+                  position: 'absolute',
+                  left: bx - bubbleSize / 2,
+                  top: by - bubbleSize / 2,
+                  width: bubbleSize, height: bubbleSize,
+                  borderRadius: bubbleSize / 2,
+                  background: isHov ? accent : isCur ? `${accent}88` : 'rgba(255,255,255,0.10)',
+                  border: `1.5px solid ${isHov ? accent : isCur ? accent : 'rgba(255,255,255,0.18)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'all 0.1s ease',
+                  color: isHov ? '#fff' : isCur ? '#fff' : 'rgba(255,255,255,0.55)',
+                  boxShadow: isHov ? `0 0 16px ${accent}88` : 'none',
+                }}>
+                  <ShuffleModeIcon mode={opt.mode} size={isHov ? 17 : 14}/>
+                </div>
+                <div style={{
+                  position: 'absolute',
+                  left: bx - 36,
+                  top: by + bubbleSize / 2 + 4,
+                  width: 72,
+                  textAlign: 'center',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: '0.06em',
+                  color: isHov ? '#fff' : 'rgba(255,255,255,0.45)',
+                  whiteSpace: 'nowrap',
+                  transition: 'color 0.1s ease',
+                }}>
+                  {opt.label.toUpperCase()}
+                </div>
+              </React.Fragment>
             );
           })}
         </div>,
@@ -1181,7 +1213,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
         {/* controls — two-row when tracklist collapsed, single-row when expanded to avoid overflow */}
         {(() => {
-          const LoopIco = loopMode === LoopMode.AB ? Icons.ab : loopMode === LoopMode.One ? Icons.loopOne : Icons.loop;
+          const LoopIco     = loopMode === LoopMode.AB ? Icons.ab         : loopMode === LoopMode.One ? Icons.loopOne     : Icons.loop;
+          const LoopIcoFill = loopMode === LoopMode.AB ? Icons.abFill     : loopMode === LoopMode.One ? Icons.loopOneFill : Icons.loopFill;
           if (queueExpanded) {
             // Compact single row matching original layout
             const tBtn = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
@@ -1190,7 +1223,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             return (
               <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: `all ${SPRING}`, flexShrink: 0 }}>
                 <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={34} accent={accent}/>
-                <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
+                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
                 {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
                   width: 58, height: 58, borderRadius: 29, border: 'none', flexShrink: 0,
@@ -1206,7 +1239,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   </span>
                 </button>
                 {tBtn(handleNext, <Icons.next size={22} stroke="var(--text-0)"/>)}
-                <SecondaryBtn Icon={LoopIco} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={34}/>
+                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} color={accent} onClick={handleLoopCycle} size={34}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={34}/>
               </div>
             );
@@ -1235,8 +1268,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               </div>
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 28px' }}>
                 <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={36} accent={accent}/>
-                <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
-                <SecondaryBtn Icon={LoopIco} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={36}/>
+                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
+                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} color={accent} onClick={handleLoopCycle} size={36}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
               </div>
             </div>
