@@ -92,6 +92,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   },
 
   setShuffle: async (mode) => {
+    const playing = get().currentHash()
     set({ shuffle: mode, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
     if (mode === ShuffleMode.Weighted || mode === ShuffleMode.Discovery) {
       try {
@@ -99,7 +100,19 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
         set({ trackPlayCounts: new Map(stats.map(([h, s]) => [h, s.play_count])) })
       } catch { /* fall back to treating all counts as 0 */ }
     }
-    if (mode !== ShuffleMode.Off) get().refillShuffleQueue()
+    if (mode !== ShuffleMode.Off) {
+      get().refillShuffleQueue()
+      // Keep the currently playing track at shuffleIndex 0 so currentHash() is stable
+      if (playing) {
+        const q = get().shuffledQueue
+        const idx = q.indexOf(playing)
+        if (idx > 0) {
+          set({ shuffledQueue: [playing, ...q.filter(h => h !== playing)] })
+        } else if (idx === -1) {
+          set({ shuffledQueue: [playing, ...q] })
+        }
+      }
+    }
   },
 
   setRepeat: (mode) => set({ repeat: mode }),
