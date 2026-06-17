@@ -30,6 +30,7 @@ export {
   FiArrowUp as IcoPush,
   FiList as IcoQueue,
 } from 'react-icons/fi';
+import { FaWeightHanging } from 'react-icons/fa';
 
 // Sparkles — matches the mobile Discover tab icon exactly
 export function IcoDiscover({ size = 17 }: { size?: number }) {
@@ -81,15 +82,9 @@ export function IcoDice({ size = 16 }: { size?: number }) {
   );
 }
 
-// Dumbbell — for Weighted shuffle mode
+// Hanging weight — for Weighted shuffle mode
 export function IcoDumbbell({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
-      <circle cx="4.5" cy="12" r="3" />
-      <circle cx="19.5" cy="12" r="3" />
-      <rect x="7" y="10.5" width="10" height="3" rx="1" />
-    </svg>
-  );
+  return <FaWeightHanging size={size} />;
 }
 
 // Magnifying glass with crosshair — for Discovery shuffle mode
