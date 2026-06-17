@@ -205,7 +205,7 @@ function SecondaryBtn({ Icon, IconActive, active, color = 'var(--accent)', onCli
 
 // ── ShuffleRadialMenu ─────────────────────────────────────────────────────────
 
-const RADIAL_R = 82;          // px from button center to icon bubble center
+const RADIAL_R = 62;          // px from button center to icon bubble center
 const LONG_PRESS_MS = 320;    // ms hold before menu opens
 const DEAD_ZONE_PX = 22;      // px from center — keep current mode highlighted
 
