@@ -9,6 +9,9 @@ jobs:
   testflight:
     name: Build and upload to TestFlight
     runs-on: macos-26
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
+      CARGO_NET_RETRY: 5
 
     steps:
       - uses: actions/checkout@v4
