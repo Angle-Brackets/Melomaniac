@@ -81,6 +81,29 @@ export function IcoDice({ size = 16 }: { size?: number }) {
   );
 }
 
+// Dumbbell — for Weighted shuffle mode
+export function IcoDumbbell({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <circle cx="4.5" cy="12" r="3" />
+      <circle cx="19.5" cy="12" r="3" />
+      <rect x="7" y="10.5" width="10" height="3" rx="1" />
+    </svg>
+  );
+}
+
+// Magnifying glass with crosshair — for Discovery shuffle mode
+export function IcoDiscovery({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
+      <path d="M8.5 11h5M11 8.5v5" />
+    </svg>
+  );
+}
+
 // Loop mode icon — changes visual based on current mode
 export function IcoLoop({ mode }: { mode: LoopMode }) {
   if (mode === LoopMode.AB) {

@@ -5,6 +5,7 @@ import { LoopMode } from '../types';
 import {
   IcoPlay, IcoPause, IcoNext, IcoPrev,
   IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue,
+  IcoDumbbell, IcoDiscovery,
 } from '../icons';
 import { FiLayers } from 'react-icons/fi';
 import { withAlpha } from '../../shared/artworkAccents';
@@ -66,6 +67,8 @@ function CtrlBtn({ active = false, onClick, title, children }: {
 
 function ShuffleIcon({ isShuffle, mode, size = 16 }: { isShuffle: boolean; mode: ShuffleMode; size?: number }) {
   if (!isShuffle || mode === 'fisher-yates') return <IcoShuffle size={size} />;
+  if (mode === 'weighted')  return <IcoDumbbell size={size} />;
+  if (mode === 'discovery') return <IcoDiscovery size={size} />;
   return <FiLayers size={size} />;
 }
 

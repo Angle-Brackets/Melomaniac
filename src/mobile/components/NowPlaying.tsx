@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { FiLayers, FiBarChart2, FiStar } from 'react-icons/fi';
 import { invoke } from '@tauri-apps/api/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useStore } from '../../store';
@@ -220,9 +219,9 @@ function ShuffleModeIcon({ mode, size }: { mode: ShuffleMode; size: number }): R
   switch (mode) {
     case ShuffleMode.Off:       return <Icons.shuffle size={size}/>;
     case ShuffleMode.Random:    return <Icons.shuffleRandom size={size}/>;
-    case ShuffleMode.Smart:     return <FiLayers size={size}/>;
-    case ShuffleMode.Weighted:  return <FiBarChart2 size={size}/>;
-    case ShuffleMode.Discovery: return <FiStar size={size}/>;
+    case ShuffleMode.Smart:     return <Icons.shuffle size={size}/>;
+    case ShuffleMode.Weighted:  return <Icons.shuffleWeighted size={size}/>;
+    case ShuffleMode.Discovery: return <Icons.shuffleDiscovery size={size}/>;
   }
 }
 
@@ -243,7 +242,11 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
 
   const active = mode !== ShuffleMode.Off;
   const iconSize = Math.round(size * 0.45);
-  const CurrentIcon = mode === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
+  const CurrentIcon =
+    mode === ShuffleMode.Random    ? Icons.shuffleRandom :
+    mode === ShuffleMode.Weighted  ? Icons.shuffleWeighted :
+    mode === ShuffleMode.Discovery ? Icons.shuffleDiscovery :
+    Icons.shuffle;
 
   const openMenu = () => {
     const el = btnRef.current;
