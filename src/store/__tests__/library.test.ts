@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createStore } from 'zustand/vanilla'
 import { createLibrarySlice, LibrarySlice } from '../librarySlice'
 import type { TrackRecord } from '../types'
+import { LoadStatus } from '../types'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -33,16 +34,16 @@ describe('loadLibrary', () => {
     mockInvoke.mockResolvedValueOnce(tracks)
 
     const promise = store.getState().loadLibrary()
-    expect(store.getState().libraryStatus).toBe('loading')
+    expect(store.getState().libraryStatus).toBe(LoadStatus.Loading)
     await promise
-    expect(store.getState().libraryStatus).toBe('ready')
+    expect(store.getState().libraryStatus).toBe(LoadStatus.Ready)
     expect(store.getState().tracks).toEqual(tracks)
   })
 
   it('sets libraryStatus to error when invoke rejects', async () => {
     mockInvoke.mockRejectedValueOnce(new Error('db offline'))
     await store.getState().loadLibrary()
-    expect(store.getState().libraryStatus).toBe('error')
+    expect(store.getState().libraryStatus).toBe(LoadStatus.Error)
     expect(store.getState().tracks).toEqual([])
   })
 

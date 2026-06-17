@@ -14,15 +14,15 @@ export type LibrarySlice = {
 
 export const createLibrarySlice: StateCreator<LibrarySlice> = (set, get) => ({
   tracks: [],
-  libraryStatus: 'idle',
+  libraryStatus: LoadStatus.Idle,
 
   loadLibrary: async () => {
-    set({ libraryStatus: 'loading' })
+    set({ libraryStatus: LoadStatus.Loading })
     try {
       const tracks = await invoke<TrackRecord[]>('library_get_all')
-      set({ tracks, libraryStatus: 'ready' })
+      set({ tracks, libraryStatus: LoadStatus.Ready })
     } catch {
-      set({ libraryStatus: 'error' })
+      set({ libraryStatus: LoadStatus.Error })
     }
   },
 

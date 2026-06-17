@@ -54,7 +54,7 @@ export function Discover({ onTab }: { onTab: (id: TabId) => void }) {
             <Chip label="+ ambient"/>
           </div>
           <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-            <button style={{ flex: 1, padding: '11px', borderRadius: 99, background: 'linear-gradient(135deg, var(--accent-light), var(--accent))', color: 'var(--bg-0)', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: '0 8px 22px oklch(0.62 0.15 28 / 0.4)' }}>
+            <button style={{ flex: 1, padding: '11px', borderRadius: 99, background: 'linear-gradient(135deg, var(--accent-light), var(--accent))', color: 'var(--bg-0)', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: '0 8px 22px color-mix(in srgb, var(--accent) 40%, transparent)' }}>
               <Icons.sparkles size={16}/> Generate
             </button>
             <button style={{ padding: '11px 14px', borderRadius: 99, background: 'var(--bg-3)', color: 'var(--text-1)', border: '0.5px solid var(--border-1)', cursor: 'pointer', fontSize: 14 }}>Try again</button>

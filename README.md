@@ -37,7 +37,12 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 ### Playback
 - Desktop audio via **rodio** (MP3, FLAC, OGG, WAV, M4A/AAC, ALAC, Opus)
 - iOS audio via **AVFoundation** — background audio session, lock screen controls, Now Playing widget
-- **Shuffle modes**: Random (Fisher-Yates) and Smart (artist-spread weighted, avoids consecutive same-artist)
+- **AVAudioSession interruption handling** (iOS) — music automatically resumes after a phone call or other audio source ends, respecting the system `shouldResume` flag
+- **Shuffle modes** (5 total):
+  - **Random** — Fisher-Yates uniform shuffle
+  - **Smart** — artist-spread weighted, avoids consecutive same-artist tracks
+  - **Weighted** — play-count weighted; tracks you listen to less often come up more
+  - **Discovery** — deprioritises recently played tracks to surface forgotten songs
 - **AB loop** with per-track A/B timestamps persisted across restarts
 - Queue management with drag-to-reorder
 - Discord Rich Presence (desktop)
@@ -64,17 +69,26 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 - Transfers audio blobs and artwork blobs; per-track download progress ring
 - Peer latency display, known device management
 
+### Privacy
+- **Privacy Mode** — replaces album art with an accent-colored gradient overlay throughout the UI, and withholds artwork from the iOS lock screen and Control Centre Now Playing widget
+
 ### Desktop UI
 - Three-column layout: sidebar rail · main panel · right panel (queue / info)
 - Playlist sidebar with folders, drag-to-reorder, pin-to-top, conflict badges
 - Coverflow album carousel
 - Frameless custom titlebar
-- Theme system: Warm · Cool · Dark · Custom hue (oklch)
+- **In-app update installer** — downloads and installs the latest release with a progress bar in Settings; no manual download needed
+- Theme system: Warm · Cool · Dark · Custom hue (oklch); named themes correctly reset the accent hue on selection, and accent color changes propagate immediately to the play button, seek bar, and halo
 - Track list density: compact · normal · relaxed
 
 ### Mobile UI (iOS)
 - Tab navigation: Library · Discover · Now Playing · Settings
 - `PlaylistDetail` slide overlay with branch picker, fork, edit, merge sheets
+- **Long-press radial menu** on the shuffle button — pick any of the 5 shuffle modes in a single gesture
+- Active secondary buttons (heart, shuffle, loop) show a **filled icon** instead of a background circle
+- Shuffle and heart icons are **theme-colored**; loop icon uses the CSS accent color — none are tied to album art palette
+- Player tab glow in the bottom nav respects the current theme color
+- Inline queue panel has rounded top corners; artist text in Now Playing is always white for readability
 - Swipe-to-delete with vertical-scroll cancel guard
 - Pull-to-refresh, swipe-back gesture
 - In-app browser (SFSafariViewController)
@@ -99,7 +113,7 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 │   ├─ librarySlice   tracks, artwork cache, library status            │
 │   ├─ playbackSlice  currentTrack, isPlaying, volume, AB loop         │
 │   ├─ playlistSlice  active playlist, branches, commit history        │
-│   ├─ queueSlice     queue, shuffle (Random/Smart), advance           │
+│   ├─ queueSlice     queue, shuffle (Random/Smart/Weighted/Discovery)  │
 │   └─ syncSlice      livePeers, knownDevices, conflicts, progress     │
 └──────────────┬───────────────────────────────┬───────────────────────┘
                │  invoke() / listen()          │

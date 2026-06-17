@@ -86,6 +86,10 @@ pub enum AudioEvent {
     RemoteTogglePlayPause,
     /// Lock-screen / Control Centre scrubber: user seeked to position (milliseconds).
     RemoteSeek(u64),
+    /// Lock-screen like/heart button pressed.
+    RemoteLike,
+    /// Lock-screen shuffle button cycled. 0 = off, 1 = random, 2 = smart.
+    RemoteShuffleChange(u8),
 }
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -152,4 +156,16 @@ pub trait AudioBridge: Send + Sync {
     /// Returns the current playback position in milliseconds, or `0` if no
     /// track is loaded.
     fn position_ms(&self) -> Result<u64, AudioError>;
+
+    /// Sync the lock-screen like/heart button state. No-op on platforms that
+    /// don't have a feedback command (desktop, Android).
+    fn set_like_active(&self, _active: bool) {}
+
+    /// Sync the lock-screen shuffle button state. 0 = off, 1 = random, 2 = smart.
+    /// No-op on desktop.
+    fn set_shuffle_mode(&self, _mode: u8) {}
+
+    /// Enable or disable privacy mode. When enabled, artwork is withheld from
+    /// the OS media session (lock screen / Control Centre). No-op on desktop.
+    fn set_privacy_mode(&self, _enabled: bool) {}
 }

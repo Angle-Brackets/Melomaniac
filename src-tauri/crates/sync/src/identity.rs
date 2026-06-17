@@ -231,6 +231,17 @@ impl TrustList {
             .retain(|d| d.public_key_b64 != public_key_b64);
     }
 
+    /// Rename a device in the trust list. Returns `false` if the key is not found.
+    /// Does not persist; call [`save`](Self::save) afterwards.
+    pub fn rename(&mut self, public_key_b64: &str, new_name: String) -> bool {
+        if let Some(device) = self.devices.iter_mut().find(|d| d.public_key_b64 == public_key_b64) {
+            device.display_name = new_name;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns a clone of all known devices.
     pub fn devices(&self) -> Vec<KnownDevice> {
         self.devices.clone()

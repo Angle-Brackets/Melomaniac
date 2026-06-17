@@ -5,16 +5,20 @@ import type { ThemeName } from '../shared/themes';
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ALBUMS, TRACKS, PLAYLISTS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
+import { check as checkForUpdate } from '@tauri-apps/plugin-updater';
+import type { Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { useAccentsFromUrl, useGlowFade, withAlpha } from '../shared/artworkAccents';
+import { ALBUMS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
 import type { AppSettings, ShuffleMode } from './types';
+import { LoopMode, Density, DefaultView } from './types';
 
 import TitleBar from './components/TitleBar';
 import LibrarySidebar, { AddToFolderPopup } from './components/Sidebar';
 import Carousel from './components/Carousel';
 import PlaylistHeader from './components/PlaylistHeader';
 import PlayerControls from './components/PlayerControls';
-import type { LoopMode } from './components/PlayerControls';
 import TrackList from './components/TrackList';
 import RightPanel from './components/RightPanel';
 import { CommitGraph, CommitGraphInline } from './components/CommitGraph';
@@ -52,30 +56,64 @@ function fisherYates<T>(arr: T[]): T[] {
   return a;
 }
 
-function balancedShuffle(tracks: Track[]): Track[] {
-  const groups = new Map<string, Track[]>();
-  for (const t of tracks) {
-    const key = t.artist || '?';
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(t);
+const ARTIST_PENALTY    = 0.25;
+const ARTIST_LOOKBEHIND = 4;
+
+function smartShuffle(tracks: Track[]): Track[] {
+  type Candidate = { track: Track; artist: string };
+  const pool: Candidate[] = tracks.map(t => ({ track: t, artist: t.artist || '?' }));
+  const result: Track[] = [];
+  const recentArtists: string[] = [];
+
+  while (pool.length > 0) {
+    const freq = new Map<string, number>();
+    for (const a of recentArtists.slice(-ARTIST_LOOKBEHIND)) {
+      freq.set(a, (freq.get(a) ?? 0) + 1);
+    }
+    const weights = pool.map(c => Math.pow(ARTIST_PENALTY, freq.get(c.artist) ?? 0));
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break; } }
+    result.push(pool[idx].track);
+    recentArtists.push(pool[idx].artist);
+    pool.splice(idx, 1);
   }
-  const shuffledGroups = [...groups.values()].map(g => fisherYates(g));
-  const n = tracks.length;
-  const result: { track: Track; pos: number }[] = [];
-  for (const group of shuffledGroups) {
-    const spacing = n / group.length;
-    const offset = Math.random() * spacing;
-    group.forEach((t, i) => {
-      result.push({ track: t, pos: offset + i * spacing + (Math.random() - 0.5) * spacing * 0.4 });
-    });
-  }
-  result.sort((a, b) => a.pos - b.pos);
-  return result.map(r => r.track);
+  return result;
 }
 
-function buildShuffledQueue(tracks: Track[], mode: ShuffleMode): Track[] {
-  if (mode === 'balanced') return balancedShuffle(tracks);
-  return fisherYates(tracks); // fisher-yates and random both produce a permutation; random re-rolls on every advance
+function weightedShuffle(tracks: Track[], playCounts: Map<string, number>): Track[] {
+  const pool = [...tracks];
+  const result: Track[] = [];
+  while (pool.length > 0) {
+    const weights = pool.map(t => 1 / ((playCounts.get(t.hash) ?? 0) + 1));
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    let idx = pool.length - 1;
+    for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break; } }
+    result.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return result;
+}
+
+function discoveryShuffle(tracks: Track[], playCounts: Map<string, number>): Track[] {
+  if (tracks.length === 0) return [];
+  const minPlays = Math.min(...tracks.map(t => playCounts.get(t.hash) ?? 0));
+  const tier = tracks.filter(t => (playCounts.get(t.hash) ?? 0) === minPlays);
+  const pool = tier.length >= Math.min(20, tracks.length) ? [...tier] : [...tracks];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool;
+}
+
+function buildShuffledQueue(tracks: Track[], mode: ShuffleMode, playCounts?: Map<string, number>): Track[] {
+  if (mode === 'smart') return smartShuffle(tracks);
+  if (mode === 'weighted') return weightedShuffle(tracks, playCounts ?? new Map());
+  if (mode === 'discovery') return discoveryShuffle(tracks, playCounts ?? new Map());
+  return fisherYates(tracks);
 }
 
 // ── Default settings ──────────────────────────────────────────────────────────
@@ -84,11 +122,12 @@ const SETTING_DEFAULTS: AppSettings = {
   accentHue: 28,
   showRightPanel: false,
   carouselSize: 210,
-  density: 'relaxed',
-  defaultView: 'Tracks',
+  density: Density.Relaxed,
+  defaultView: DefaultView.Tracks,
   discordEnabled: false,
   commitAuthor: '',
   shuffleMode: 'fisher-yates',
+  privacyMode: false,
 };
 
 const SETTINGS_KEY = 'melomaniac.settings';
@@ -122,11 +161,15 @@ export default function DesktopApp(): JSX.Element {
   const openPairingDisplay       = useStore(s => s.openPairingDisplay);
   const syncToast                = useStore(s => s.syncToast);
   const refreshLivePeers         = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices      = useStore(s => s.refreshKnownDevices);
   const loadPlaylists            = useStore(s => s.loadPlaylists);
   const artworkVersion           = useStore(s => s.artworkVersion);
   const syncVersion              = useStore(s => s.syncVersion);
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const reopenConflict           = useStore(s => s.reopenConflict);
+  const isPlaying  = useStore(s => s.isPlaying);
+  const loadedHash = useStore(s => s.loadedTrackHash);
+  const durationMs = useStore(s => s.duration_ms);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -154,15 +197,15 @@ export default function DesktopApp(): JSX.Element {
   const [showArtworkModal, setShowArtworkModal] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<{ message: string; execute: () => Promise<void> }[]>([]);
   const [railItem, setRailItem] = useState('playlists');
-  const [activeTab, setActiveTab] = useState('Tracks');
+  const [activeTab, setActiveTab] = useState<string>(DefaultView.Tracks);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('melomaniac.pinned') ?? '[]') as string[]); } catch { return new Set(); }
   });
-  const [trackOrder, setTrackOrder] = useState<Track[]>(TRACKS);
+  const [trackOrder, setTrackOrder] = useState<Track[]>([]);
   const [hasUncommitted, setHasUncommitted] = useState(false);
   const [abA, setAbA] = useState(0);
   const [abB, setAbB] = useState(1);
-  const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  const [loopMode, setLoopMode] = useState<LoopMode>(LoopMode.Off);
   // Keyed by track hash so points survive DB re-indexes and cross-device imports.
   const [trackAbPoints, setTrackAbPoints] = useState<Record<string, { a: number; b: number }>>(() => {
     try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
@@ -176,16 +219,13 @@ export default function DesktopApp(): JSX.Element {
   });
   const [editorTrackId, setEditorTrackId] = useState<number | null>(null);
   const [activeTrackId, setActiveTrackId] = useState(1);
-  const [isPlaying, setIsPlaying] = useState(false);
   // User-local favorites — persisted to localStorage, never committed to git
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('melomaniac.favorites') ?? '[]')); } catch { return new Set(); }
   });
   const [isShuffle, setIsShuffle] = useState(false);
   const [shuffledQueue, setShuffledQueue] = useState<Track[] | null>(null);
-  const [loadedHash, setLoadedHash] = useState<string | null>(null);
   const [positionMs, setPositionMs] = useState(0);
-  const [durationMs, setDurationMs] = useState(0);
   const lastSeekTime = useRef(0);
   // Live position updated on every PositionChanged without triggering a re-render.
   // PlayerControls / MiniPlayer read this via rAF and update their DOM directly.
@@ -196,13 +236,19 @@ export default function DesktopApp(): JSX.Element {
   const [artworkUrls, setArtworkUrls] = useState<Record<string, string>>({});
   const [volume, setVolume] = useState(0.30);
   const [miniPlayerCollapsed, setMiniPlayerCollapsed] = useState(false);
+  const [bigPicture, setBigPicture] = useState(false);
   const [manualQueue, setManualQueue] = useState<Track[]>([]);
+  const [sessionExcluded, setSessionExcluded] = useState<Set<string>>(new Set());
   const [showQueue, setShowQueue] = useState(false);
   const [vibeText, setVibeText] = useState('chill ambient music for focus');
   const [meloToast, setMeloToast] = useState<string | null>(null);
   const [commitRefreshKey, setCommitRefreshKey] = useState(0);
   const [showStats, setShowStats] = useState(false);
   const [appStats, setAppStats] = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<Update | null>(null);
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateReady, setUpdateReady] = useState(false);
 
   const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
   // Override description with the branch-specific value from the tree blob.
@@ -230,6 +276,11 @@ export default function DesktopApp(): JSX.Element {
     [playQueue, artworkUrls],
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
+  const activeTrackHash = playQueue.find(t => t.id === activeTrackId)?.hash ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
+  const isActiveLoaded = !!loadedHash && activeTrackHash === loadedHash;
+  const activeArtworkUrl = artworkUrls[playQueue[carouselIdx]?.hash ?? ''] ?? null;
+  const artworkAccents = useAccentsFromUrl(activeArtworkUrl);
+  const { slots: glowSlots, activeSlot: glowActive } = useGlowFade(artworkAccents);
 
   // Stale-closure ref — updated synchronously each render so the audio event
   // listener (which is registered once) always reads the latest values.
@@ -253,14 +304,32 @@ export default function DesktopApp(): JSX.Element {
 
   // Refs that hold the latest skip handlers so the audio event listener can
   // call them without stale closures.
-  const skipNextRef  = useRef<() => void>(() => {});
-  const skipPrevRef  = useRef<() => void>(() => {});
-  const abCommitRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipNextRef    = useRef<() => void>(() => {});
+  const skipPrevRef    = useRef<() => void>(() => {});
+  const abCommitRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playCountsRef  = useRef<Map<string, number>>(new Map());
+
+  type SavedPlaybackState = {
+    hash: string; durationMs: number;
+    playlistId: string | null; branchName: string | null;
+    isShuffle: boolean; shuffleMode: ShuffleMode;
+    shuffledHashes?: string[];
+    loopMode?: LoopMode;
+    positionMs?: number;
+    coldStart?: boolean;
+  };
+  const pendingRestoreRef = useRef<SavedPlaybackState | null>(null);
 
   // ── Theme effect — all palette logic lives in shared/themes.ts ──────────
   useEffect(() => {
     applyTheme(settings.theme, settings.accentHue);
   }, [settings.theme, settings.accentHue]);
+
+  // Sequential big-picture animations to avoid the carousel bouncing mid-layout.
+  // ENTER: collapse tracklist first (380ms), then expand pane + carousel.
+  // EXIT:  shrink pane + carousel first (380ms), then reveal tracklist.
+  const enterBigPicture = useCallback(() => setBigPicture(true), []);
+  const exitBigPicture = useCallback(() => setBigPicture(false), []);
 
   // Keep top pane tall enough whenever carousel size changes
   useEffect(() => {
@@ -273,11 +342,30 @@ export default function DesktopApp(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // On mount, check whether audio is still playing from a previous session (e.g. after a
+  // WebView2 restart on Windows). If audio_position resolves, the bridge still has a track
+  // loaded — mark the saved state for restoration once the library/playlist data arrives.
+  useEffect(() => {
+    const raw = localStorage.getItem('melomaniac.playback_state');
+    if (!raw) return;
+    let saved: SavedPlaybackState;
+    try { saved = JSON.parse(raw); } catch { return; }
+    invoke<number>('audio_position')
+      .then(() => { pendingRestoreRef.current = saved; })
+      .catch(() => {
+        // Cold start — audio engine is not running, but we still restore the track
+        // as a paused restore (load without play, seek to saved position).
+        pendingRestoreRef.current = { ...saved, coldStart: true };
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Background peer poll — drives auto-sync when a known device comes online.
   // Populate the Zustand playlists store first so triggerAutoSync has local
   // state to compare against before the first poll fires.
   useEffect(() => {
     loadPlaylists().then(() => refreshLivePeers())
+    refreshKnownDevices()
     const id = setInterval(refreshLivePeers, 15_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -288,20 +376,14 @@ export default function DesktopApp(): JSX.Element {
     if (syncVersion > 0) setCommitRefreshKey(k => k + 1)
   }, [syncVersion]);
 
-  // Fetch the persisted commit author name from the backend on mount
+  // Push commit author to the backend on mount and whenever the setting changes.
+  // We do NOT read back from get_commit_author: Rust initialises from $USER (not
+  // persisted to disk), so fetching it on startup would overwrite the user's
+  // localStorage value with their OS username.
   useEffect(() => {
-    invoke<string>('get_commit_author')
-      .then(name => { if (name) updateSetting('commitAuthor', name); })
-      .catch(console.error);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Push commit author changes to the backend whenever the setting is updated
-  useEffect(() => {
-    if (settings.commitAuthor) {
-      invoke('set_commit_author', { name: settings.commitAuthor }).catch(console.error);
-    }
+    invoke('set_commit_author', { name: settings.commitAuthor }).catch(console.error);
   }, [settings.commitAuthor]);
+
 
   // ── Load real tracks from storage on mount ───────────────────────────────
   const reloadLibrary = useCallback(() => {
@@ -311,6 +393,48 @@ export default function DesktopApp(): JSX.Element {
   }, []);
 
   useEffect(() => { reloadLibrary(); }, []);
+
+  // Restore playback state if audio is still playing and the track came from the library
+  // (no playlist context). Playlist-context restore happens in the playlistTracks effect.
+  useEffect(() => {
+    const r = pendingRestoreRef.current;
+    if (!r || r.playlistId !== null || trackOrder.length === 0) return;
+    const track = trackOrder.find(t => t.hash === r.hash);
+    if (!track) { pendingRestoreRef.current = null; return; }
+    useStore.getState().setLoaded(r.hash, r.durationMs);
+    setActiveTrackId(track.id);
+    sr.current.durationMs = r.durationMs;
+    if (r.loopMode) { setLoopMode(r.loopMode); sr.current.loopMode = r.loopMode; }
+    hasRecordedPlayRef.current = true;
+    if (r.coldStart) {
+      invoke('track_load_paused', { hash: r.hash })
+        .then(() => {
+          if (r.positionMs && r.positionMs > 0) {
+            livePositionMsRef.current = r.positionMs;
+            setPositionMs(r.positionMs);
+            invoke('audio_seek', { positionMs: r.positionMs }).catch(console.error);
+          }
+        })
+        .catch(console.error);
+      useStore.getState().setPlaying(false);
+    } else {
+      useStore.getState().setPlaying(true);
+    }
+    if (r.isShuffle) {
+      setIsShuffle(true);
+      if (r.shuffledHashes?.length) {
+        const validSet = new Set(trackOrder.map(t => t.hash));
+        const restored = r.shuffledHashes
+          .filter(h => validSet.has(h))
+          .map(h => trackOrder.find(t => t.hash === h)!);
+        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current));
+      } else {
+        setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current));
+      }
+    }
+    pendingRestoreRef.current = null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackOrder]);
 
   // ── Refresh library when a download completes ────────────────────────────
   useEffect(() => {
@@ -389,7 +513,7 @@ export default function DesktopApp(): JSX.Element {
         }
         // Branch switch within same playlist — rebuild shuffled queue from new tracks
         if (!playlistChanged && newTracks.length > 0) {
-          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode) : null);
+          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode, playCountsRef.current) : null);
         }
       })
       .catch(() => setPlaylistTracks([]));
@@ -402,20 +526,83 @@ export default function DesktopApp(): JSX.Element {
       .catch(() => setBranchMeta(null));
   }, [activePlaylistId, activeBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Discord Rich Presence ─────────────────────────────────────────────────
+  // Clear session-excluded hashes whenever the active playlist or branch changes.
+  useEffect(() => { setSessionExcluded(new Set()); }, [activePlaylistId, activeBranch]);
+
+  // Restore playback state if audio is still playing and the track came from a playlist.
+  // Runs after playlistTracks loads; the playlist change effect may have reset isShuffle
+  // to false, but we override it here since we're restoring a prior session.
   useEffect(() => {
-    if (!settings.discordEnabled) return;
-    const track = trackOrder.find(t => t.hash === loadedHash);
-    if (track) {
-      invoke('discord_set_activity', {
-        title: track.title,
-        artist: track.artist,
-        album: track.album ?? null,
-      }).catch(console.error);
+    const r = pendingRestoreRef.current;
+    if (!r || r.playlistId === null || !playlistTracks) return;
+    if (activePlaylistId !== r.playlistId || activeBranch !== r.branchName) return;
+    const track = playlistTracks.find(t => t.hash === r.hash);
+    if (!track) { pendingRestoreRef.current = null; return; }
+    useStore.getState().setLoaded(r.hash, r.durationMs);
+    setActiveTrackId(track.id);
+    sr.current.durationMs = r.durationMs;
+    if (r.loopMode) { setLoopMode(r.loopMode); sr.current.loopMode = r.loopMode; }
+    hasRecordedPlayRef.current = true;
+    if (r.coldStart) {
+      invoke('track_load_paused', { hash: r.hash })
+        .then(() => {
+          if (r.positionMs && r.positionMs > 0) {
+            livePositionMsRef.current = r.positionMs;
+            setPositionMs(r.positionMs);
+            invoke('audio_seek', { positionMs: r.positionMs }).catch(console.error);
+          }
+        })
+        .catch(console.error);
+      useStore.getState().setPlaying(false);
     } else {
-      invoke('discord_clear_activity').catch(console.error);
+      useStore.getState().setPlaying(true);
     }
+    if (r.isShuffle) {
+      setIsShuffle(true);
+      if (r.shuffledHashes?.length) {
+        const validSet = new Set(playlistTracks.map(t => t.hash));
+        const restored = r.shuffledHashes
+          .filter(h => validSet.has(h))
+          .map(h => playlistTracks.find(t => t.hash === h)!);
+        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current));
+      } else {
+        setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current));
+      }
+    }
+    pendingRestoreRef.current = null;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlistTracks]);
+
+  // ── Discord Rich Presence ─────────────────────────────────────────────────
+  // Connect/disconnect the client first, then set the current activity so the
+  // now-playing status is live immediately on startup and on every track change.
+  // Chaining ensures discord_set_activity never races against an unfinished connect.
+  // The stale flag guards against out-of-order resolution when tracks change rapidly:
+  // React runs the cleanup function before the next effect fires, so by the time a
+  // superseded promise chain resolves, stale=true and the set_activity call is skipped.
+  useEffect(() => {
+    let stale = false;
+    invoke('discord_apply_settings', { enabled: settings.discordEnabled })
+      .then(() => {
+        if (stale || !settings.discordEnabled) return;
+        const track = trackOrder.find(t => t.hash === loadedHash);
+        if (track) {
+          invoke('discord_set_activity', {
+            title: track.title,
+            artist: track.artist,
+            album: track.album ?? null,
+          }).catch(console.error);
+        } else {
+          invoke('discord_clear_activity').catch(console.error);
+        }
+      })
+      .catch(console.error);
+    return () => { stale = true; };
   }, [loadedHash, settings.discordEnabled]);
+
+  useEffect(() => {
+    invoke('audio_set_privacy_mode', { enabled: settings.privacyMode }).catch(console.error);
+  }, [settings.privacyMode]);
 
   // ── Global Stats Listener ────────────────────────────────────────────────
   useEffect(() => {
@@ -453,6 +640,17 @@ export default function DesktopApp(): JSX.Element {
     return () => clearInterval(interval);
   }, [showStats]);
 
+  // ── Update check — runs once on startup, skipped in dev builds ──────────
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    const timer = setTimeout(() => {
+      checkForUpdate()
+        .then(update => { if (update?.available) setPendingUpdate(update); })
+        .catch(() => {});
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, []);
+
   // ── Audio event listener ─────────────────────────────────────────────────
   useEffect(() => {
     type AudioPayload =
@@ -464,13 +662,12 @@ export default function DesktopApp(): JSX.Element {
 
     const loadTrack = (track: Track) => {
       setActiveTrackId(track.id);
-      setLoadedHash(track.hash);
-      setDurationMs(track.duration_ms);
+      useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
       setPositionMs(0);
       livePositionMsRef.current = 0;
       hasRecordedPlayRef.current = false;
-      setIsPlaying(true);
+      useStore.getState().setPlaying(true);
       invoke('track_play', { hash: track.hash }).catch(console.error);
     };
 
@@ -480,7 +677,7 @@ export default function DesktopApp(): JSX.Element {
         const posMs = payload.PositionChanged;
         // ── A·B loop enforcement — runs regardless of seek throttle ──────────
         const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
-        if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+        if (lm === LoopMode.AB && dur > 0 && posMs >= b * dur) {
           const aMs = Math.round(a * dur);
           // Stamp lastSeekTime so the 600 ms debounce below doesn't overwrite livePositionMsRef.
           lastSeekTime.current = Date.now();
@@ -508,24 +705,28 @@ export default function DesktopApp(): JSX.Element {
         }
       }
       if (typeof payload === 'object' && 'DurationKnown' in payload) {
-        if (payload.DurationKnown > 0) setDurationMs(payload.DurationKnown);
+        if (payload.DurationKnown > 0) {
+          const lh = useStore.getState().loadedTrackHash;
+          if (lh) useStore.getState().setLoaded(lh, payload.DurationKnown);
+          sr.current.durationMs = payload.DurationKnown;
+        }
       }
       if (payload === 'TrackEnded') {
         setPositionMs(0);
         const { loopMode: lm, loadedHash: lh, abA: a, durationMs: dur } = sr.current;
 
-        if (lm === 'one') {
+        if (lm === LoopMode.One) {
           if (lh) invoke('track_play', { hash: lh }).catch(console.error);
-          setIsPlaying(true);
+          hasRecordedPlayRef.current = false; // reset so each loop iteration counts
+          useStore.getState().setPlaying(true);
           return;
         }
-        if (lm === 'ab') {
+        if (lm === LoopMode.AB) {
           const aMs = Math.floor(a * dur);
           lastSeekTime.current = Date.now();
           setPositionMs(aMs);
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
-          invoke('audio_play').catch(console.error);
-          setIsPlaying(true);
+          useStore.getState().resumeAudio().catch(console.error);
           return;
         }
 
@@ -547,7 +748,7 @@ export default function DesktopApp(): JSX.Element {
         if (nextIdx >= pq.length) {
           // End of queue — reshuffle or wrap
           if (shuffle && aq.length > 0) {
-            const newQ = buildShuffledQueue(aq, sm);
+            const newQ = buildShuffledQueue(aq, sm, playCountsRef.current);
             // Avoid immediately repeating the just-finished track at position 0.
             if (newQ.length > 1 && newQ[0].hash === lh) [newQ[0], newQ[1]] = [newQ[1], newQ[0]];
             setShuffledQueue(newQ);
@@ -560,9 +761,9 @@ export default function DesktopApp(): JSX.Element {
           loadTrack(pq[nextIdx]);
         }
       }
-      if (payload === 'RemotePlay')  setIsPlaying(true);
-      if (payload === 'RemotePause') setIsPlaying(false);
-      if (payload === 'RemoteTogglePlayPause') setIsPlaying(p => !p);
+      if (payload === 'RemotePlay')             useStore.getState().resumeAudio().catch(console.error);
+      if (payload === 'RemotePause')            useStore.getState().pauseAudio().catch(console.error);
+      if (payload === 'RemoteTogglePlayPause')  useStore.getState().toggleAudio().catch(console.error);
       if (payload === 'RemoteNextTrack')     skipNextRef.current();
       if (payload === 'RemotePreviousTrack') skipPrevRef.current();
     }).then(fn => { unlisten = fn; });
@@ -604,6 +805,42 @@ export default function DesktopApp(): JSX.Element {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePlaylist?.id, activeBranch]);
+
+  // ── Persist playback state for restart recovery ──────────────────────────
+  useEffect(() => {
+    return useStore.subscribe(state => {
+      if (state.loadedTrackHash) {
+        localStorage.setItem('melomaniac.playback_state', JSON.stringify({
+          hash: state.loadedTrackHash, durationMs: state.duration_ms,
+          playlistId: activePlaylistId, branchName: activeBranch,
+          isShuffle, shuffleMode: settings.shuffleMode,
+          shuffledHashes: isShuffle && shuffledQueue ? shuffledQueue.map(t => t.hash) : undefined,
+          loopMode,
+        } satisfies SavedPlaybackState));
+      } else {
+        localStorage.removeItem('melomaniac.playback_state');
+      }
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode, shuffledQueue, loopMode]);
+
+  // Persist playback position periodically and on unload so cold-start restore
+  // can seek back to where the user left off (mirrors Spotify's behaviour).
+  useEffect(() => {
+    const patchPosition = () => {
+      const raw = localStorage.getItem('melomaniac.playback_state');
+      if (!raw) return;
+      try {
+        const s = JSON.parse(raw);
+        s.positionMs = livePositionMsRef.current;
+        localStorage.setItem('melomaniac.playback_state', JSON.stringify(s));
+      } catch { /* ignore */ }
+    };
+    const id = setInterval(patchPosition, 10_000);
+    window.addEventListener('beforeunload', patchPosition);
+    return () => { clearInterval(id); window.removeEventListener('beforeunload', patchPosition); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Persist sidebar state to localStorage ────────────────────────────────
   useEffect(() => {
@@ -670,11 +907,9 @@ export default function DesktopApp(): JSX.Element {
 
   const handleReorder = (newOrder: Track[] | null) => {
     if (newOrder === null) {
-      // Discard: restore the last committed state from the backend if available,
-      // otherwise fall back to static mock data.
       invoke<TrackRecord[]>('library_get_all')
-        .then(records => setTrackOrder(records.length > 0 ? records.map(trackRecordToTrack) : TRACKS))
-        .catch(() => setTrackOrder(TRACKS));
+        .then(records => setTrackOrder(records.map(trackRecordToTrack)))
+        .catch(() => setTrackOrder([]));
       setHasUncommitted(false);
     } else {
       setTrackOrder(newOrder);
@@ -688,28 +923,30 @@ export default function DesktopApp(): JSX.Element {
     setTimeout(() => setMeloToast(null), ms);
   };
 
-  // off → fisher-yates → balanced → random → off
-  const handleShuffle = () => {
-    if (!isShuffle) {
-      updateSetting('shuffleMode', 'fisher-yates');
-      const newQ = buildShuffledQueue(activeQueue, 'fisher-yates');
-      sr.current.playQueue = newQ; // sync update so TrackEnded sees it before next render
+  // off → fisher-yates → smart → weighted → discovery → off
+  const handleShuffle = async () => {
+    const applyMode = (mode: ShuffleMode, label: string) => {
+      updateSetting('shuffleMode', mode);
+      const newQ = buildShuffledQueue(activeQueue, mode, playCountsRef.current);
+      sr.current.playQueue = newQ;
       sr.current.isShuffle = true;
       setShuffledQueue(newQ);
       setIsShuffle(true);
-      toast('Shuffle: True Shuffle');
+      toast(`Shuffle: ${label}`);
+    };
+
+    if (!isShuffle) {
+      applyMode('fisher-yates', 'True Shuffle');
     } else if (settings.shuffleMode === 'fisher-yates') {
-      updateSetting('shuffleMode', 'balanced');
-      const newQ = buildShuffledQueue(activeQueue, 'balanced');
-      sr.current.playQueue = newQ;
-      setShuffledQueue(newQ);
-      toast('Shuffle: Balanced');
-    } else if (settings.shuffleMode === 'balanced') {
-      updateSetting('shuffleMode', 'random');
-      const newQ = buildShuffledQueue(activeQueue, 'random');
-      sr.current.playQueue = newQ;
-      setShuffledQueue(newQ);
-      toast('Shuffle: Random');
+      applyMode('smart', 'Smart');
+    } else if (settings.shuffleMode === 'smart') {
+      try {
+        const stats = await invoke<[string, { play_count: number }][]>('library_get_all_track_stats');
+        playCountsRef.current = new Map(stats.map(([h, s]) => [h, s.play_count]));
+      } catch { /* fall back to empty map — treats all counts as 0 */ }
+      applyMode('weighted', 'Weighted');
+    } else if (settings.shuffleMode === 'weighted') {
+      applyMode('discovery', 'Discovery');
     } else {
       sr.current.playQueue = activeQueue;
       sr.current.isShuffle = false;
@@ -760,7 +997,7 @@ export default function DesktopApp(): JSX.Element {
       setPlaylistRecords(prev => prev.filter(p => p.id !== activePlaylistId));
       setActivePlaylistId(null);
       setPlaylistTracks(null);
-      setActiveTab('Tracks');
+      setActiveTab(DefaultView.Tracks);
       setMeloToast(`Deleted "${name}"`);
       setTimeout(() => setMeloToast(null), 2400);
     } catch (e) { console.error(e); }
@@ -838,7 +1075,7 @@ export default function DesktopApp(): JSX.Element {
   };
 
   const handleLoopCycle = () => setLoopMode(m => {
-    const next = m === 'off' ? 'one' : m === 'one' ? 'ab' : 'off';
+    const next = m === LoopMode.Off ? LoopMode.One : m === LoopMode.One ? LoopMode.AB : LoopMode.Off;
     sr.current.loopMode = next; // sync update so TrackEnded sees it before next render
     return next;
   });
@@ -874,7 +1111,11 @@ export default function DesktopApp(): JSX.Element {
   const handleRailChange = (item: string) => {
     setRailItem(item);
     if (item === 'melo') setShowCommitGraph(true);
-    if (item === 'editor') setActiveTab('Tracks');
+    if (item === 'editor') {
+      setActiveTab(DefaultView.Tracks);
+      // Lock in a concrete track so playback changes never hijack the editor display.
+      setEditorTrackId(prev => prev ?? activeTrackId);
+    }
   };
 
   const handleSelectTrack = (id: number) => {
@@ -886,21 +1127,14 @@ export default function DesktopApp(): JSX.Element {
     if (!track?.hash) return;
     if (track.hash === loadedHash) {
       // Already loaded — just toggle pause/resume
-      if (isPlaying) {
-        invoke('audio_pause').catch(console.error);
-        setIsPlaying(false);
-      } else {
-        invoke('audio_play').catch(console.error);
-        setIsPlaying(true);
-      }
+      useStore.getState().toggleAudio().catch(console.error);
     } else {
       // Different track — load and play it
       setActiveTrackId(id);
       invoke('track_play', { hash: track.hash }).catch(console.error);
-      setIsPlaying(true);
-      setLoadedHash(track.hash);
-      setDurationMs(track.duration_ms);
+      useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
+      useStore.getState().setPlaying(true);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
     }
   };
@@ -908,20 +1142,20 @@ export default function DesktopApp(): JSX.Element {
   const handleSkipNext = () => {
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
+    setLoopMode(LoopMode.Off); sr.current.loopMode = LoopMode.Off;
     // Manual queue takes priority
     if (manualQueue.length > 0) {
       const [next, ...rest] = manualQueue;
       setManualQueue(rest);
       setActiveTrackId(next.id);
       invoke('track_play', { hash: next.hash }).catch(console.error);
-      setIsPlaying(true);
-      setLoadedHash(next.hash);
-      setDurationMs(next.duration_ms);
+      useStore.getState().setLoaded(next.hash, next.duration_ms);
       sr.current.durationMs = next.duration_ms;
+      useStore.getState().setPlaying(true);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       return;
     }
-    const q = playQueue;
+    const q = playQueue.filter(t => !sessionExcluded.has(t.hash));
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
     if (q.length === 0) return;
@@ -929,10 +1163,9 @@ export default function DesktopApp(): JSX.Element {
     const next = q[nextIdx];
     setActiveTrackId(next.id);
     invoke('track_play', { hash: next.hash }).catch(console.error);
-    setIsPlaying(true);
-    setLoadedHash(next.hash);
-    setDurationMs(next.duration_ms);
+    useStore.getState().setLoaded(next.hash, next.duration_ms);
     sr.current.durationMs = next.duration_ms;
+    useStore.getState().setPlaying(true);
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
   };
   skipNextRef.current = handleSkipNext;
@@ -942,11 +1175,12 @@ export default function DesktopApp(): JSX.Element {
     if (livePositionMsRef.current > 3000 && loadedHash) {
       invoke('track_play', { hash: loadedHash }).catch(console.error);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-      setIsPlaying(true);
+      useStore.getState().setPlaying(true);
       return;
     }
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
+    setLoopMode(LoopMode.Off); sr.current.loopMode = LoopMode.Off;
     const q = playQueue;
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
@@ -955,10 +1189,9 @@ export default function DesktopApp(): JSX.Element {
     const prev = q[prevIdx];
     setActiveTrackId(prev.id);
     invoke('track_play', { hash: prev.hash }).catch(console.error);
-    setIsPlaying(true);
-    setLoadedHash(prev.hash);
-    setDurationMs(prev.duration_ms);
+    useStore.getState().setLoaded(prev.hash, prev.duration_ms);
     sr.current.durationMs = prev.duration_ms;
+    useStore.getState().setPlaying(true);
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
   };
   skipPrevRef.current = handleSkipPrev;
@@ -969,33 +1202,25 @@ export default function DesktopApp(): JSX.Element {
     if (loadedHash) {
       const queueTrack = playQueue.find(t => t.id === activeTrackId);
       if (!queueTrack || queueTrack.hash === loadedHash) {
-        if (isPlaying) {
-          invoke('audio_pause').catch(console.error);
-          setIsPlaying(false);
-        } else {
-          invoke('audio_play').catch(console.error);
-          setIsPlaying(true);
-        }
+        useStore.getState().toggleAudio().catch(console.error);
         return;
       }
       // A different track is selected in the queue — load it
       invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
-      setLoadedHash(queueTrack.hash);
-      setDurationMs(queueTrack.duration_ms);
+      useStore.getState().setLoaded(queueTrack.hash, queueTrack.duration_ms);
       sr.current.durationMs = queueTrack.duration_ms;
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-      setIsPlaying(true);
+      useStore.getState().setPlaying(true);
       return;
     }
     // Nothing loaded yet — load the selected track from the queue
     const track = playQueue.find(t => t.id === activeTrackId);
     if (!track?.hash) return;
     invoke('track_play', { hash: track.hash }).catch(console.error);
-    setLoadedHash(track.hash);
-    setDurationMs(track.duration_ms);
+    useStore.getState().setLoaded(track.hash, track.duration_ms);
     sr.current.durationMs = track.duration_ms;
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-    setIsPlaying(true);
+    useStore.getState().setPlaying(true);
   };
 
   return (
@@ -1008,9 +1233,9 @@ export default function DesktopApp(): JSX.Element {
 
           {/* Sidebar */}
           <LibrarySidebar
-            playlists={playlistRecords.length > 0 ? playlistRecords.map(playlistRecordToPlaylist) : PLAYLISTS}
+            playlists={playlistRecords.map(playlistRecordToPlaylist)}
             activePlaylistId={activePlaylistId}
-            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab('Tracks'); setRailItem('playlists'); }}
+            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab(DefaultView.Tracks); setRailItem('playlists'); }}
             activeRailItem={railItem}
             onRailChange={handleRailChange}
             expanded={leftExpanded}
@@ -1027,6 +1252,7 @@ export default function DesktopApp(): JSX.Element {
             }}
             onDeleteFolder={deleteFolder}
             onOpenSettings={() => setShowSettings(true)}
+            hasUpdate={!!pendingUpdate}
             onAddToFolderClick={setFolderPopupItem}
             onNewPlaylist={() => setShowNewPlaylist(true)}
           />
@@ -1060,7 +1286,7 @@ export default function DesktopApp(): JSX.Element {
               />
             ) : railItem === 'editor' ? (
               <EditorView
-                track={trackOrder.find(t => t.id === (editorTrackId ?? activeTrackId))}
+                track={trackOrder.find(t => t.id === editorTrackId)}
                 tracks={trackOrder}
                 artworkUrls={artworkUrls}
                 onTrackUpdated={(oldHash, newHash, patch) => {
@@ -1080,7 +1306,7 @@ export default function DesktopApp(): JSX.Element {
                   });
                   fetchedHashesRef.current.add(newHash);
                   fetchedHashesRef.current.delete(oldHash);
-                  if (loadedHash === oldHash) setLoadedHash(newHash);
+                  if (loadedHash === oldHash) useStore.getState().setLoaded(newHash, durationMs);
                   setMeloToast('Metadata saved · committed to all branches');
                   setTimeout(() => setMeloToast(null), 3000);
                   setCommitRefreshKey(k => k + 1);
@@ -1121,10 +1347,34 @@ export default function DesktopApp(): JSX.Element {
                   onResolveConflict={() => { if (activePlaylistId) reopenConflict(activePlaylistId); }}
                 />
 
-                {activeTab === 'Tracks' && (
-                  <>
-                    <div style={{ height: topPaneHeight, flexShrink: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                      <div style={{ paddingTop: 14, paddingBottom: 4, flexShrink: 0 }}>
+                {activeTab === DefaultView.Tracks && (
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <div style={{
+                      position: 'absolute', left: 0, right: 0, top: 0,
+                      bottom: bigPicture ? 0 : `calc(100% - ${topPaneHeight}px)`,
+                      overflow: 'hidden', display: 'flex', flexDirection: 'column',
+                      background: 'var(--bg-2)',
+                      paddingBottom: bigPicture ? 28 : 0,
+                      transition: 'bottom 0.4s cubic-bezier(0.4,0,0.2,1), padding-bottom 0.4s ease',
+                      zIndex: 2,
+                    }}>
+                      {/* Artwork bloom — two slots cross-fade so gradient changes animate smoothly
+                           (CSS can't interpolate between gradient values, opacity cross-fade instead) */}
+                      {glowSlots.map((slot, i) => slot[0] && (
+                        <div key={i} style={{
+                          position: 'absolute', left: '50%', top: bigPicture ? '45%' : '38%',
+                          transform: 'translate(-50%, -50%)',
+                          width: '75%', height: bigPicture ? '70%' : '160%',
+                          borderRadius: '50%',
+                          background: `radial-gradient(ellipse at center, ${withAlpha(slot[0], 0.35)} 0%, ${withAlpha(slot[1], 0.16)} 45%, transparent 70%)`,
+                          filter: 'blur(30px)',
+                          pointerEvents: 'none',
+                          zIndex: 0,
+                          opacity: glowActive === i ? 1 : 0,
+                          transition: 'opacity 0.9s ease, top 0.4s cubic-bezier(0.4,0,0.2,1), height 0.4s cubic-bezier(0.4,0,0.2,1)',
+                        }} />
+                      ))}
+                      <div style={{ paddingTop: 14, paddingBottom: 4, flex: 1, minHeight: 0, position: 'relative', zIndex: 1 }}>
                         <Carousel
                           albums={carouselAlbums}
                           activeIndex={carouselIdx}
@@ -1133,65 +1383,86 @@ export default function DesktopApp(): JSX.Element {
                             if (t) handleSelectTrack(t.id);
                           }}
                           size={settings.carouselSize}
+                          activeGlowColors={artworkAccents}
+                          bigPicture={bigPicture}
+                          privacyMode={settings.privacyMode}
                         />
                       </div>
-                      <PlayerControls
-                        track={playQueue.find(t => t.id === activeTrackId) ?? null}
-                        positionMsRef={livePositionMsRef}
-                        durationMs={durationMs}
-                        isPlaying={isPlaying} onPlayPause={handlePlayPause}
-                        onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
-                        isFav={favorites.has(playQueue.find(t => t.id === activeTrackId)?.hash ?? '')}
-                        onFav={() => {
-                          const hash = playQueue.find(t => t.id === activeTrackId)?.hash;
-                          if (!hash) return;
-                          setFavorites(prev => {
-                            const next = new Set(prev);
-                            next.has(hash) ? next.delete(hash) : next.add(hash);
-                            return next;
-                          });
-                        }}
-                        loopMode={loopMode} onLoopCycle={handleLoopCycle}
-                        isShuffle={isShuffle} shuffleMode={settings.shuffleMode} onShuffle={handleShuffle}
-                        showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
-                        onSeek={pct => {
-                          const ms = Math.floor(pct * durationMs);
-                          lastSeekTime.current = Date.now();
-                          setPositionMs(ms); livePositionMsRef.current = ms;
-                          invoke('audio_seek', { positionMs: ms }).catch(console.error);
-                        }}
-                        volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
-                        abA={abA} abB={abB} onAbChange={handleAbChange}
-                      />
+                      <div style={{ position: 'relative', zIndex: 1 }}>
+                        <PlayerControls
+                          track={playQueue.find(t => t.id === activeTrackId) ?? null}
+                          positionMsRef={livePositionMsRef}
+                          durationMs={durationMs}
+                          isPlaying={isPlaying} onPlayPause={handlePlayPause}
+                          onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
+                          isFav={favorites.has(playQueue.find(t => t.id === activeTrackId)?.hash ?? '')}
+                          onFav={() => {
+                            const hash = playQueue.find(t => t.id === activeTrackId)?.hash;
+                            if (!hash) return;
+                            setFavorites(prev => {
+                              const next = new Set(prev);
+                              next.has(hash) ? next.delete(hash) : next.add(hash);
+                              return next;
+                            });
+                          }}
+                          loopMode={loopMode} onLoopCycle={handleLoopCycle}
+                          isShuffle={isShuffle} shuffleMode={settings.shuffleMode} onShuffle={handleShuffle}
+                          showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
+                          bigPicture={bigPicture} onBigPicture={() => bigPicture ? exitBigPicture() : enterBigPicture()}
+                          onSeek={pct => {
+                            const ms = Math.floor(pct * durationMs);
+                            lastSeekTime.current = Date.now();
+                            setPositionMs(ms); livePositionMsRef.current = ms;
+                            invoke('audio_seek', { positionMs: ms }).catch(console.error);
+                          }}
+                          volume={volume} onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+                          abA={abA} abB={abB} onAbChange={handleAbChange}
+                          artworkAccents={artworkAccents}
+                          isActiveLoaded={isActiveLoaded}
+                        />
+                      </div>
                     </div>
-                    <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
-                    <TrackList
-                      tracks={playlistTracks ?? trackOrder}
-                      activeTrackId={activeTrackId}
-                      loadedHash={loadedHash}
-                      isPlaying={isPlaying}
-                      onSelect={handleSelectTrack}
-                      onPlayPause={handleTrackPlayPause}
-                      onReorder={playlistTracks ? handlePlaylistReorder : handleReorder}
-                      hasUncommitted={hasUncommitted}
-                      onCommitChanges={handleCommitReorder}
-                      onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
-                      artworkUrls={artworkUrls}
-                      onRemoveTrack={playlistTracks ? handleRemoveFromPlaylist : undefined}
-                      onAddTracks={playlistTracks ? () => {
-                        setRailItem('library');
-                        setMeloToast('Select tracks in the library, then use "Add to Playlist"');
-                        setTimeout(() => setMeloToast(null), 3000);
-                      } : undefined}
-                      onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
-                      onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
-                      favorites={favorites}
-                      density={settings.density}
-                    />
-                  </>
+                    <div style={{
+                      position: 'absolute', left: 0, right: 0, bottom: 0, top: topPaneHeight,
+                      display: 'flex', flexDirection: 'column',
+                      transform: bigPicture ? 'translateY(100%)' : 'translateY(0)',
+                      opacity: bigPicture ? 0 : 1,
+                      pointerEvents: bigPicture ? 'none' : undefined,
+                      transition: 'transform 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s ease',
+                      zIndex: 1,
+                    }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                      <ResizeHandle direction="v" onDelta={d => setTopPaneHeight(h => Math.max(settings.carouselSize + 160, Math.min(580, h + d)))} />
+                      <TrackList
+                        tracks={playlistTracks ?? trackOrder}
+                        activeTrackId={activeTrackId}
+                        loadedHash={loadedHash}
+                        isPlaying={isPlaying}
+                        onSelect={handleSelectTrack}
+                        onPlayPause={handleTrackPlayPause}
+                        onReorder={playlistTracks ? handlePlaylistReorder : handleReorder}
+                        hasUncommitted={hasUncommitted}
+                        onCommitChanges={handleCommitReorder}
+                        onEditTrack={id => { setEditorTrackId(id); setRailItem('editor'); }}
+                        artworkUrls={artworkUrls}
+                        onRemoveTrack={playlistTracks ? handleRemoveFromPlaylist : undefined}
+                        onAddTracks={playlistTracks ? () => {
+                          setRailItem('library');
+                          setMeloToast('Select tracks in the library, then use "Add to Playlist"');
+                          setTimeout(() => setMeloToast(null), 3000);
+                        } : undefined}
+                        onPlayNext={track => { setManualQueue(q => [track, ...q]); toast(`"${track.title}" plays next`); }}
+                        onAddToQueue={track => { setManualQueue(q => [...q, track]); toast(`"${track.title}" added to queue`); }}
+                        favorites={favorites}
+                        density={settings.density}
+                        onCollapse={enterBigPicture}
+                      />
+                      </div>
+                    </div>
+                  </div>
                 )}
 
-                {activeTab === 'History' && (
+                {activeTab === DefaultView.History && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <CommitGraphInline
                       playlistId={activePlaylistId}
@@ -1264,12 +1535,13 @@ export default function DesktopApp(): JSX.Element {
         {/* Queue panel */}
         {showQueue && (
           <QueuePanel
-            playQueue={playQueue}
+            playQueue={playQueue.filter(t => !sessionExcluded.has(t.hash))}
             manualQueue={manualQueue}
             loadedHash={loadedHash}
             artworkUrls={artworkUrls}
             onRemoveManual={idx => setManualQueue(q => q.filter((_, i) => i !== idx))}
             onClearManual={() => setManualQueue([])}
+            onRemoveUpcoming={hash => setSessionExcluded(s => new Set([...s, hash]))}
             onClose={() => setShowQueue(false)}
           />
         )}
@@ -1297,12 +1569,13 @@ export default function DesktopApp(): JSX.Element {
               invoke('audio_seek', { positionMs: ms }).catch(console.error);
             }}
             onVolume={v => { setVolume(v); invoke('audio_set_volume', { volume: v }).catch(console.error); }}
+            artworkAccents={artworkAccents}
             showQueue={showQueue} onQueueToggle={() => setShowQueue(p => !p)}
             onCollapse={() => setMiniPlayerCollapsed(true)}
             onStop={() => {
               invoke('audio_stop').catch(console.error);
-              setIsPlaying(false);
-              setLoadedHash(null);
+              useStore.getState().setPlaying(false);
+              useStore.getState().setLoaded(null, 0);
               setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
             }}
           />
@@ -1341,7 +1614,7 @@ export default function DesktopApp(): JSX.Element {
           padding: '0 12px', flexShrink: 0,
         }}>
           <span className="font-mono text-[9px] text-mm-t2 flex items-center gap-2">
-            Melomaniac by Soupa | v1.0 Alpha | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--text-3)' }}>N/A</span>
+            Melomaniac by Soupa | v{__APP_VERSION__} | Rust + Tauri | GPLv3 | Syncing: <span style={{ color: 'var(--text-3)' }}>N/A</span>
             {showStats && appStats && (
               <span className="ml-4 text-mm-accent-lit">
                 RAM: {appStats.memory_mb.toFixed(1)} MB | CPU: {appStats.cpu_usage.toFixed(1)}%
@@ -1500,6 +1773,30 @@ export default function DesktopApp(): JSX.Element {
             onClose={() => setShowSettings(false)}
             onReset={() => { updateSetting(SETTING_DEFAULTS); setShowSettings(false); }}
             onPairDevice={() => { setShowSettings(false); openPairingDisplay().catch(console.error); }}
+            pendingUpdate={pendingUpdate}
+            isInstalling={isInstalling}
+            onInstallUpdate={async () => {
+              if (!pendingUpdate) return;
+              setIsInstalling(true);
+              setUpdateProgress(0);
+              let downloaded = 0;
+              let total = 0;
+              await pendingUpdate.downloadAndInstall(event => {
+                if (event.event === 'Started') {
+                  total = event.data.contentLength ?? 0;
+                } else if (event.event === 'Progress') {
+                  downloaded += event.data.chunkLength;
+                  setUpdateProgress(total > 0 ? Math.round((downloaded / total) * 100) : null);
+                } else if (event.event === 'Finished') {
+                  setUpdateProgress(100);
+                }
+              }).catch(console.error);
+              setIsInstalling(false);
+              setUpdateReady(true);
+            }}
+            updateReady={updateReady}
+            updateProgress={updateProgress}
+            onRelaunch={() => relaunch()}
           />
         )}
 

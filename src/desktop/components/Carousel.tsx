@@ -1,14 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Album } from '../data';
+import { withAlpha } from '../../shared/artworkAccents';
 
 interface AlbumArtProps {
   album: Album;
   size?: number;
   style?: React.CSSProperties;
   tilt?: boolean;
+  privacyOverlay?: boolean;
+  accentColors?: [string, string];
 }
 
-export function AlbumArt({ album, size = 180, style = {}, tilt = true }: AlbumArtProps) {
+export function AlbumArt({ album, size = 180, style = {}, tilt = true, privacyOverlay, accentColors }: AlbumArtProps) {
   const inner = (
     <div style={{
         width: size, height: size,
@@ -38,6 +41,13 @@ export function AlbumArt({ album, size = 180, style = {}, tilt = true }: AlbumAr
           background: `radial-gradient(ellipse at 50% 0%, ${album.accent}44 0%, transparent 70%)`,
           pointerEvents: 'none',
         }} />
+        {privacyOverlay && accentColors && (
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            background: `linear-gradient(135deg, ${accentColors[0]}, ${accentColors[1]})`,
+            transition: 'none',
+          }} />
+        )}
     </div>
   );
   if (!tilt) return inner;
@@ -56,13 +66,17 @@ interface CarouselProps {
   activeIndex: number;
   onIndexChange: (idx: number) => void;
   size?: number; // card size in px (120–240), driven by settings.carouselSize
+  activeGlowColors?: [string, string];
+  bigPicture?: boolean;
+  privacyMode?: boolean;
 }
 
 const SLOT_GAP = 6; // px gap between card slots
 
-export default function Carousel({ albums, activeIndex, onIndexChange, size = 180 }: CarouselProps) {
-  const [position,      setPosition]      = useState(activeIndex);
-  const [containerWidth, setContainerWidth] = useState(600);
+export default function Carousel({ albums, activeIndex, onIndexChange, size = 180, activeGlowColors, bigPicture, privacyMode }: CarouselProps) {
+  const [position,       setPosition]       = useState(activeIndex);
+  const [containerWidth, setContainerWidth]  = useState(600);
+  const [containerHeight, setContainerHeight] = useState(0);
   const posRef           = useRef(activeIndex);
   const dragStartX       = useRef<number | null>(null);
   const dragStartPos     = useRef(0);
@@ -76,15 +90,16 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
   useEffect(() => { albumsLenRef.current     = albums.length;  }, [albums.length]);
   useEffect(() => { onIndexChangeRef.current = onIndexChange;  }, [onIndexChange]);
 
-  // Track container width so getCardProps fills the available space
+  // Track container dimensions so getCardProps fills the available space
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(entries => {
       setContainerWidth(entries[0].contentRect.width);
+      setContainerHeight(entries[0].contentRect.height);
     });
     ro.observe(containerRef.current);
-    // Seed immediately
     setContainerWidth(containerRef.current.offsetWidth);
+    setContainerHeight(containerRef.current.offsetHeight);
     return () => ro.disconnect();
   }, []);
 
@@ -193,8 +208,11 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
     animateTo(t);
   };
 
-  const slot        = size + SLOT_GAP;
-  // Half the number of cards that fit across the container — anything beyond this is invisible
+  // In Big Picture mode, cards scale to fill ~72% of the container height
+  const effectiveSize = bigPicture && containerHeight > 80
+    ? Math.min(Math.floor(containerHeight * 0.72), 380)
+    : size;
+  const slot        = effectiveSize + SLOT_GAP;
   const halfVisible = containerWidth / (2 * slot);
 
   const getCardProps = (index: number) => {
@@ -214,16 +232,16 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
     };
   };
 
-  const carouselHeight = size + 30;
+  const carouselHeight = bigPicture ? '100%' : (size + 30);
 
   return (
     <div style={{
-      position: 'relative', width: '100%', height: carouselHeight,
+      position: 'relative', width: '100%',
+      height: carouselHeight, flex: bigPicture ? 1 : undefined, minHeight: bigPicture ? 0 : undefined,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      // translateZ(0) + contain promote the carousel to its own compositor layer, preventing
-      // repaints from propagating up during rAF-driven position updates
       willChange: 'transform', transform: 'translateZ(0)',
       contain: 'layout style paint',
+      transition: 'height 0.22s ease',
     }}>
       <div
         ref={containerRef}
@@ -248,22 +266,29 @@ export default function Carousel({ albums, activeIndex, onIndexChange, size = 18
           if (!props) return null;
           const isActive = Math.abs(i - position) < 0.5;
           const { tilt, ...cardStyle } = props;
+          const glowColor = isActive && activeGlowColors ? activeGlowColors[0] : album.accent;
           return (
             <div
               key={i}
               onClick={() => { if (!isDragging.current) snapTo(i); }}
               style={{
-                position: 'absolute', left: '50%', marginLeft: -(size / 2),
+                position: 'absolute', left: '50%', marginLeft: -(effectiveSize / 2),
                 cursor: 'pointer', willChange: 'transform',
-                backfaceVisibility: 'hidden',
+                borderRadius: 12,
                 ...cardStyle,
               }}
             >
-              <AlbumArt album={album} size={size} tilt={tilt} style={{
-                boxShadow: isActive
-                  ? `0 8px 36px rgba(0,0,0,0.7), 0 0 0 2px var(--accent), 0 0 24px ${album.accent}44`
-                  : '0 4px 16px rgba(0,0,0,0.5)',
-              }} />
+              <AlbumArt
+                album={album} size={effectiveSize} tilt={tilt}
+                privacyOverlay={!!privacyMode}
+                accentColors={[album.accent, album.accent]}
+                style={{
+                  boxShadow: isActive
+                    ? `0 8px 36px rgba(0,0,0,0.7), 0 0 0 2px var(--accent), 0 0 28px ${withAlpha(glowColor, 0.5)}`
+                    : '0 4px 16px rgba(0,0,0,0.5)',
+                  outline: 'none',
+                }}
+              />
             </div>
           );
         })}

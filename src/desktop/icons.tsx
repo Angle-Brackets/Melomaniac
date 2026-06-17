@@ -1,6 +1,8 @@
 // Shared icon library.
 // react-icons/fi (Feather) for standard UI actions; custom SVGs for
 // music/melo-specific shapes that have no Feather equivalent.
+import { LoopMode } from './types';
+export { LoopMode };
 export {
   FiMenu as IcoMenu,
   FiDisc as IcoLibrary,
@@ -28,6 +30,8 @@ export {
   FiArrowUp as IcoPush,
   FiList as IcoQueue,
 } from 'react-icons/fi';
+import { FaWeightHanging } from 'react-icons/fa';
+import { FaMagnifyingGlass } from 'react-icons/fa6';
 
 // Sparkles — matches the mobile Discover tab icon exactly
 export function IcoDiscover({ size = 17 }: { size?: number }) {
@@ -79,9 +83,19 @@ export function IcoDice({ size = 16 }: { size?: number }) {
   );
 }
 
+// Hanging weight — for Weighted shuffle mode
+export function IcoDumbbell({ size = 16 }: { size?: number }) {
+  return <FaWeightHanging size={size} />;
+}
+
+// Magnifying glass — for Discovery shuffle mode
+export function IcoDiscovery({ size = 16 }: { size?: number }) {
+  return <FaMagnifyingGlass size={size} />;
+}
+
 // Loop mode icon — changes visual based on current mode
-export function IcoLoop({ mode }: { mode: 'off' | 'one' | 'ab' }) {
-  if (mode === 'ab') {
+export function IcoLoop({ mode }: { mode: LoopMode }) {
+  if (mode === LoopMode.AB) {
     return (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
         <text x="1.5" y="11.5" fontSize="8" fontWeight="800" fill="currentColor" stroke="none" fontFamily="monospace">A</text>
@@ -95,7 +109,7 @@ export function IcoLoop({ mode }: { mode: 'off' | 'one' | 'ab' }) {
       strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 4h8v3l3-3-3-3v3" />
       <path d="M12 12H4V9l-3 3 3 3v-3" />
-      {mode === 'one' && (
+      {mode === LoopMode.One && (
         <text x="6.5" y="10.5" fontSize="6" fontWeight="900"
           fill="currentColor" stroke="none" fontFamily="monospace">1</text>
       )}

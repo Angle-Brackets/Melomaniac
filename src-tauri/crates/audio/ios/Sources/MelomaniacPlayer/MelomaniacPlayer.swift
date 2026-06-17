@@ -39,6 +39,13 @@ private var currentArtwork: MPMediaItemArtwork? = nil
 // will NOT show the Now Playing widget in Control Centre / lock screen.
 private var remoteCommandTokens: [Any] = []
 
+// Stored so the interruption handler can send Play/Pause events back to Rust.
+private var remoteCallback: MeloCommandCallback? = nil
+
+// When true, artwork is withheld from MPNowPlayingInfoCenter so the lock
+// screen and Control Centre widget don't reveal what's playing.
+private var privacyModeEnabled: Bool = false
+
 // ── UTI helpers ───────────────────────────────────────────────────────────────
 //
 // AVAudioPlayer(contentsOf:fileTypeHint:) expects a UTI string, not MIME.
@@ -259,7 +266,7 @@ public func meloUpdateNowPlaying(
             MPNowPlayingInfoPropertyDefaultPlaybackRate:        1.0,
         ]
         if let album  = album        { info[MPMediaItemPropertyAlbumTitle] = album }
-        if let art    = currentArtwork { info[MPMediaItemPropertyArtwork]   = art   }
+        if !privacyModeEnabled, let art = currentArtwork { info[MPMediaItemPropertyArtwork] = art }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 }
@@ -278,13 +285,66 @@ public func meloSetArtworkPath(_ pathPtr: UnsafePointer<CChar>?) {
             currentArtwork = nil
         }
         if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
-            if let art = currentArtwork {
+            if !privacyModeEnabled, let art = currentArtwork {
                 info[MPMediaItemPropertyArtwork] = art
             } else {
                 info.removeValue(forKey: MPMediaItemPropertyArtwork)
             }
             MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         }
+    }
+}
+
+/// Enables or disables privacy mode. When enabled, artwork is withheld from
+/// MPNowPlayingInfoCenter so the lock screen / Control Centre don't show it.
+@_cdecl("melo_set_privacy_mode")
+public func meloSetPrivacyMode(_ enabled: Bool) {
+    onMain {
+        privacyModeEnabled = enabled
+        if var info = MPNowPlayingInfoCenter.default().nowPlayingInfo {
+            if !enabled, let art = currentArtwork {
+                info[MPMediaItemPropertyArtwork] = art
+            } else {
+                info.removeValue(forKey: MPMediaItemPropertyArtwork)
+            }
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        }
+    }
+}
+
+// ── Audio session interruption handling ───────────────────────────────────────
+//
+// iOS automatically pauses AVAudioPlayer when another app takes the audio
+// session (phone call, video in another app, Siri, etc.). The interruption
+// notification tells us when that other source releases the session so we can
+// resume and update the frontend's isPlaying state via the remote callback.
+
+private func handleInterruption(_ notification: Notification) {
+    guard let info = notification.userInfo,
+          let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+    switch type {
+    case .began:
+        // AVAudioPlayer is already paused by the system — just sync UI state.
+        NSLog("[Melo] Interruption began")
+        remoteCallback?(1, 0.0)   // Pause → frontend sets isPlaying=false
+
+    case .ended:
+        let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+        let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+        guard options.contains(.shouldResume) else {
+            NSLog("[Melo] Interruption ended — no shouldResume, staying paused")
+            return
+        }
+        NSLog("[Melo] Interruption ended — resuming")
+        // Re-activate the session; iOS may have deactivated it while interrupted.
+        try? AVAudioSession.sharedInstance().setActive(true)
+        player?.play()
+        remoteCallback?(0, 0.0)   // Play → frontend sets isPlaying=true
+
+    @unknown default:
+        break
     }
 }
 
@@ -308,7 +368,14 @@ public typealias MeloCommandCallback = @convention(c) (Int32, Double) -> Void
 /// the Now Playing widget in Control Centre or on the lock screen.
 @_cdecl("melo_register_remote_commands")
 public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
+    remoteCallback = callback
     onMain {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { handleInterruption($0) }
+
         let c = MPRemoteCommandCenter.shared()
 
         // isEnabled defaults to true when addTarget is called, but setting it
@@ -319,6 +386,8 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
         c.previousTrackCommand.isEnabled           = true
         c.togglePlayPauseCommand.isEnabled         = true
         c.changePlaybackPositionCommand.isEnabled  = true
+        c.likeCommand.isEnabled                    = true
+        c.changeShuffleModeCommand.isEnabled       = true
 
         remoteCommandTokens = [
             c.playCommand.addTarget            { _ in callback(0, 0.0); return .success },
@@ -340,8 +409,32 @@ public func meloRegisterRemoteCommands(_ callback: MeloCommandCallback) {
                 callback(5, secs)
                 return .success
             },
+            c.likeCommand.addTarget { _ in callback(6, 0.0); return .success },
+            c.changeShuffleModeCommand.addTarget { event in
+                guard let e = event as? MPChangeShuffleModeCommandEvent else { return .commandFailed }
+                callback(7, Double(e.shuffleType.rawValue))
+                return .success
+            },
         ]
         NSLog("[Melo] Remote commands registered (\(remoteCommandTokens.count) tokens)")
+    }
+}
+
+/// Reflects the current shuffle mode on the lock-screen shuffle button.
+/// 0 = off (.off), 1 = random (.items), 2 = smart (.collections)
+@_cdecl("melo_set_shuffle_state")
+public func meloSetShuffleState(_ mode: Int32) {
+    onMain {
+        let type: MPShuffleType = mode == 1 ? .items : mode == 2 ? .collections : .off
+        MPRemoteCommandCenter.shared().changeShuffleModeCommand.currentShuffleType = type
+    }
+}
+
+/// Reflects the current track's liked state on the lock-screen heart button.
+@_cdecl("melo_set_like_state")
+public func meloSetLikeState(_ isActive: Bool) {
+    onMain {
+        MPRemoteCommandCenter.shared().likeCommand.isActive = isActive
     }
 }
 

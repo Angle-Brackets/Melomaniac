@@ -28,6 +28,9 @@ unsafe extern "C" {
     );
     fn melo_set_artwork_path(path: *const c_char);
     fn melo_register_remote_commands(callback: extern "C" fn(i32, f64));
+    fn melo_set_like_state(active: bool);
+    fn melo_set_shuffle_state(mode: i32);
+    fn melo_set_privacy_mode(enabled: bool);
 }
 
 // ── Remote command routing ────────────────────────────────────────────────────
@@ -45,6 +48,8 @@ extern "C" fn remote_cmd_callback(code: i32, position_secs: f64) {
         3 => AudioEvent::RemotePreviousTrack,
         4 => AudioEvent::RemoteTogglePlayPause,
         5 => AudioEvent::RemoteSeek((position_secs * 1000.0) as u64),
+        6 => AudioEvent::RemoteLike,
+        7 => AudioEvent::RemoteShuffleChange(position_secs as u8),
         _ => return,
     };
     if let Some(tx) = REMOTE_CMD_TX.get() {
@@ -195,6 +200,18 @@ impl AudioBridge for IosBridge {
 
     fn position_ms(&self) -> Result<u64, AudioError> {
         Ok(self.position_ms.load(Ordering::Relaxed))
+    }
+
+    fn set_like_active(&self, active: bool) {
+        unsafe { melo_set_like_state(active) };
+    }
+
+    fn set_shuffle_mode(&self, mode: u8) {
+        unsafe { melo_set_shuffle_state(mode as i32) };
+    }
+
+    fn set_privacy_mode(&self, enabled: bool) {
+        unsafe { melo_set_privacy_mode(enabled) };
     }
 }
 

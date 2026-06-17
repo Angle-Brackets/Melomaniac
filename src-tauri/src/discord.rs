@@ -25,7 +25,9 @@ fn connect(app_id: &str) -> Result<DiscordIpcClient, String> {
 
 const APP_ID: &str = "1501840436703268934";
 
-/// Called from the frontend whenever the Discord Rich Presence toggle changes.
+/// Ensure the Discord IPC client matches `enabled`.
+/// Idempotent: does nothing if already in the requested state, so it's safe
+/// to call before every activity update without churning the connection.
 #[tauri::command]
 pub fn discord_apply_settings(
     enabled: bool,
@@ -33,12 +35,12 @@ pub fn discord_apply_settings(
 ) -> Result<(), String> {
     let mut guard = state.client.lock().unwrap();
 
-    if let Some(mut c) = guard.take() {
-        c.close().ok();
-    }
-
     if enabled {
-        *guard = Some(connect(APP_ID)?);
+        if guard.is_none() {
+            *guard = Some(connect(APP_ID)?);
+        }
+    } else if let Some(mut c) = guard.take() {
+        c.close().ok();
     }
 
     Ok(())

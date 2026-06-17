@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { FiTrash2 } from 'react-icons/fi';
 import { Icons } from '../icons';
 import { MMTabBar, usePullToRefresh, PullSpinner } from './common';
 import type { TabId } from './common';
@@ -30,6 +31,7 @@ interface StoredSettings {
   accentHue: number;
   customAccentHue: number; // remembers last slider position independently of active theme
   commitAuthor: string;
+  privacyMode: boolean;
   [key: string]: unknown;
 }
 
@@ -38,6 +40,7 @@ const DEFAULTS: StoredSettings = {
   accentHue: 28,
   customAccentHue: 200,
   commitAuthor: '',
+  privacyMode: false,
 };
 
 function loadSettings(): StoredSettings {
@@ -51,15 +54,20 @@ function loadSettings(): StoredSettings {
 function saveSettings(patch: Partial<StoredSettings>) {
   try {
     const existing = (() => { try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}'); } catch { return {}; } })();
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...existing, ...patch }));
+    const next = { ...existing, ...patch };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent('mm-settings-change', { detail: next }));
   } catch { /* ignore */ }
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function SettingsGroup({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingsGroup({ label, action, children }: { label: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ margin: '14px 16px 0' }}>
-      <div style={{ padding: '0 8px 6px', fontSize: 11, letterSpacing: 0.15, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{label}</div>
+      <div style={{ padding: '0 8px 6px', display: 'flex', alignItems: 'center' }}>
+        <span style={{ fontSize: 11, letterSpacing: 0.15, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{label}</span>
+        {action && <div style={{ marginLeft: 'auto' }}>{action}</div>}
+      </div>
       <div style={{ background: 'var(--bg-2)', border: '0.5px solid var(--border-1)', borderRadius: 14, overflow: 'hidden' }}>
         {children}
       </div>
@@ -101,9 +109,29 @@ const THEME_PILLS: { id: ThemeName; label: string }[] = [
 export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const openPairingDisplay      = useStore(s => s.openPairingDisplay);
   const livePeers               = useStore(s => s.livePeers);
+  const knownDevices            = useStore(s => s.knownDevices);
   const refreshLivePeers        = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices     = useStore(s => s.refreshKnownDevices);
   const openPeerManifest        = useStore(s => s.openPeerManifest);
+
+  const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
+  const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
+
+  const [editingKey,  setEditingKey]  = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const editInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editingKey) editInputRef.current?.focus(); }, [editingKey]);
+
+  const commitRename = (pk: string, name: string) => {
+    const trimmed = name.trim();
+    if (trimmed) {
+      invoke('sync_rename_device', { publicKeyB64: pk, newName: trimmed })
+        .then(refreshKnownDevices)
+        .catch(console.error);
+    }
+    setEditingKey(null);
+  };
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const playlists               = useStore(s => s.playlists);
   const reopenConflict          = useStore(s => s.reopenConflict);
@@ -118,6 +146,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const [stats, setStats]         = useState<{ memory_mb: number; cpu_usage: number } | null>(null);
   const [storageBytes, setStorageBytes] = useState<number | null>(null);
   const [topTracks, setTopTracks] = useState<Array<{ hash: string; stats: TrackStats; track: TrackRecord | null }>>([]);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   // Apply persisted theme once on mount
   useEffect(() => {
@@ -147,8 +176,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
     invoke<number>('library_get_storage_bytes').then(setStorageBytes).catch(() => {});
   }, []);
 
-  // Top tracks — loaded once on mount
-  useEffect(() => {
+  const loadTopTracks = useCallback(() => {
     Promise.all([
       invoke<[string, TrackStats][]>('library_get_top_tracks', { limit: 10 }),
       invoke<TrackRecord[]>('library_get_all'),
@@ -161,6 +189,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
       })));
     }).catch(() => {});
   }, []);
+
+  useEffect(() => { loadTopTracks(); }, []);
 
   // Focus author input when entering edit mode
   useEffect(() => {
@@ -233,7 +263,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* Header */}
         <div style={{ padding: '12px 22px 6px' }}>
           <h1 style={{ fontSize: 30, fontWeight: 700, letterSpacing: -0.5 }}>Settings</h1>
-          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v1.0 alpha · mobile</div>
+          <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 2, fontFamily: 'JetBrains Mono, monospace' }}>v{__APP_VERSION__} · mobile</div>
         </div>
 
         {/* Conflict resolution banner — shown when any playlist has an unresolved merge */}
@@ -321,28 +351,54 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
             {/* Accent hue */}
             <div style={{ fontSize: 11, letterSpacing: 0.12, textTransform: 'uppercase', color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', marginBottom: 8 }}>Accent hue</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              {/* Rainbow track */}
-              <div style={{ flex: 1, position: 'relative', height: 20, display: 'flex', alignItems: 'center' }}>
+              {/* Rainbow track with circle thumb */}
+              <div style={{ flex: 1, position: 'relative', height: 22, display: 'flex', alignItems: 'center' }}>
                 <div style={{
                   position: 'absolute', left: 0, right: 0, height: 6, borderRadius: 3,
                   background: 'linear-gradient(90deg, oklch(0.62 0.15 0), oklch(0.62 0.15 60), oklch(0.62 0.15 120), oklch(0.62 0.15 180), oklch(0.62 0.15 240), oklch(0.62 0.15 300), oklch(0.62 0.15 360))',
                   pointerEvents: 'none',
                 }}/>
+                {/* Circle thumb positioned along the track */}
+                <div style={{
+                  position: 'absolute',
+                  left: `calc(${(settings.accentHue / 360) * 100}% - 11px)`,
+                  width: 22, height: 22, borderRadius: 11,
+                  background: `oklch(0.62 0.15 ${settings.accentHue})`,
+                  border: '2px solid rgba(255,255,255,0.55)',
+                  boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
+                  pointerEvents: 'none',
+                }}/>
                 <input
                   type="range" min={0} max={360} value={settings.accentHue}
                   onChange={e => handleHueChange(Number(e.target.value))}
-                  style={{ position: 'relative', width: '100%', margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 1 }}
+                  style={{ position: 'relative', width: '100%', margin: 0, opacity: 0, cursor: 'pointer', height: 22, zIndex: 1 }}
                 />
               </div>
-              {/* Live preview dot — white ring ensures visibility on any hue */}
-              <div style={{
-                width: 22, height: 22, borderRadius: 11, flexShrink: 0,
-                background: `oklch(0.62 0.15 ${settings.accentHue})`,
-                border: '2px solid rgba(255,255,255,0.55)',
-                boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
-              }}/>
               <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', width: 28, textAlign: 'right' }}>{settings.accentHue}°</span>
             </div>
+          </div>
+        </SettingsGroup>
+
+        {/* Privacy */}
+        <SettingsGroup label="Privacy">
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, color: 'var(--text-0)' }}>Privacy Mode</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>Blur album art so others can't see what's playing</div>
+            </div>
+            <input
+              type="checkbox"
+              className="toggle toggle-primary toggle-sm"
+              checked={!!settings.privacyMode}
+              onChange={e => {
+                const enabled = e.target.checked;
+                const patch = { privacyMode: enabled };
+                setSettings(prev => ({ ...prev, ...patch }));
+                saveSettings(patch);
+                invoke('audio_set_privacy_mode', { enabled }).catch(console.error);
+              }}
+              style={{ flexShrink: 0, cursor: 'pointer' }}
+            />
           </div>
         </SettingsGroup>
 
@@ -353,9 +409,42 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           <Row title="Crossfade" detail="N/A" chev={false} isLast muted/>
         </SettingsGroup>
 
-        {/* Top Tracks */}
+        {/* History */}
         {topTracks.length > 0 && (
-          <SettingsGroup label="Most Played">
+          <SettingsGroup
+            label="History"
+            action={
+              confirmClear ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-1)' }}>Are you sure?</span>
+                  <button
+                    onClick={async () => {
+                      await invoke('library_clear_history');
+                      setConfirmClear(false);
+                      loadTopTracks();
+                    }}
+                    style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid #c0392b', background: '#c0392b22', color: '#e05050', cursor: 'pointer' }}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => setConfirmClear(false)}
+                    style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-2)', background: 'none', color: 'var(--text-2)', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmClear(true)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4, display: 'flex', alignItems: 'center' }}
+                  title="Clear listening history"
+                >
+                  <FiTrash2 size={13} />
+                </button>
+              )
+            }
+          >
             {topTracks.map(({ hash, stats: trackStats, track }, idx) => (
               <div
                 key={hash}
@@ -402,14 +491,56 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* Sync */}
         <SettingsGroup label="Sync">
           {livePeers.map((peer) => (
-            <Row
-              key={peer.public_key_b64}
-              title={peer.display_name}
-              detail={peer.latency_ms != null ? `${peer.latency_ms}ms` : undefined}
-              onClick={() => openPeerManifest(peer)}
-            >
-              <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>Sync</span>
-            </Row>
+            <div key={peer.public_key_b64} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'oklch(0.72 0.17 142)', flexShrink: 0 }}/>
+              {editingKey === peer.public_key_b64 ? (
+                <input
+                  ref={editInputRef}
+                  value={editingName}
+                  onChange={e => setEditingName(e.target.value)}
+                  onBlur={() => setEditingKey(null)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename(peer.public_key_b64, editingName);
+                    if (e.key === 'Escape') setEditingKey(null);
+                  }}
+                  style={{ flex: 1, fontSize: 14, background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 6, padding: '2px 6px', color: 'var(--text-0)', outline: 'none' }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setEditingKey(peer.public_key_b64); setEditingName(peer.display_name); }}
+                  style={{ flex: 1, fontSize: 14, color: 'var(--text-0)', cursor: 'pointer' }}
+                >{peer.display_name}</span>
+              )}
+              {peer.latency_ms != null && <span style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{peer.latency_ms}ms</span>}
+              <span onClick={() => openPeerManifest(peer)} style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer' }}>Sync</span>
+            </div>
+          ))}
+          {offlineDevices.map((device) => (
+            <div key={device.public_key_b64} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)', opacity: 0.5 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--border-2)', flexShrink: 0 }}/>
+              {editingKey === device.public_key_b64 ? (
+                <input
+                  ref={editingKey === device.public_key_b64 ? editInputRef : undefined}
+                  value={editingName}
+                  onChange={e => setEditingName(e.target.value)}
+                  onBlur={() => setEditingKey(null)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitRename(device.public_key_b64, editingName);
+                    if (e.key === 'Escape') setEditingKey(null);
+                  }}
+                  style={{ flex: 1, fontSize: 14, background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 6, padding: '2px 6px', color: 'var(--text-0)', outline: 'none' }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setEditingKey(device.public_key_b64); setEditingName(device.display_name); }}
+                  style={{ flex: 1, fontSize: 14, color: 'var(--text-0)', cursor: 'pointer' }}
+                >{device.display_name}</span>
+              )}
+              <button
+                onClick={() => invoke('sync_remove_device', { publicKeyB64: device.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
+                style={{ fontSize: 12, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+              >Remove</button>
+            </div>
           ))}
           <Row title="Pair a device" chev isLast onClick={() => { openPairingDisplay().catch(console.error); }}>
             <span style={{ fontSize: 13, color: 'var(--text-2)' }}>QR</span>
@@ -419,7 +550,7 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
         {/* About */}
         <SettingsGroup label="About">
           <div style={{ padding: '12px 14px', borderBottom: '0.5px solid var(--border-0)' }}>
-            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>Melomaniac v1.0 Alpha</div>
+            <div style={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}>Melomaniac v{__APP_VERSION__}</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', marginTop: 3 }}>Tauri 2 · React · Rust · GPLv3</div>
             <div style={{ fontSize: 11.5, color: 'var(--text-2)', marginTop: 3 }}>By Soupa · built {BUILD_DATE}</div>
           </div>

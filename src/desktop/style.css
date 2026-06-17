@@ -212,6 +212,10 @@
   from { transform: translateX(0); }
   to   { transform: translateX(var(--mm-dist, -200px)); }
 }
+@keyframes mm-play-shimmer {
+  from { transform: rotate(45deg) translateX(0px); }
+  to   { transform: rotate(45deg) translateX(400px); }
+}
 .tl-context-menu { animation: fadeInScale 0.12s ease; }
 
 /* ── Modal enter / exit ────────────────────────────────────────────────────── */

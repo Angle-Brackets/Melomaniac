@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import './style.css';
 import { applyTheme, writeCustomHue } from '../shared/themes';
 import { useStore } from '../store';
+import { LoopMode } from '../store/types';
 import { positionMsRef, loopStateRef } from './playerContext';
 import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
@@ -169,7 +170,7 @@ export default function MobileApp() {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
         const posMs = payload.PositionChanged;
         const { loopMode: lm, abA: a, abB: b, durMs: dur } = loopStateRef;
-        if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+        if (lm === LoopMode.AB && dur > 0 && posMs >= b * dur) {
           const aMs = Math.round(a * dur);
           positionMsRef.current = aMs;
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
@@ -198,14 +199,14 @@ export default function MobileApp() {
       if (payload === 'TrackEnded') {
         positionMsRef.current = 0;
         const { loopMode: lm, abA: a, durMs: dur } = loopStateRef;
-        if (lm === 'one') {
+        if (lm === LoopMode.One) {
           const s = useStore.getState();
           const hash = s.currentHash();
           if (hash) invoke('track_play', { hash }).catch(console.error);
           s.setPlaying(true);
           return;
         }
-        if (lm === 'ab') {
+        if (lm === LoopMode.AB) {
           const aMs = Math.round(a * dur);
           positionMsRef.current = aMs;
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
@@ -216,11 +217,25 @@ export default function MobileApp() {
         playNext();
         return;
       }
-      if (payload === 'RemotePlay')  { useStore.getState().setPlaying(true); return; }
-      if (payload === 'RemotePause') { useStore.getState().setPlaying(false); return; }
+      if (payload === 'RemotePlay') {
+        invoke('audio_play').catch(console.error);
+        useStore.getState().setPlaying(true);
+        return;
+      }
+      if (payload === 'RemotePause') {
+        invoke('audio_pause').catch(console.error);
+        useStore.getState().setPlaying(false);
+        return;
+      }
       if (payload === 'RemoteTogglePlayPause') {
         const s = useStore.getState();
-        s.setPlaying(!s.isPlaying);
+        if (s.isPlaying) {
+          invoke('audio_pause').catch(console.error);
+          s.setPlaying(false);
+        } else {
+          invoke('audio_play').catch(console.error);
+          s.setPlaying(true);
+        }
         return;
       }
       if (payload === 'RemoteNextTrack')     { playNext(true); return; }

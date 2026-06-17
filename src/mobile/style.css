@@ -1,5 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* ── Safe area custom properties ────────────────────────────────────────────── */
 :root {
   --safe-top:    env(safe-area-inset-top,    0px);
@@ -84,6 +89,11 @@
   from { transform: translateX(calc(-100% - 24px)); opacity: 0; }
   to   { transform: translateX(0);                  opacity: 1; }
 }
+@keyframes mm-play-shimmer {
+  from { transform: rotate(45deg) translateX(0px); }
+  to   { transform: rotate(45deg) translateX(400px); }
+}
+
 @keyframes mmNoteDance {
   0%   { transform: translateY(0px)   rotate(-15deg) scale(1);    }
   15%  { transform: translateY(-14px) rotate(10deg)  scale(1.2);  }

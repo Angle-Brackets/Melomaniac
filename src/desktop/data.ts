@@ -107,17 +107,6 @@ export const ALBUMS: Album[] = [
   { id: 7, title: "Neon Shore",          artist: "Study Beats", gradient: "radial-gradient(ellipse at 55% 45%, #3a8ac0 0%, #1a4870 38%, #080e24 70%, #040812 100%)", accent: "#3a8ac0" },
 ];
 
-export const TRACKS: Track[] = [
-  { id: 1, hash: '', artwork_hash: null, duration_ms: 0, title: "Chill Ambient",        artist: "Anna Bair",   album: "Chill Ruests",   commit: "4fa9b0", added: "2h ago",  length: "24:20", albumRef: 1 },
-  { id: 2, hash: '', artwork_hash: null, duration_ms: 0, title: "Coffee Terpomarai",    artist: "Lorun",       album: "Coffee Shop A.", commit: "4fa9b0", added: "5h ago",  length: "23:35", albumRef: 1 },
-  { id: 3, hash: '', artwork_hash: null, duration_ms: 0, title: "Denny Wrock Before",   artist: "Study Beats", album: "Coffee Shop A.", commit: "4fa9b0", added: "1d ago",  length: "23:57", albumRef: 2 },
-  { id: 4, hash: '', artwork_hash: null, duration_ms: 0, title: "Coffee Shop Ambienc.", artist: "Anna Bair",   album: "Coffee Shop A.", commit: "4fa9b0", added: "1d ago",  length: "23:19", albumRef: 2 },
-  { id: 5, hash: '', artwork_hash: null, duration_ms: 0, title: "Sunset Keys",          artist: "Lorun",       album: "Sunset Drift",   commit: "9c2a31", added: "3d ago",  length: "18:44", albumRef: 2 },
-  { id: 6, hash: '', artwork_hash: null, duration_ms: 0, title: "Rain on Glass",        artist: "Anna Bair",   album: "Rainy Window",   commit: "9c2a31", added: "3d ago",  length: "31:02", albumRef: 0 },
-  { id: 7, hash: '', artwork_hash: null, duration_ms: 0, title: "Midnight Protocol",    artist: "Study Beats", album: "Midnight Bloom", commit: "b7f192", added: "5d ago",  length: "22:11", albumRef: 3 },
-  { id: 8, hash: '', artwork_hash: null, duration_ms: 0, title: "Ember Walk",           artist: "Various",     album: "Ember",          commit: "b7f192", added: "5d ago",  length: "19:55", albumRef: 4 },
-];
-
 function fmtDuration(ms: number): string {
   if (!ms) return '—';
   const s = Math.floor(ms / 1000);
@@ -153,23 +142,3 @@ export function trackRecordToTrack(r: TrackRecord, idx: number): Track {
   };
 }
 
-export const PLAYLISTS: Playlist[] = [
-  { id: "mock-1", name: "Cozy Melodies",  version: "1.5", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },
-  { id: "mock-2", name: "Study Beats",    version: "3.0", commit: "4fa9b0", synced: "2h ago", branch: "main", pull: true, pinned: true },
-  { id: "mock-3", name: "Lo-Fi Lounge",   version: "2.1", commit: "3ed5b0", synced: "2h ago", branch: "main", pinned: false },
-];
-
-export const COMMITS: Commit[] = [
-  { hash: "4fa9b0", msg: "Add Coffee Shop Ambience + Rainy Window", author: "you",      time: "2h ago", branch: "main", parents: ["9c2a31"],           tags: ["HEAD", "main"] },
-  { hash: "9c2a31", msg: "Merge branch dev → main",                  author: "you",      time: "1d ago", branch: "main", parents: ["b7f192", "8e2b44"], tags: [] },
-  { hash: "8e2b44", msg: "Reorder: move ambient tracks to top",      author: "device-2", time: "2d ago", branch: "dev",  parents: ["c91f33"],           tags: [] },
-  { hash: "c91f33", msg: "Experiment: fast-paced gaming section",    author: "you",      time: "3d ago", branch: "dev",  parents: ["b7f192"],           tags: ["dev"] },
-  { hash: "b7f192", msg: "Import Sunset Drift + Midnight Bloom",     author: "you",      time: "5d ago", branch: "main", parents: ["3ed5b0"],           tags: [] },
-  { hash: "3ed5b0", msg: "Fork from Lo-Fi Lounge v2.0",              author: "you",      time: "2w ago", branch: "main", parents: [],                  tags: ["upstream/main"] },
-];
-
-export const CHART_BARS = [4, 6, 3, 8, 5, 9, 7, 5, 6, 8, 4, 7];
-export const CHART_LINE = [3, 5, 4, 7, 6, 9, 8, 6, 7, 9, 7, 8];
-
-export const BRANCH_COLS: Record<string, number> = { main: 0, dev: 1 };
-export const BRANCH_COLORS: Record<string, string> = { main: "var(--accent)", dev: "var(--blue)" };

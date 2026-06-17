@@ -28,6 +28,13 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_barcode_scanner::init());
     }
 
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
+    }
+
     builder
         .setup(|app| {
             let (event_tx, event_rx) = std::sync::mpsc::channel::<AudioEvent>();
@@ -214,7 +221,11 @@ pub fn run() {
             audio::audio_seek,
             audio::audio_set_volume,
             audio::audio_position,
+            audio::audio_set_like_state,
+            audio::audio_set_shuffle_state,
+            audio::audio_set_privacy_mode,
             audio::track_play,
+            audio::track_load_paused,
             storage::library_get_all,
             storage::library_set_favorite,
             storage::library_import_folder,
@@ -276,6 +287,7 @@ pub fn run() {
             storage::track_get_stats,
             storage::library_get_top_tracks,
             storage::library_get_all_track_stats,
+            storage::library_clear_history,
             #[cfg(debug_assertions)]
             storage::dev_reset_playlists,
             sync::sync_get_peers,
@@ -286,6 +298,7 @@ pub fn run() {
             sync::sync_accept_qr_pairing,
             sync::sync_known_devices,
             sync::sync_remove_device,
+            sync::sync_rename_device,
             sync::sync_playlist,
             sync::sync_playlist_branches,
             sync::sync_with_peer,

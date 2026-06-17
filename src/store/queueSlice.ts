@@ -1,5 +1,7 @@
 import { StateCreator } from 'zustand'
+import { invoke } from '@tauri-apps/api/core'
 import { RepeatMode, ShuffleMode } from './types'
+import type { TrackStats } from './types'
 import type { StoreState } from './index'
 
 // Start topping up before the queue fully drains so the UI always has upcoming tracks to display
@@ -14,6 +16,7 @@ export type QueueSlice = {
   shuffleHistory: string[] // recently played hashes used to avoid immediate repeats on refill
   shuffleIndex: number    // current position within shuffledQueue
   lookahead: number       // how many tracks to pre-generate per refill (default 20)
+  trackPlayCounts: Map<string, number> // hash → play_count; populated on demand for Weighted/Discovery
 
   // Selector: encapsulates the shuffle/linear branch so callers don't duplicate it
   currentHash: () => string | null
@@ -24,6 +27,7 @@ export type QueueSlice = {
   setShuffle: (mode: ShuffleMode) => void
   setRepeat: (mode: RepeatMode) => void
   refillShuffleQueue: () => void
+  removeUpcomingTrack: (hash: string) => void
 }
 
 // How many recent artists to consider when penalising same-artist picks
@@ -41,6 +45,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   shuffleHistory: [],
   shuffleIndex: 0,
   lookahead: 20,
+  trackPlayCounts: new Map(),
 
   currentHash: () => {
     const { queueTracks, currentIndex, shuffle, shuffledQueue, shuffleIndex } = get()
@@ -86,15 +91,47 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
     if (index >= 0 && index < queueTracks.length) set({ currentIndex: index })
   },
 
-  setShuffle: (mode) => {
+  setShuffle: async (mode) => {
+    const playing = get().currentHash()
     set({ shuffle: mode, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
-    if (mode !== ShuffleMode.Off) get().refillShuffleQueue()
+    if (mode === ShuffleMode.Weighted || mode === ShuffleMode.Discovery) {
+      try {
+        const stats = await invoke<[string, TrackStats][]>('library_get_all_track_stats')
+        set({ trackPlayCounts: new Map(stats.map(([h, s]) => [h, s.play_count])) })
+      } catch { /* fall back to treating all counts as 0 */ }
+    }
+    if (mode !== ShuffleMode.Off) {
+      get().refillShuffleQueue()
+      // Keep the currently playing track at shuffleIndex 0 so currentHash() is stable
+      if (playing) {
+        const q = get().shuffledQueue
+        const idx = q.indexOf(playing)
+        if (idx > 0) {
+          set({ shuffledQueue: [playing, ...q.filter(h => h !== playing)] })
+        } else if (idx === -1) {
+          set({ shuffledQueue: [playing, ...q] })
+        }
+      }
+    }
   },
 
   setRepeat: (mode) => set({ repeat: mode }),
 
+  removeUpcomingTrack: (hash) => {
+    const { shuffle, shuffledQueue, shuffleIndex, queueTracks, currentIndex } = get()
+    if (shuffle !== ShuffleMode.Off) {
+      const before = shuffledQueue.slice(0, shuffleIndex + 1)
+      const after  = shuffledQueue.slice(shuffleIndex + 1).filter(h => h !== hash)
+      set({ shuffledQueue: [...before, ...after] })
+    } else {
+      const before = queueTracks.slice(0, currentIndex + 1)
+      const after  = queueTracks.slice(currentIndex + 1).filter(h => h !== hash)
+      set({ queueTracks: [...before, ...after] })
+    }
+  },
+
   refillShuffleQueue: () => {
-    const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks } = get()
+    const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks, trackPlayCounts } = get()
     if (queueTracks.length === 0) return
 
     // Exclude recently played tracks; if history has consumed everything, start a fresh cycle
@@ -104,7 +141,32 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
 
     let picks: string[]
 
-    if (shuffle === ShuffleMode.Random) {
+    if (shuffle === ShuffleMode.Weighted) {
+      // weight = 1 / (play_count + 1): unheard tracks get weight 1, heard once get 0.5, etc.
+      const pool = [...candidates]
+      picks = []
+      const count = Math.min(lookahead, pool.length)
+      for (let i = 0; i < count; i++) {
+        const weights = pool.map(h => 1 / ((trackPlayCounts.get(h) ?? 0) + 1))
+        const total = weights.reduce((s, w) => s + w, 0)
+        let r = Math.random() * total
+        let idx = pool.length - 1
+        for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break } }
+        picks.push(pool[idx])
+        pool.splice(idx, 1)
+      }
+    } else if (shuffle === ShuffleMode.Discovery) {
+      // Tier candidates by play count; pick from the lowest-play tier first.
+      const minPlays = Math.min(...candidates.map(h => trackPlayCounts.get(h) ?? 0))
+      const tier = candidates.filter(h => (trackPlayCounts.get(h) ?? 0) === minPlays)
+      const pool = tier.length >= Math.min(lookahead, candidates.length) ? tier : candidates
+      picks = [...pool]
+      for (let i = picks.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[picks[i], picks[j]] = [picks[j], picks[i]]
+      }
+      picks = picks.slice(0, lookahead)
+    } else if (shuffle === ShuffleMode.Random) {
       // Fisher-Yates: uniform random permutation, no repeats within a full cycle
       picks = [...candidates]
       for (let i = picks.length - 1; i > 0; i--) {

@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "melomaniac"
-version = "0.1.0-alpha"
+version = "1.0.1-alpha"
 description = "An app for infinite music"
 authors = ["Soupa"]
 edition = "2024"
@@ -35,6 +35,8 @@ discord-rich-presence = "1"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 rodio = { version = "0.22", features = ["symphonia-all"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 tokio    = { version = "1", features = ["macros", "rt-multi-thread"] }

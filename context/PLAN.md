@@ -133,6 +133,13 @@
 - [x] Add artwork display in player and library views — gradient album art with per-pixel shine
 - [x] General visual polish pass — DaisyUI v5 migration, theme centralization, responsive carousel, mouse drag-reorder, play queue ordering
 - [x] Add F12 performance toggle for CPU and RAM usage via `sysinfo` integration
+- [x] Privacy Mode — blurs album art and clears iOS lock screen / Control Centre artwork when enabled
+- [x] Auto-updater with in-settings progress bar — checks for updates on launch; progress shown inline in SettingsModal
+- [x] Weighted shuffle mode — artist-spread weighted Fisher-Yates so tracks from the same artist are spread apart
+- [x] Discovery shuffle mode — deprioritises recently played tracks to surface less-heard library items
+- [x] Long-press radial menu for shuffle mode selection on mobile — hold shuffle button to choose between Off / Normal / Weighted / Discovery
+- [x] AVAudioSession interruption handling on iOS — resumes playback automatically after phone calls / Siri / other audio interruptions
+- [x] Named theme accent hue reset on selection — selecting a named theme pill now resets the custom hue slider to that theme's canonical hue
 
 ---
 
@@ -261,10 +268,6 @@ In debug builds all data lands in an isolated `dev/` subdirectory of the app dat
 - **Library**: every audio file in `tests/audio/` is ingested at startup (idempotent — same hash skips the write)
 - **DevelopmentOnly playlist**: `dev_seed_dev_playlist` (called from `lib.rs`) destroys and recreates a "DevelopmentOnly" playlist on every launch, seeded with all test-audio tracks. History does not accumulate — it always starts clean. This is the fixture for exercising the carousel and playback UI. Never appears in production builds.
 
-### Known bugs
-
-- ~~Rail git icon: clicking the git rail icon while the CommitGraph overlay is open doesn't reset the highlighted rail icon when navigating away~~ **Fixed**
-
 ### Remaining desktop UI work
 
 - **Android audio bridge** — ExoPlayer / Media3 implementation (see P0 section)
@@ -320,6 +323,8 @@ The tree schema has an `includes` array (reserved field). After design review, p
 
 ### Completed since 2026-05-09 (fourth pass)
 
+- **Play button shimmer fix** — Replaced `repeating-linear-gradient` with an oversized 200% `span` rotated 45 degrees using a standard `linear-gradient` to eliminate "weird tiling" grid lines while keeping the infinite shimmering animation seamless.
+
 - **A/B loop backend wired** — `playlist_get_tracks` returns committed `ab_start_ms`/`ab_end_ms` per track entry; `playlist_set_ab_loop` writes them to the tree blob with amend-style commits; `playlist_reorder_tracks` preserves them via hash→entry map. Frontend seeds `trackAbPoints` from the committed tree on every branch load (backend wins over localStorage). Clearing A/B (drag to full range) now sends `null` to erase the committed values; commit graph refreshes and a toast fires on write/clear.
 - **Playlist descriptions** — per-branch description stored in tree blob; `playlist_get_meta` reads from tree (not SQL cache); `playlist_set_description` commits and updates SQL cache; description shown in `PlaylistHeader` subtitle and editable in `PlaylistSettingsPanel`; `branchMeta` state in `DesktopApp` overrides SQL-cached description so each branch shows its own value
 - **Merge description conflicts** — `MergeBranchModal` fetches both branches' descriptions and shows a conflict chooser when they differ; `branch_merge` accepts `description_override: Option<String>`; `branchMeta` refreshes after merge
@@ -343,5 +348,8 @@ The tree schema has an `includes` array (reserved field). After design review, p
 3. **Push mechanism** — active "push my local changes to peer" path so sync is no longer poll-only
 4. **Android sync bridge** — `AndroidSyncBridge` implementation (mDNS + HTTP server)
 5. **Internet/cloud fallback** — Axum self-hosted server for sync when no LAN peer is reachable
+6. **Playlist creation on mobile** — `+` button in the Playlists tab to create a new playlist directly from the mobile UI
+7. **Track export to filesystem / iOS Files app** — export a track's CAS blob to a user-chosen location; use the iOS document picker / Files app integration
+8. **Android support** — full Android target: audio bridge, sync bridge, build pipeline, Play Store packaging
 
-*Last updated: 2026-05-22.*
+*Last updated: 2026-06-16.*

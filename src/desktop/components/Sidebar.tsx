@@ -362,13 +362,14 @@ interface LibrarySidebarProps {
   onOpenSettings: () => void;
   onAddToFolderClick: (item: Playlist) => void;
   onNewPlaylist: () => void;
+  hasUpdate?: boolean;
 }
 
 export default function LibrarySidebar({
   playlists, activePlaylistId, onSelectPlaylist,
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
   pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder, onDeleteFolder,
-  onOpenSettings, onAddToFolderClick, onNewPlaylist,
+  onOpenSettings, onAddToFolderClick, onNewPlaylist, hasUpdate,
 }: LibrarySidebarProps): JSX.Element {
   const [isDragging, setIsDragging] = useState(false);
   const [noFolderCount, setNoFolderCount] = useState(0);
@@ -396,7 +397,16 @@ export default function LibrarySidebar({
         <RailIcon icon={<IcoEditor size={14} />} active={activeRailItem === 'editor'} onClick={() => onRailChange('editor')} title="Editor — modify track metadata & MP3 tags" />
         <RailIcon icon={<IcoDiscover size={23} />} disabled title="Discover — AI-powered music discovery" />
         <div style={{ flex: 1 }} />
-        <RailIcon icon={<IcoSettings size={14} />} active={activeRailItem === 'settings'} onClick={onOpenSettings} title="Settings" />
+        <div style={{ position: 'relative' }}>
+          <RailIcon icon={<IcoSettings size={14} />} active={activeRailItem === 'settings'} onClick={onOpenSettings} title="Settings" />
+          {hasUpdate && (
+            <div style={{
+              position: 'absolute', top: 4, right: 4, width: 7, height: 7,
+              borderRadius: '50%', background: 'var(--accent)',
+              border: '1.5px solid var(--bg-0)', pointerEvents: 'none',
+            }} />
+          )}
+        </div>
       </div>
 
       {/* Library tree */}

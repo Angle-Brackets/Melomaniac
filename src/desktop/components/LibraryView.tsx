@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react';
+import DesktopLoader from './DesktopLoader';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
@@ -70,6 +71,7 @@ interface LibraryViewProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName, favorites }: LibraryViewProps): JSX.Element {
+  const [loading,           setLoading]           = useState(true);
   const [records,           setRecords]           = useState<TrackRecord[]>([]);
   const [strayHashes,       setStrayHashes]       = useState<Set<string>>(new Set());
   const [search,            setSearch]            = useState('');
@@ -99,9 +101,12 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
       invoke<TrackRecord[]>('library_get_all'),
       invoke<string[]>('library_get_stray_tracks'),
     ]);
-    setRecords(recs);
-    setStrayHashes(new Set(stray));
-    onTracksChanged(recs.map(trackRecordToTrack));
+    startTransition(() => {
+      setLoading(false);
+      setRecords(recs);
+      setStrayHashes(new Set(stray));
+      onTracksChanged(recs.map(trackRecordToTrack));
+    });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, []);
@@ -394,7 +399,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
       {/* ── Rows ── */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
-        {filtered.length === 0 && (
+        {loading && <DesktopLoader />}
+        {!loading && filtered.length === 0 && (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)', fontSize: 12, fontStyle: 'italic' }}>
             {records.length === 0
               ? 'No tracks yet — import files or download to get started'

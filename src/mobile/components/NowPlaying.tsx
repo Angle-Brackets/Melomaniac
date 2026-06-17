@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useStore } from '../../store';
-import { RepeatMode, ShuffleMode } from '../../store/types';
+import { LoopMode, RepeatMode, ShuffleMode } from '../../store/types';
 import type { TrackRecord, PlaylistRecord, PlaylistTrackRecord, BranchRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
@@ -10,18 +11,71 @@ import { positionMsRef, loopStateRef } from '../playerContext';
 import { Icons } from '../icons';
 import { MMArt, MMSheet, MMTabBar, MarqueeText } from './common';
 import type { TabId } from './common';
-import { useTrackAccents, withAlpha } from '../hooks/useTrackAccent';
+import { useTrackAccents, withAlpha, useGlowFade } from '../hooks/useTrackAccent';
+import { SHIMMER_DURATION, SPRING, SHEET_IN, FADE_SLOW, TRANSITION_FAST, TRANSITION_MED, QUEUE_STAGGER_MS, PLAYLIST_STAGGER_MS } from '../animations';
 
 function fmtMs(ms: number): string {
   const s = Math.floor(ms / 1000);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow }: { track: TrackRecord; size: number; glow: boolean }) {
+const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow, privacyMode }: {
+  track: TrackRecord; size: number; glow: boolean;
+  privacyMode?: boolean;
+}) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
-  return <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>;
+  const [a1, a2] = useTrackAccents(track.hash, track.artwork_hash);
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <MMArt src={artUrl ?? undefined} size={size} radius={14} glow={glow}/>
+      {privacyMode && (
+        <div style={{
+          position: 'absolute', inset: 0, borderRadius: 14, pointerEvents: 'none',
+          background: `linear-gradient(135deg, ${a1}, ${a2})`,
+          transition: 'none',
+        }}/>
+      )}
+    </div>
+  );
 });
 
+
+function SwipeToRemove({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) {
+  const [dx, setDx] = useState(0);
+  const [snapping, setSnapping] = useState(false);
+  const startXRef = useRef(0);
+
+  return (
+    <div
+      style={{ position: 'relative', overflow: 'hidden' }}
+      onTouchStart={e => { startXRef.current = e.touches[0].clientX; setSnapping(false); }}
+      onTouchMove={e => {
+        const d = e.touches[0].clientX - startXRef.current;
+        if (d > 0) setDx(Math.min(d, 120));
+      }}
+      onTouchEnd={() => {
+        if (dx > 80) onRemove();
+        setSnapping(true);
+        setDx(0);
+      }}
+    >
+      <div style={{
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%',
+        background: '#ef4444', display: 'flex', alignItems: 'center', paddingLeft: 16,
+        opacity: Math.min(1, dx / 60),
+      }}>
+        <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>Remove</span>
+      </div>
+      <div style={{
+        transform: `translateX(${dx}px)`,
+        transition: snapping ? `transform ${TRANSITION_FAST}` : 'none',
+        background: 'var(--bg-1)',
+      }}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function QueueSheetRow({ track }: { track: TrackRecord }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
@@ -29,8 +83,19 @@ function QueueSheetRow({ track }: { track: TrackRecord }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
       <MMArt src={artUrl ?? undefined} size={36} radius={6}/>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.title}</div>
-        {track.artist && <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{track.artist}</div>}
+        <MarqueeText
+          text={track.title}
+          active={true}
+          textStyle={{ fontSize: 13, fontWeight: 500, color: 'var(--text-0)' }}
+        />
+        {track.artist && (
+          <MarqueeText
+            text={track.artist}
+            active={true}
+            style={{ marginTop: 1 }}
+            textStyle={{ fontSize: 11, color: 'var(--text-2)' }}
+          />
+        )}
       </div>
     </div>
   );
@@ -116,33 +181,246 @@ function PlaylistSwitcherCard({ playlist, active, onSelect }: {
   );
 }
 
-function SecondaryBtn({ Icon, active, color = 'var(--accent)', onClick, size = 40 }: {
+function SecondaryBtn({ Icon, IconActive, active, color = 'var(--accent)', onClick, size = 40 }: {
   Icon: (p: { size?: number }) => React.ReactElement;
+  IconActive?: (p: { size?: number }) => React.ReactElement;
   active: boolean;
   color?: string;
   onClick?: () => void;
   size?: number;
 }) {
+  const Ico = (active && IconActive) ? IconActive : Icon;
   return (
     <button onClick={onClick} style={{
       width: size, height: size, borderRadius: size / 2,
-      background: active ? `${color}1a` : 'transparent',
+      background: 'transparent',
       border: 'none',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'pointer', color: active ? color : 'var(--text-1)',
     }}>
-      <Icon size={Math.round(size * 0.45)}/>
+      <Ico size={Math.round(size * 0.45)}/>
     </button>
+  );
+}
+
+// ── ShuffleRadialMenu ─────────────────────────────────────────────────────────
+
+const RADIAL_R = 62;          // px from button center to icon bubble center
+const LONG_PRESS_MS = 320;    // ms hold before menu opens
+const DEAD_ZONE_PX = 22;      // px from center — keep current mode highlighted
+
+// Full circle, 5 modes evenly spaced at 72° each. 0° = top, clockwise.
+const SHUFFLE_OPTS = [
+  { mode: ShuffleMode.Off,       label: 'Off',       angleDeg:   0 },
+  { mode: ShuffleMode.Random,    label: 'Random',    angleDeg:  72 },
+  { mode: ShuffleMode.Smart,     label: 'Smart',     angleDeg: 144 },
+  { mode: ShuffleMode.Weighted,  label: 'Weighted',  angleDeg: 216 },
+  { mode: ShuffleMode.Discovery, label: 'Discovery', angleDeg: 288 },
+] as const;
+
+function ShuffleModeIcon({ mode, size }: { mode: ShuffleMode; size: number }): React.ReactElement {
+  switch (mode) {
+    case ShuffleMode.Off:       return <Icons.shuffle size={size}/>;
+    case ShuffleMode.Random:    return <Icons.shuffleRandom size={size}/>;
+    case ShuffleMode.Smart:     return <Icons.shuffle size={size}/>;
+    case ShuffleMode.Weighted:  return <Icons.shuffleWeighted size={size}/>;
+    case ShuffleMode.Discovery: return <Icons.shuffleDiscovery size={size}/>;
+  }
+}
+
+function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
+  mode: ShuffleMode;
+  onSelect: (m: ShuffleMode) => void;
+  onTap: () => void;
+  size: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState<ShuffleMode>(mode);
+  // ref mirror so imperative window listeners always read the latest hovered value
+  const hoveredRef = useRef<ShuffleMode>(mode);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const centerRef = useRef({ x: 0, y: 0 });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didOpenRef = useRef(false);
+  const touchStartRef = useRef({ x: 0, y: 0 });
+
+  const active = mode !== ShuffleMode.Off;
+  const iconSize = Math.round(size * 0.45);
+  const CurrentIcon =
+    mode === ShuffleMode.Random    ? Icons.shuffleRandom :
+    mode === ShuffleMode.Weighted  ? Icons.shuffleWeighted :
+    mode === ShuffleMode.Discovery ? Icons.shuffleDiscovery :
+    Icons.shuffle;
+
+  const openMenu = () => {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    centerRef.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    hoveredRef.current = mode;
+    setHovered(mode);
+    setOpen(true);
+    didOpenRef.current = true;
+  };
+
+  // Touch events always belong to the element where touchstart fired (the button),
+  // so the overlay never receives them. We register listeners on window instead so
+  // the entire hold-drag-release gesture works without lifting the finger.
+  const handleTouchStart = (e: React.TouchEvent) => {
+    didOpenRef.current = false;
+    const t = e.touches[0];
+    touchStartRef.current = { x: t.clientX, y: t.clientY };
+
+    timerRef.current = setTimeout(openMenu, LONG_PRESS_MS);
+
+    const onMove = (ev: TouchEvent) => {
+      if (!didOpenRef.current) {
+        // Cancel long-press if finger moves too much before menu opens
+        const dx = ev.touches[0].clientX - touchStartRef.current.x;
+        const dy = ev.touches[0].clientY - touchStartRef.current.y;
+        if (dx * dx + dy * dy > 64) {
+          if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+        }
+        return;
+      }
+      ev.preventDefault();
+      const touch = ev.touches[0];
+      const { x: cx, y: cy } = centerRef.current;
+      const dist = Math.hypot(touch.clientX - cx, touch.clientY - cy);
+      if (dist < DEAD_ZONE_PX) {
+        hoveredRef.current = mode;
+        setHovered(mode);
+        return;
+      }
+      let closest: ShuffleMode = mode;
+      let minD = Infinity;
+      for (const opt of SHUFFLE_OPTS) {
+        const rad = (opt.angleDeg * Math.PI) / 180;
+        const ix = cx + Math.sin(rad) * RADIAL_R;
+        const iy = cy - Math.cos(rad) * RADIAL_R;
+        const d = Math.hypot(touch.clientX - ix, touch.clientY - iy);
+        if (d < minD) { minD = d; closest = opt.mode; }
+      }
+      hoveredRef.current = closest;
+      setHovered(closest);
+    };
+
+    const onEnd = () => {
+      if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+      window.removeEventListener('touchmove', onMove);
+      if (didOpenRef.current) {
+        didOpenRef.current = false;
+        setOpen(false);
+        const selected = hoveredRef.current;
+        if (selected !== mode) onSelect(selected);
+      }
+    };
+
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onEnd, { once: true });
+  };
+
+  const handleBtnClick = () => {
+    if (didOpenRef.current) { didOpenRef.current = false; return; }
+    onTap();
+  };
+
+  const { x: cx, y: cy } = centerRef.current;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onTouchStart={handleTouchStart}
+        onClick={handleBtnClick}
+        style={{
+          width: size, height: size, borderRadius: size / 2,
+          background: 'transparent',
+          border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', color: active ? 'var(--accent)' : 'var(--text-1)',
+        }}
+      >
+        <CurrentIcon size={iconSize}/>
+      </button>
+
+      {open && createPortal(
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.5)',
+          pointerEvents: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none' as React.CSSProperties['WebkitUserSelect'],
+        }}>
+          {/* Label above the shuffle button — only for the hovered mode */}
+          {(() => {
+            const hovOpt = SHUFFLE_OPTS.find(o => o.mode === hovered);
+            if (!hovOpt) return null;
+            const labelW = 160;
+            const labelX = Math.max(8, Math.min(window.innerWidth - labelW - 8, cx - labelW / 2));
+            const labelY = Math.max(16, cy - RADIAL_R - 48);
+            return (
+              <div style={{
+                position: 'absolute',
+                left: labelX,
+                top: labelY,
+                width: labelW,
+                textAlign: 'center',
+                fontSize: 13,
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: '#fff',
+                pointerEvents: 'none',
+              }}>
+                {hovOpt.label}
+              </div>
+            );
+          })()}
+
+          {/* Bubbles */}
+          {SHUFFLE_OPTS.map(opt => {
+            const rad = (opt.angleDeg * Math.PI) / 180;
+            const ix = cx + Math.sin(rad) * RADIAL_R;
+            const iy = cy - Math.cos(rad) * RADIAL_R;
+            const isHov = hovered === opt.mode;
+            const isCur = mode === opt.mode;
+            const bubbleSize = isHov ? 54 : 44;
+            const margin = 8;
+            const bx = Math.max(bubbleSize / 2 + margin, Math.min(window.innerWidth  - bubbleSize / 2 - margin, ix));
+            const by = Math.max(bubbleSize / 2 + margin, Math.min(window.innerHeight - bubbleSize / 2 - margin, iy));
+            return (
+              <div key={opt.mode} style={{
+                position: 'absolute',
+                left: bx - bubbleSize / 2,
+                top: by - bubbleSize / 2,
+                width: bubbleSize, height: bubbleSize,
+                borderRadius: bubbleSize / 2,
+                background: isHov ? 'var(--accent)' : isCur ? 'color-mix(in srgb, var(--accent) 53%, transparent)' : 'rgba(255,255,255,0.10)',
+                border: `1.5px solid ${isHov || isCur ? 'var(--accent)' : 'rgba(255,255,255,0.18)'}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.1s ease',
+                color: isHov ? '#fff' : isCur ? '#fff' : 'rgba(255,255,255,0.55)',
+                boxShadow: isHov ? '0 0 16px color-mix(in srgb, var(--accent) 53%, transparent)' : 'none',
+              }}>
+                <ShuffleModeIcon mode={opt.mode} size={isHov ? 18 : 15}/>
+              </div>
+            );
+          })}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
 const COVERFLOW_WINDOW = 4; // cards mounted on each side of the visible center
 
-function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
+function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200, privacyMode }: {
   tracks: TrackRecord[];
   activeIndex: number;
   onBrowse?: (idx: number) => void;
   size?: number;
+  privacyMode?: boolean;
 }) {
   const wrapRef       = useRef<HTMLDivElement>(null);
   const cardRefs      = useRef<(HTMLDivElement | null)[]>([]);
@@ -297,7 +575,7 @@ function MMCoverflow({ tracks, activeIndex, onBrowse, size = 200 }: {
               zIndex: hidden ? undefined : Math.round(10 - abs),
             }}
           >
-            <CoverflowCard track={track} size={size} glow={i === windowCenter}/>
+            <CoverflowCard track={track} size={size} glow={i === windowCenter} privacyMode={privacyMode}/>
           </div>
         );
       })}
@@ -325,8 +603,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const setShuffle         = useStore(s => s.setShuffle);
   const setRepeat          = useStore(s => s.setRepeat);
   const shuffledQueue      = useStore(s => s.shuffledQueue);
-  const shuffleIndex       = useStore(s => s.shuffleIndex);
-  const toggleFavorite     = useStore(s => s.toggleFavorite);
+  const shuffleIndex          = useStore(s => s.shuffleIndex);
+  const removeUpcomingTrack   = useStore(s => s.removeUpcomingTrack);
+  const toggleFavorite        = useStore(s => s.toggleFavorite);
   const playlists          = useStore(s => s.playlists);
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
   const setCurrentPlaylist = useStore(s => s.setCurrentPlaylist);
@@ -397,9 +676,21 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     inactivityRef.current = setTimeout(() => setListScrolled(false), 2500);
   }, []);
 
+  // ── Privacy mode ──────────────────────────────────────────────────────────
+  const [privacyMode, setPrivacyMode] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}').privacyMode ?? false; } catch { return false; }
+  });
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail?.privacyMode === 'boolean') setPrivacyMode(detail.privacyMode);
+    };
+    window.addEventListener('mm-settings-change', handler);
+    return () => window.removeEventListener('mm-settings-change', handler);
+  }, []);
+
   // ── AB loop state ─────────────────────────────────────────────────────────
-  type LoopMode = 'off' | 'one' | 'ab';
-  const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  const [loopMode, setLoopMode] = useState<LoopMode>(() => loopStateRef.loopMode);
   // abA and abB are fractional positions (0.0–1.0) of total duration, not ms.
   // This makes them resolution-independent and trivial to render on the seek bar.
   const [abA, setAbA] = useState(0);
@@ -558,7 +849,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // currentIndex only changes via advance/retreat/explicit play so auto-advance stays correct.
 
   const handleShuffle = () => {
-    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random] as const;
+    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery] as const;
     setShuffle(cycle[(cycle.indexOf(shuffle) + 1) % cycle.length]);
   };
 
@@ -590,9 +881,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   const handleLoopCycle = () => {
     setLoopMode(prev => {
-      const next: LoopMode = prev === 'off' ? 'one' : prev === 'one' ? 'ab' : 'off';
+      const next = prev === LoopMode.Off ? LoopMode.One : prev === LoopMode.One ? LoopMode.AB : LoopMode.Off;
       loopStateRef.loopMode = next;
-      setRepeat(next === 'one' ? RepeatMode.One : RepeatMode.None);
+      setRepeat(next === LoopMode.One ? RepeatMode.One : RepeatMode.None);
       return next;
     });
   };
@@ -610,7 +901,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     // on mobile where the touch easily leaves the narrow seek bar.
     e.currentTarget.setPointerCapture(e.pointerId);
     const pct = getSeekPct(e.clientX);
-    if (loopMode === 'ab') {
+    if (loopMode === LoopMode.AB) {
       if (Math.abs(pct - abA) < 0.05) { abDragging.current = 'A'; return; }
       if (Math.abs(pct - abB) < 0.05) { abDragging.current = 'B'; return; }
     }
@@ -667,6 +958,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     browseTrack?.artwork_hash ?? currentTrack?.artwork_hash ?? null,
   );
   const accent = accent1;
+  const { slots: haloSlots, activeSlot: haloActive } = useGlowFade([accent1, accent2]);
   const nextTrack: TrackRecord | null = shuffle !== ShuffleMode.Off
     ? (shuffledQueue[shuffleIndex + 1] ? tracks.find(t => t.hash === shuffledQueue[shuffleIndex + 1]) ?? null : null)
     : (queueRecords[activeListIndex + 1] ?? null);
@@ -790,13 +1082,17 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-1)', color: 'var(--text-0)', overflow: 'hidden' }}>
-      {/* Halo — centered behind the album art, not off at the top */}
-      <div style={{
-        position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)',
-        width: 560, height: 560, borderRadius: '50%',
-        background: `radial-gradient(circle, ${withAlpha(accent1, 0.40)} 0%, ${withAlpha(accent2, 0.18)} 42%, transparent 68%)`,
-        filter: 'blur(40px)', pointerEvents: 'none',
-      }}/>
+      {/* Halo — two slots cross-fade so the glow smoothly transitions between tracks */}
+      {haloSlots.map((slot, i) => (
+        <div key={i} style={{
+          position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)',
+          width: 560, height: 560, borderRadius: '50%',
+          background: `radial-gradient(circle, ${withAlpha(slot[0], 0.40)} 0%, ${withAlpha(slot[1], 0.18)} 42%, transparent 68%)`,
+          filter: 'blur(40px)', pointerEvents: 'none',
+          opacity: haloActive === i ? 1 : 0,
+          transition: `opacity ${FADE_SLOW}`,
+        }}/>
+      ))}
 
       <div style={{ position: 'relative', zIndex: 5, height: '100%', display: 'flex', flexDirection: 'column', paddingTop: 'calc(16px + var(--safe-top))', overflow: 'hidden', paddingBottom: `calc(var(--tab-h) + ${queueRecords.length > 0 ? QUEUE_HEADER_H + (queueExpanded ? QUEUE_LIST_H : 0) : 0}px)`, transition: 'padding-bottom 0.4s cubic-bezier(0.22,1,0.36,1)' }}>
 
@@ -832,12 +1128,14 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           marginTop: 6, marginBottom: 8,
           transition: 'max-height 0.4s cubic-bezier(0.22,1,0.36,1)',
           overflow: 'visible', display: 'flex', alignItems: 'center',
+          position: 'relative',
         }}>
           <MMCoverflow
             tracks={coverflowItems}
             activeIndex={activeListIndex >= 0 ? Math.min(activeListIndex, coverflowItems.length - 1) : Math.min(currentIndex, Math.max(0, coverflowItems.length - 1))}
             onBrowse={setBrowseIndex}
             size={queueExpanded ? 130 : 260}
+            privacyMode={privacyMode}
           />
         </div>
 
@@ -854,10 +1152,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               text={`${browseTrack.artist}${browseTrack.album ? ` · ${browseTrack.album}` : ''}`}
               active={true}
               style={{ marginTop: 4, textAlign: 'center' }}
-              textStyle={{ fontSize: 13, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', textAlign: 'center' }}
+              textStyle={{ fontSize: 13, color: 'var(--text-0)', textAlign: 'center' }}
             />
           )}
-          {loopMode === 'ab' && duration_ms > 0 && (
+          {loopMode === LoopMode.AB && duration_ms > 0 && (
             // Multiply fraction by duration_ms here — the only place display needs absolute ms.
             <div style={{ fontSize: 10.5, color: accent, marginTop: 3, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.05 }}>
               A·B {fmtMs(abA * duration_ms)} → {fmtMs(abB * duration_ms)}
@@ -872,10 +1170,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             onPointerDown={handleSeekPointerDown}
             onPointerMove={handleSeekPointerMove}
             onPointerUp={handleSeekPointerUp}
-            style={{ position: 'relative', height: 36, display: 'flex', alignItems: 'center', cursor: loopMode === 'ab' ? 'default' : 'pointer', touchAction: 'none' }}
+            style={{ position: 'relative', height: 36, display: 'flex', alignItems: 'center', cursor: loopMode === LoopMode.AB ? 'default' : 'pointer', touchAction: 'none' }}
           >
             <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'var(--bg-3)', position: 'relative', overflow: 'visible' }}>
-              {loopMode === 'ab' && (
+              {loopMode === LoopMode.AB && (
                 <div style={{
                   position: 'absolute', left: `${abA * 100}%`, width: `${(abB - abA) * 100}%`,
                   top: 0, bottom: 0, borderRadius: 2,
@@ -887,7 +1185,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 background: `linear-gradient(90deg, ${accent1}, ${accent2})`, borderRadius: 2,
                 boxShadow: `0 0 12px ${withAlpha(accent1, 0.5)}`,
               }}/>
-              {loopMode !== 'ab' && (
+              {loopMode !== LoopMode.AB && (
                 <div ref={thumbRef} style={{
                   position: 'absolute', left: '0%', top: '50%',
                   width: 14, height: 14, transform: 'translate(-50%,-50%)',
@@ -895,7 +1193,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   boxShadow: `0 0 10px ${withAlpha(accent1, 0.7)}, 0 2px 4px rgba(0,0,0,0.5)`,
                 }}/>
               )}
-              {loopMode === 'ab' && (
+              {loopMode === LoopMode.AB && (
                 <>
                   <div style={{
                     position: 'absolute', left: `${abA * 100}%`, top: '50%',
@@ -925,29 +1223,33 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
         {/* controls — two-row when tracklist collapsed, single-row when expanded to avoid overflow */}
         {(() => {
-          const ShuffleIco = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
-          const LoopIco = loopMode === 'ab' ? Icons.ab : loopMode === 'one' ? Icons.loopOne : Icons.loop;
+          const LoopIco     = loopMode === LoopMode.AB ? Icons.ab         : loopMode === LoopMode.One ? Icons.loopOne     : Icons.loop;
+          const LoopIcoFill = loopMode === LoopMode.AB ? Icons.abFill     : loopMode === LoopMode.One ? Icons.loopOneFill : Icons.loopFill;
           if (queueExpanded) {
             // Compact single row matching original layout
             const tBtn = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
               <button onClick={onClick} style={{ width: 44, height: 44, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 22, flexShrink: 0 }}>{children}</button>
             );
             return (
-              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)', flexShrink: 0 }}>
-                <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={34}/>
-                <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
+              <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: `all ${SPRING}`, flexShrink: 0 }}>
+                <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={34}/>
+                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
                 {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
                   width: 58, height: 58, borderRadius: 29, border: 'none', flexShrink: 0,
-                  background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+                  background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`,
+                  position: 'relative', overflow: 'hidden',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 6px 18px ${withAlpha(accent1, 0.45)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  boxShadow: `0 0 24px ${withAlpha(accent1, 0.75)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
-                  {isBrowsing ? <Icons.play size={24}/> : isPlaying ? <Icons.pause size={24}/> : <Icons.play size={24}/>}
+                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, animationPlayState: isPlaying ? 'running' : 'paused', pointerEvents: 'none' }} />
+                  <span style={{ position: 'relative', zIndex: 1, display: 'flex' }}>
+                    {isBrowsing ? <Icons.play size={24}/> : isPlaying ? <Icons.pause size={24}/> : <Icons.play size={24}/>}
+                  </span>
                 </button>
                 {tBtn(handleNext, <Icons.next size={22} stroke="var(--text-0)"/>)}
-                <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={34}/>
+                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={34}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={34}/>
               </div>
             );
@@ -956,24 +1258,28 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             <button onClick={onClick} style={{ width: 52, height: 52, background: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderRadius: 26, flexShrink: 0 }}>{children}</button>
           );
           return (
-            <div style={{ padding: '4px 16px 8px', transition: 'all 0.35s cubic-bezier(0.22,1,0.36,1)', flexShrink: 0 }}>
+            <div style={{ padding: '4px 16px 8px', transition: `all ${SPRING}`, flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
                 {tPrimary(handlePrev, <Icons.prev size={28} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
                   width: 72, height: 72, borderRadius: 36, border: 'none', flexShrink: 0,
-                  background: `linear-gradient(135deg, ${accent1}, ${accent2})`,
+                  background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`,
+                  position: 'relative', overflow: 'hidden',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 10px 28px ${withAlpha(accent1, 0.5)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                  boxShadow: `0 0 36px ${withAlpha(accent1, 0.8)}, inset 0 1px 0 rgba(255,255,255,0.25)`,
                   color: '#fff', cursor: 'pointer',
                 }}>
-                  {isBrowsing ? <Icons.play size={30}/> : isPlaying ? <Icons.pause size={30}/> : <Icons.play size={30}/>}
+                  <span style={{ position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100, marginLeft: -500, marginTop: -50, background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2} 50px, ${accent1} 100px)`, animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`, animationPlayState: isPlaying ? 'running' : 'paused', pointerEvents: 'none' }} />
+                  <span style={{ position: 'relative', zIndex: 1, display: 'flex' }}>
+                    {isBrowsing ? <Icons.play size={30}/> : isPlaying ? <Icons.pause size={30}/> : <Icons.play size={30}/>}
+                  </span>
                 </button>
                 {tPrimary(handleNext, <Icons.next size={28} stroke="var(--text-0)"/>)}
               </div>
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 28px' }}>
-                <SecondaryBtn Icon={ShuffleIco} active={shuffle !== ShuffleMode.Off} onClick={handleShuffle} size={36}/>
-                <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
-                <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={36}/>
+                <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={36}/>
+                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
+                <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={36}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
               </div>
             </div>
@@ -989,8 +1295,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           <div style={{
             position: 'absolute', left: 0, right: 0,
             bottom: listScrolled ? 0 : 'var(--tab-h)',
-            transition: 'bottom 0.35s ease',
-            zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
+            transition: `bottom ${SPRING}`,
+            zIndex: 10, background: 'var(--bg-0)',
+            borderTopLeftRadius: 20, borderTopRightRadius: 20,
+            border: '0.5px solid var(--border-1)', borderBottom: 'none',
           }}>
             {/* Queue header — drag up/down to expand/collapse; tap to toggle. */}
             <div
@@ -1041,13 +1349,13 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                       )}
                     </div>
                     <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
-                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : ''}
+                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : shuffle === ShuffleMode.Weighted ? ' · weighted' : shuffle === ShuffleMode.Discovery ? ' · discovery' : ''}
                     </span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {!queueExpanded && nextTrack && <NextTrackArt track={nextTrack}/>}
-                  <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.25s ease' }}>
+                  <div style={{ display: 'flex', transform: queueExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: `transform ${TRANSITION_MED}` }}>
                     <Icons.chevDown size={13} stroke="var(--text-3)"/>
                   </div>
                 </div>
@@ -1093,7 +1401,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
       <MMTabBar active="now" onTab={onTab} style={{
         transform: listScrolled ? 'translateY(var(--tab-h))' : 'translateY(0)',
-        transition: 'transform 0.35s ease',
+        transition: `transform ${SPRING}`,
       }}/>
 
       {/* Drag ghost */}
@@ -1127,11 +1435,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
         return (
           <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
             <div onClick={() => setShowQueue(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" expandable animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowQueue(false)}>
+            <MMSheet title="Queue" subtitle={shuffle !== ShuffleMode.Off ? 'Shuffle on' : undefined} height="55%" expandable animStyle={{ animation: `mmSheetUp ${SHEET_IN} both` }} onClose={() => setShowQueue(false)}>
               {nowPlaying && (
                 <>
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginBottom: 2 }}>Now Playing</div>
-                  <div style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: '0ms' }}>
+                  <div style={{ animation: `mmFadeSlide ${TRANSITION_MED} both`, animationDelay: '0ms' }}>
                     <QueueSheetRow track={nowPlaying}/>
                   </div>
                 </>
@@ -1140,8 +1448,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 <>
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Coming Up</div>
                   {comingUp.map((t, i) => (
-                    <div key={t.hash} style={{ animation: 'mmFadeSlide 0.25s ease both', animationDelay: `${i * 40}ms` }}>
-                      <QueueSheetRow track={t}/>
+                    <div key={t.hash} style={{ animation: `mmFadeSlide ${TRANSITION_MED} both`, animationDelay: `${i * QUEUE_STAGGER_MS}ms` }}>
+                      <SwipeToRemove onRemove={() => removeUpcomingTrack(t.hash)}>
+                        <QueueSheetRow track={t}/>
+                      </SwipeToRemove>
                     </div>
                   ))}
                 </>
@@ -1162,7 +1472,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             title="Switch Branch"
             subtitle={`${currentPlaylist.branches.length} branch${currentPlaylist.branches.length !== 1 ? 'es' : ''}`}
             height="55%"
-            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+            animStyle={{ animation: `mmSheetUp ${SHEET_IN} both` }}
             onClose={() => setShowBranchSheet(false)}
           >
             <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1187,8 +1497,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                       padding: '11px 4px',
                       borderBottom: i < currentPlaylist.branches.length - 1 ? '0.5px solid var(--border-0)' : 'none',
                       cursor: 'pointer',
-                      animation: `mmFadeSlide 0.22s ease both`,
-                      animationDelay: `${i * 35}ms`,
+                      animation: `mmFadeSlide ${TRANSITION_MED} both`,
+                      animationDelay: `${i * PLAYLIST_STAGGER_MS}ms`,
                     }}
                   >
                     <div style={{
@@ -1223,7 +1533,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       {showSwitcher && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
           <div onClick={() => setShowSwitcher(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
-          <MMSheet title="Switch Source" subtitle={`${playlists.length} playlists`} height="70%" animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }} onClose={() => setShowSwitcher(false)}>
+          <MMSheet title="Switch Source" subtitle={`${playlists.length} playlists`} height="70%" animStyle={{ animation: `mmSheetUp ${SHEET_IN} both` }} onClose={() => setShowSwitcher(false)}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* Library option */}
               <div onClick={() => {

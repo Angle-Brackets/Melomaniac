@@ -2,8 +2,9 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
+import { Density } from '../types';
 import { IcoDragHandle, IcoDots } from '../icons';
-import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause, FiSearch, FiX } from 'react-icons/fi';
+import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause, FiSearch, FiX, FiChevronDown } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 
 const HEADERS = ['', '#', '', 'Title', 'Artist', 'Album', 'Commit', 'Added', 'Length', ''];
@@ -27,14 +28,15 @@ interface TrackListProps {
   onAddTracks?: () => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
-  density?: 'compact' | 'normal' | 'relaxed';
+  density?: Density;
   favorites?: Set<string>;
+  onCollapse?: () => void;
 }
 
 export default function TrackList({
   tracks, activeTrackId, loadedHash, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
-  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = 'relaxed', favorites,
+  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = Density.Relaxed, favorites, onCollapse,
 }: TrackListProps): JSX.Element {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -140,11 +142,22 @@ export default function TrackList({
           onChange={e => setSearch(e.target.value)}
           placeholder="Search tracks…"
           className="flex-1 bg-transparent outline-none text-mm-t1"
-          style={{ fontSize: 11, fontFamily: "'Outfit', sans-serif" }}
+          style={{ fontSize: 11, fontFamily: "'Outfit', sans-serif", minWidth: 0 }}
         />
         {search && (
-          <button onClick={() => setSearch('')} style={{ color: 'var(--text-3)', display: 'flex' }}>
+          <button onClick={() => setSearch('')} style={{ color: 'var(--text-3)', display: 'flex', flexShrink: 0 }}>
             <FiX size={11} />
+          </button>
+        )}
+        {onCollapse && (
+          <button
+            onClick={onCollapse}
+            title="Collapse track list"
+            style={{ color: 'var(--text-2)', display: 'flex', flexShrink: 0, padding: '2px 4px', cursor: 'pointer', lineHeight: 1 }}
+            onMouseEnter={e => ((e.currentTarget as HTMLElement).style.color = 'var(--text-0)')}
+            onMouseLeave={e => ((e.currentTarget as HTMLElement).style.color = 'var(--text-2)')}
+          >
+            <FiChevronDown size={15} />
           </button>
         )}
       </div>

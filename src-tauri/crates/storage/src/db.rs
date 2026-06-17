@@ -786,6 +786,13 @@ impl Database {
         Ok(())
     }
 
+    /// Erase all play and skip history.
+    pub async fn clear_listening_history(&self) -> Result<(), StorageError> {
+        sqlx::query("DELETE FROM plays").execute(&self.pool).await?;
+        sqlx::query("DELETE FROM skips").execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Return play/skip aggregate stats for a single track.
     pub async fn get_track_stats(&self, hash: &str) -> Result<TrackStats, StorageError> {
         let play_count: i64 = sqlx::query_scalar(

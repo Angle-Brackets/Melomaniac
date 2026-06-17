@@ -34,15 +34,15 @@ export const createPlaylistSlice: StateCreator<PlaylistSlice> = (set) => ({
   currentBranchName: 'main',
   playingBranchName: 'main',
   branchByPlaylist:  loadBranchMap(),
-  playlistStatus:    'idle',
+  playlistStatus:    LoadStatus.Idle,
 
   loadPlaylists: async () => {
-    set({ playlistStatus: 'loading' })
+    set({ playlistStatus: LoadStatus.Loading })
     try {
       const playlists = await invoke<PlaylistRecord[]>('playlist_get_all')
-      set({ playlists, playlistStatus: 'ready' })
+      set({ playlists, playlistStatus: LoadStatus.Ready })
     } catch {
-      set({ playlistStatus: 'error' })
+      set({ playlistStatus: LoadStatus.Error })
     }
   },
 

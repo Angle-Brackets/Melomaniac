@@ -1,13 +1,18 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import type { Track } from '../data';
 import type { ShuffleMode } from '../types';
+import { LoopMode } from '../types';
 import {
   IcoPlay, IcoPause, IcoNext, IcoPrev,
-  IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue, IcoDice,
+  IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue,
+  IcoDumbbell, IcoDiscovery,
 } from '../icons';
 import { FiLayers } from 'react-icons/fi';
+import { withAlpha } from '../../shared/artworkAccents';
+import { SHIMMER_DURATION, TRANSITION_FAST, TRANSITION_GLOW } from '../animations';
+import ScrollText from './ScrollText';
 
-export type LoopMode = 'off' | 'one' | 'ab';
+export type { LoopMode };
 
 // Pure helper — defined at module level so useEffect deps stay stable
 function fmtMs(ms: number) {
@@ -24,25 +29,55 @@ interface PlayerControlsProps {
   loopMode:        LoopMode; onLoopCycle: () => void;
   isShuffle:       boolean; shuffleMode: ShuffleMode; onShuffle: () => void;
   showQueue:       boolean; onQueueToggle: () => void;
+  bigPicture:      boolean; onBigPicture: () => void;
   onSkipNext?:     () => void;
   onSkipPrev?:     () => void;
   onSeek:          (pct: number) => void;
   volume:          number;  onVolume:    (vol: number) => void;
   abA:             number;  abB:         number;
   onAbChange:      (handle: 'A' | 'B', val: number) => void;
+  artworkAccents?: [string, string];
+  /** False when the user has browsed to a different track than the one loaded/playing. */
+  isActiveLoaded:  boolean;
+}
+
+function CtrlBtn({ active = false, onClick, title, children }: {
+  active?: boolean; onClick?: () => void; title?: string; children: React.ReactNode;
+}) {
+  const [hov, setHov] = useState(false);
+  const btn = (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 30, height: 30, borderRadius: 6, flexShrink: 0,
+        background: 'none', border: 'none', cursor: 'pointer', padding: 0, outline: 'none',
+        color: active ? 'var(--accent)' : hov ? 'var(--text-0)' : 'var(--text-2)',
+        transition: `color ${TRANSITION_FAST}`,
+      }}
+    >
+      {children}
+    </button>
+  );
+  if (!title) return btn;
+  return <div className="tooltip tooltip-top" data-tip={title} style={{ flexShrink: 0, display: 'flex' }}>{btn}</div>;
 }
 
 function ShuffleIcon({ isShuffle, mode, size = 16 }: { isShuffle: boolean; mode: ShuffleMode; size?: number }) {
   if (!isShuffle || mode === 'fisher-yates') return <IcoShuffle size={size} />;
-  if (mode === 'balanced') return <FiLayers size={size} />;
-  return <IcoDice size={size} />;
+  if (mode === 'weighted')  return <IcoDumbbell size={size} />;
+  if (mode === 'discovery') return <IcoDiscovery size={size} />;
+  return <FiLayers size={size} />;
 }
 
 function shuffleLabel(isShuffle: boolean, mode: ShuffleMode) {
   if (!isShuffle)              return 'Shuffle: Off — click for True Shuffle';
-  if (mode === 'fisher-yates') return 'True Shuffle — click for Balanced';
-  if (mode === 'balanced')     return 'Balanced Shuffle — click for Random';
-  return 'Random — click to turn off';
+  if (mode === 'fisher-yates') return 'True Shuffle — click for Smart';
+  if (mode === 'smart')        return 'Smart Shuffle — click for Weighted';
+  if (mode === 'weighted')     return 'Weighted Shuffle — click for Discovery';
+  return 'Discovery Shuffle — click to turn off';
 }
 
 function Tip({ tip, children }: { tip: string; children: React.ReactNode }) {
@@ -57,34 +92,57 @@ export default function PlayerControls({
   track, positionMsRef, durationMs,
   isPlaying, onPlayPause, isFav, onFav,
   loopMode, onLoopCycle, isShuffle, shuffleMode, onShuffle,
-  showQueue, onQueueToggle,
+  showQueue, onQueueToggle, bigPicture, onBigPicture,
   onSkipNext, onSkipPrev,
   onSeek, volume, onVolume,
   abA, abB, onAbChange,
+  artworkAccents,
+  isActiveLoaded,
 }: PlayerControlsProps): JSX.Element {
+  const [accent1, accent2] = artworkAccents ?? ['', ''];
+  const playBtnStyle = accent1 ? {
+    background: accent1,
+    boxShadow: `0 0 18px ${withAlpha(accent1, 0.55)}, 0 2px 8px rgba(0,0,0,0.4)`,
+    border: 'none',
+    color: '#fff',
+  } : undefined;
+  const seekFillColor = accent1
+    ? `linear-gradient(90deg, ${accent1}, ${accent2 || accent1})`
+    : 'var(--accent)';
   const seekRef  = useRef<HTMLDivElement>(null);
   const volRef   = useRef<HTMLDivElement>(null);
   // DOM refs for rAF-driven updates (no React re-render needed)
-  const seekFillRef = useRef<HTMLDivElement>(null);
-  const posTextRef  = useRef<HTMLSpanElement>(null);
-  const rafRef      = useRef<number>(0);
+  const seekFillRef  = useRef<HTMLDivElement>(null);
+  const seekThumbRef = useRef<HTMLDivElement>(null);
+  const posTextRef   = useRef<HTMLSpanElement>(null);
+  const rafRef       = useRef<number>(0);
 
-  const seekingRef  = useRef(false);
-  const volumingRef = useRef(false);
-  const abDragging  = useRef<'A' | 'B' | null>(null);
-  const abActive    = loopMode === 'ab';
+  const seekingRef       = useRef(false);
+  const volumingRef      = useRef(false);
+  const abDragging       = useRef<'A' | 'B' | null>(null);
+  const seekHoveredRef   = useRef(false);
+  const isActiveLoadedRef = useRef(isActiveLoaded);
+  const abActive         = loopMode === LoopMode.AB;
 
-  // rAF loop — updates seek fill and time text directly without React re-renders
+  useEffect(() => { isActiveLoadedRef.current = isActiveLoaded; }, [isActiveLoaded]);
+
+  // rAF loop — updates seek fill and time text directly without React re-renders.
+  // When the browsed track differs from the playing track, show 0 unless the
+  // user hovers the seek bar (hover = peek at the live position of the playing song).
   useEffect(() => {
     const tick = () => {
-      if (durationMs > 0) {
-        const posMs = positionMsRef.current;
-        const pct = Math.min(1, Math.max(0, posMs / durationMs));
-        if (seekFillRef.current) seekFillRef.current.style.width = `${pct * 100}%`;
-        if (posTextRef.current)  posTextRef.current.textContent  = fmtMs(posMs);
+      const showLive = isActiveLoadedRef.current || seekHoveredRef.current;
+      const refDur   = durationMs;
+      if (refDur > 0) {
+        const posMs = showLive ? positionMsRef.current : 0;
+        const pct   = showLive ? Math.min(1, Math.max(0, posMs / refDur)) : 0;
+        if (seekFillRef.current)  seekFillRef.current.style.width = `${pct * 100}%`;
+        if (seekThumbRef.current) seekThumbRef.current.style.left = `${pct * 100}%`;
+        if (posTextRef.current)   posTextRef.current.textContent  = showLive ? fmtMs(posMs) : '0:00';
       } else {
-        if (seekFillRef.current) seekFillRef.current.style.width = '0%';
-        if (posTextRef.current)  posTextRef.current.textContent  = '0:00';
+        if (seekFillRef.current)  seekFillRef.current.style.width = '0%';
+        if (seekThumbRef.current) seekThumbRef.current.style.left = '0%';
+        if (posTextRef.current)   posTextRef.current.textContent  = '0:00';
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -113,20 +171,23 @@ export default function PlayerControls({
   }, [onSeek, onVolume, onAbChange, abA, abB]);
 
   const loopTip =
-    loopMode === 'off' ? 'Loop: Off — click for Single Track' :
-    loopMode === 'one' ? 'Loop: Single Track — click for A·B' :
+    loopMode === LoopMode.Off ? 'Loop: Off — click for Single Track' :
+    loopMode === LoopMode.One ? 'Loop: Single Track — click for A·B' :
     'Loop: A·B — drag handles on seek bar';
 
   return (
     <div className="shrink-0">
       {/* Track info */}
-      <div className="text-center px-5 pt-1.5 pb-0.5">
-        <p className="text-[13px] font-semibold text-mm-t0">
-          {track ? track.title : '—'}
-        </p>
-        <p className="text-[11px] text-mm-t2 mt-px">
-          {track ? `${track.artist} · ${track.album}` : 'Select a track and press play'}
-        </p>
+      <div className="px-5 pt-1.5 pb-0.5">
+        <ScrollText
+          text={track ? track.title : '—'}
+          textStyle={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}
+        />
+        <ScrollText
+          text={track ? `${track.artist} · ${track.album}` : 'Select a track and press play'}
+          style={{ marginTop: 1 }}
+          textStyle={{ fontSize: 11, color: 'var(--text-2)', textAlign: 'center', fontFamily: "'Outfit', sans-serif" }}
+        />
         {abActive && durationMs > 0 && (
           <p className="font-mono text-[10px] text-mm-accent-lit mt-0.5">
             A·B Loop: {fmtMs(abA * durationMs)} → {fmtMs(abB * durationMs)}
@@ -137,51 +198,55 @@ export default function PlayerControls({
       {/* Controls — left | play | right */}
       <div className="grid grid-cols-[1fr_auto_1fr] items-center px-6 py-1.5">
         <div className="flex items-center gap-2 justify-end">
-          <Tip tip="Queue">
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${showQueue ? 'text-primary' : ''}`}
-              onClick={onQueueToggle}
-            ><IcoQueue size={16} /></button>
-          </Tip>
-          <Tip tip={shuffleLabel(isShuffle, shuffleMode)}>
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${isShuffle ? 'text-primary' : ''}`}
-              onClick={onShuffle}
-            >
-              <ShuffleIcon isShuffle={isShuffle} mode={shuffleMode} />
-            </button>
-          </Tip>
-          <Tip tip="Previous (hold: restart track)">
-            <button className="btn btn-ghost btn-square btn-sm" onClick={onSkipPrev}><IcoPrev size={16} /></button>
-          </Tip>
+          <CtrlBtn active={showQueue} onClick={onQueueToggle} title="Queue">
+            <IcoQueue size={16} />
+          </CtrlBtn>
+          <CtrlBtn active={isShuffle} onClick={onShuffle} title={shuffleLabel(isShuffle, shuffleMode)}>
+            <ShuffleIcon isShuffle={isShuffle} mode={shuffleMode} />
+          </CtrlBtn>
+          <CtrlBtn onClick={onSkipPrev} title="Previous (hold: restart track)">
+            <IcoPrev size={16} />
+          </CtrlBtn>
         </div>
 
-        <Tip tip={isPlaying ? 'Pause' : 'Play'}>
+        <Tip tip={isPlaying && isActiveLoaded ? 'Pause' : 'Play'}>
           <button
-            className="btn btn-ghost btn-circle mx-3 border-2 border-mm-b2 bg-mm-3"
-            style={{ width: 44, height: 44, minHeight: 'unset' }}
+            className="btn btn-circle mx-3"
+            style={{ width: 44, height: 44, minHeight: 'unset', position: 'relative', overflow: 'hidden', transition: `box-shadow ${TRANSITION_GLOW}`, ...(playBtnStyle ?? { border: '2px solid var(--border-2)', background: 'var(--bg-3)' }) }}
             onClick={onPlayPause}
           >
-            {isPlaying ? <IcoPause size={18} /> : <IcoPlay size={18} />}
+            {accent1 && (
+              <span style={{
+                position: 'absolute', left: '50%', top: '50%', width: 1000, height: 100,
+                marginLeft: -500, marginTop: -50, zIndex: 0,
+                background: `repeating-linear-gradient(90deg, ${accent1} 0px, ${accent2 || accent1} 50px, ${accent1} 100px)`,
+                animation: `mm-play-shimmer ${SHIMMER_DURATION} linear infinite`,
+                animationPlayState: isPlaying && isActiveLoaded ? 'running' : 'paused',
+                pointerEvents: 'none',
+              }} />
+            )}
+            <span style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {isPlaying && isActiveLoaded ? <IcoPause size={18} /> : <IcoPlay size={18} />}
+            </span>
           </button>
         </Tip>
 
         <div className="flex items-center gap-2">
-          <Tip tip="Next">
-            <button className="btn btn-ghost btn-square btn-sm" onClick={onSkipNext}><IcoNext size={16} /></button>
-          </Tip>
-          <Tip tip={isFav ? 'Unfavorite' : 'Favorite'}>
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${isFav ? 'text-primary' : ''}`}
-              onClick={onFav}
-            ><IcoHeart size={16} /></button>
-          </Tip>
-          <Tip tip={loopTip}>
-            <button
-              className={`btn btn-ghost btn-square btn-sm ${loopMode !== 'off' ? 'text-primary' : ''}`}
-              onClick={onLoopCycle}
-            ><IcoLoop mode={loopMode} /></button>
-          </Tip>
+          <CtrlBtn onClick={onSkipNext} title="Next">
+            <IcoNext size={16} />
+          </CtrlBtn>
+          <CtrlBtn active={isFav} onClick={onFav} title={isFav ? 'Unfavorite' : 'Favorite'}>
+            <IcoHeart size={16} />
+          </CtrlBtn>
+          <CtrlBtn active={loopMode !== LoopMode.Off} onClick={onLoopCycle} title={loopTip}>
+            <IcoLoop mode={loopMode} />
+          </CtrlBtn>
+          <CtrlBtn active={bigPicture} onClick={onBigPicture} title={bigPicture ? 'Shrink artwork' : 'Expand artwork'}>
+            {bigPicture
+              ? <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><line x1="2" y1="5" x2="5" y2="5"/><line x1="5" y1="2" x2="5" y2="5"/><line x1="9" y1="5" x2="12" y2="5"/><line x1="9" y1="2" x2="9" y2="5"/><line x1="2" y1="9" x2="5" y2="9"/><line x1="5" y1="9" x2="5" y2="12"/><line x1="9" y1="9" x2="12" y2="9"/><line x1="9" y1="9" x2="9" y2="12"/></svg>
+              : <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><line x1="1" y1="5" x2="1" y2="1"/><line x1="1" y1="1" x2="5" y2="1"/><line x1="9" y1="1" x2="13" y2="1"/><line x1="13" y1="1" x2="13" y2="5"/><line x1="1" y1="9" x2="1" y2="13"/><line x1="1" y1="13" x2="5" y2="13"/><line x1="9" y1="13" x2="13" y2="13"/><line x1="13" y1="9" x2="13" y2="13"/></svg>
+            }
+          </CtrlBtn>
         </div>
       </div>
 
@@ -195,6 +260,8 @@ export default function PlayerControls({
         <div
           className="flex-1 relative h-[18px] flex items-center cursor-pointer"
           ref={seekRef}
+          onMouseEnter={() => { seekHoveredRef.current = true; }}
+          onMouseLeave={() => { seekHoveredRef.current = false; }}
           onMouseDown={e => {
             if (!seekRef.current) return;
             const r = seekRef.current.getBoundingClientRect();
@@ -222,10 +289,20 @@ export default function PlayerControls({
               style={{
                 position: 'absolute', left: 0, top: 0, bottom: 0,
                 width: '0%',
-                background: 'var(--accent)', borderRadius: 2,
+                background: seekFillColor, borderRadius: 2,
+                transition: `background-color ${TRANSITION_GLOW}`,
               }}
             />
           </div>
+
+          <div ref={seekThumbRef} style={{
+            position: 'absolute', left: '0%', top: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 12, height: 12, borderRadius: '50%',
+            background: 'var(--text-0)',
+            boxShadow: `0 0 10px ${withAlpha(accent1 || '#ffffff', 0.7)}, 0 2px 4px rgba(0,0,0,0.5)`,
+            pointerEvents: 'none', zIndex: 2,
+          }} />
 
           {abActive && (
             <>
@@ -260,7 +337,9 @@ export default function PlayerControls({
         </div>
 
         <span className="font-mono text-[10px] text-mm-t2 min-w-[32px]">
-          {durationMs > 0 ? fmtMs(durationMs) : '—'}
+          {isActiveLoaded
+            ? (durationMs > 0 ? fmtMs(durationMs) : '—')
+            : (track?.duration_ms ? fmtMs(track.duration_ms) : '—')}
         </span>
 
         {/* Volume */}
