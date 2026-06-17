@@ -79,7 +79,10 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Apply app icons
-        run: npx tauri icon src-tauri/icons/icon.png
+        run: |
+          APPICONSET=$(find src-tauri/gen/apple -path "*/AppIcon.appiconset" | head -1)
+          echo "Copying icons into $APPICONSET"
+          cp src-tauri/icons/ios/*.png "$APPICONSET/"
 
       - name: Set build number
         run: |
