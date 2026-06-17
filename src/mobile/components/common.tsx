@@ -185,7 +185,7 @@ export function MMTabBar({ active, onTab, style }: { active: TabId; onTab: (id: 
               borderRadius: t.center ? 22 : 8,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: t.center && on ? 'var(--accent)' : 'transparent',
-              boxShadow: t.center && on ? '0 6px 22px oklch(0.62 0.15 28 / 0.5)' : 'none',
+              boxShadow: t.center && on ? '0 6px 22px color-mix(in srgb, var(--accent) 50%, transparent)' : 'none',
               color: t.center && on ? 'var(--bg-0)' : color,
               transition: 'background 0.2s, box-shadow 0.2s, color 0.2s',
               animation: popped ? 'mmTabPop 0.32s cubic-bezier(0.22,1,0.36,1) both' : 'none',
