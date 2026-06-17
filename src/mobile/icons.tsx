@@ -1,5 +1,6 @@
 import React from 'react';
 import { FaWeightHanging } from 'react-icons/fa';
+import { FaMagnifyingGlass } from 'react-icons/fa6';
 
 interface IconProps {
   size?: number;
@@ -53,7 +54,7 @@ export const Icons = {
   shuffle: (p: IconProps) => <Ic {...p}><path d="M16 3h5v5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/><path d="M21 16v5h-5"/><path d="M14 14l7 7"/><path d="M3 3l7 7"/></Ic>,
   shuffleRandom: (p: IconProps) => <Ic {...p}><rect x="2" y="2" width="20" height="20" rx="3.5"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="8" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="16" cy="16" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></Ic>,
   shuffleWeighted: ({ size = 22 }: IconProps) => <FaWeightHanging size={size}/>,
-  shuffleDiscovery: (p: IconProps) => <Ic {...p}><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8.5 11h5M11 8.5v5"/></Ic>,
+  shuffleDiscovery: ({ size = 22 }: IconProps) => <FaMagnifyingGlass size={size}/>,
   loop: (p: IconProps) => <Ic {...p}><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/></Ic>,
   loopOne: (p: IconProps) => <Ic {...p}><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/><text x="12" y="14.5" fontSize="7" textAnchor="middle" fontWeight="700" fill="currentColor" stroke="none">1</text></Ic>,
   ab: (p: IconProps) => <Ic {...p}><path d="M3 18l4-12 4 12M4.5 14h5"/><path d="M14 6h3.5a2.5 2.5 0 010 5H14V6zm0 5h4a2.5 2.5 0 010 5h-4v-5z"/></Ic>,

@@ -31,6 +31,7 @@ export {
   FiList as IcoQueue,
 } from 'react-icons/fi';
 import { FaWeightHanging } from 'react-icons/fa';
+import { FaMagnifyingGlass } from 'react-icons/fa6';
 
 // Sparkles — matches the mobile Discover tab icon exactly
 export function IcoDiscover({ size = 17 }: { size?: number }) {
@@ -87,16 +88,9 @@ export function IcoDumbbell({ size = 16 }: { size?: number }) {
   return <FaWeightHanging size={size} />;
 }
 
-// Magnifying glass with crosshair — for Discovery shuffle mode
+// Magnifying glass — for Discovery shuffle mode
 export function IcoDiscovery({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="7" />
-      <path d="M21 21l-4.3-4.3" />
-      <path d="M8.5 11h5M11 8.5v5" />
-    </svg>
-  );
+  return <FaMagnifyingGlass size={size} />;
 }
 
 // Loop mode icon — changes visual based on current mode
