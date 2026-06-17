@@ -58,20 +58,20 @@ jobs:
         run: |
           mkdir -p src-tauri/binaries
           curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-            -o src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
-          chmod +x src-tauri/binaries/yt-dlp-x86_64-unknown-linux-gnu
+            -o src-tauri/binaries/melomaniac-ytdlp-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/melomaniac-ytdlp-x86_64-unknown-linux-gnu
 
       - name: Download yt-dlp sidecar (macOS)
         if: matrix.os == 'macos-latest'
         run: |
           mkdir -p src-tauri/binaries
           curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos \
-            -o src-tauri/binaries/yt-dlp-universal-apple-darwin
-          cp src-tauri/binaries/yt-dlp-universal-apple-darwin src-tauri/binaries/yt-dlp-aarch64-apple-darwin
-          cp src-tauri/binaries/yt-dlp-universal-apple-darwin src-tauri/binaries/yt-dlp-x86_64-apple-darwin
-          chmod +x src-tauri/binaries/yt-dlp-universal-apple-darwin \
-            src-tauri/binaries/yt-dlp-aarch64-apple-darwin \
-            src-tauri/binaries/yt-dlp-x86_64-apple-darwin
+            -o src-tauri/binaries/melomaniac-ytdlp-universal-apple-darwin
+          cp src-tauri/binaries/melomaniac-ytdlp-universal-apple-darwin src-tauri/binaries/melomaniac-ytdlp-aarch64-apple-darwin
+          cp src-tauri/binaries/melomaniac-ytdlp-universal-apple-darwin src-tauri/binaries/melomaniac-ytdlp-x86_64-apple-darwin
+          chmod +x src-tauri/binaries/melomaniac-ytdlp-universal-apple-darwin \
+            src-tauri/binaries/melomaniac-ytdlp-aarch64-apple-darwin \
+            src-tauri/binaries/melomaniac-ytdlp-x86_64-apple-darwin
 
       - name: Download yt-dlp sidecar (Windows)
         if: matrix.os == 'windows-latest'
@@ -79,7 +79,7 @@ jobs:
         run: |
           mkdir -p src-tauri/binaries
           curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe \
-            -o src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
+            -o src-tauri/binaries/melomaniac-ytdlp-x86_64-pc-windows-msvc.exe
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
