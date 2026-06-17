@@ -255,8 +255,7 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    // Horizontally center the arc on screen so all 5 bubbles are symmetrical
-    centerRef.current = { x: window.innerWidth / 2, y: r.top + r.height / 2 };
+    centerRef.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     hoveredRef.current = mode;
     setHovered(mode);
     setOpen(true);
