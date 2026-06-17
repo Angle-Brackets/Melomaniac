@@ -205,16 +205,17 @@ function SecondaryBtn({ Icon, IconActive, active, color = 'var(--accent)', onCli
 
 // ── ShuffleRadialMenu ─────────────────────────────────────────────────────────
 
-const RADIAL_R = 100;         // px from button center to icon bubble center
+const RADIAL_R = 82;          // px from button center to icon bubble center
 const LONG_PRESS_MS = 320;    // ms hold before menu opens
 const DEAD_ZONE_PX = 22;      // px from center — keep current mode highlighted
 
+// Full circle, 5 modes evenly spaced at 72° each. 0° = top, clockwise.
 const SHUFFLE_OPTS = [
-  { mode: ShuffleMode.Off,       label: 'Off',       angleDeg: -80 },
-  { mode: ShuffleMode.Smart,     label: 'Smart',     angleDeg: -40 },
-  { mode: ShuffleMode.Random,    label: 'Random',    angleDeg:   0 },
-  { mode: ShuffleMode.Weighted,  label: 'Weighted',  angleDeg:  40 },
-  { mode: ShuffleMode.Discovery, label: 'Discovery', angleDeg:  80 },
+  { mode: ShuffleMode.Off,       label: 'Off',       angleDeg:   0 },
+  { mode: ShuffleMode.Random,    label: 'Random',    angleDeg:  72 },
+  { mode: ShuffleMode.Smart,     label: 'Smart',     angleDeg: 144 },
+  { mode: ShuffleMode.Weighted,  label: 'Weighted',  angleDeg: 216 },
+  { mode: ShuffleMode.Discovery, label: 'Discovery', angleDeg: 288 },
 ] as const;
 
 function ShuffleModeIcon({ mode, size }: { mode: ShuffleMode; size: number }): React.ReactElement {
@@ -350,17 +351,21 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
           userSelect: 'none',
           WebkitUserSelect: 'none' as React.CSSProperties['WebkitUserSelect'],
         }}>
-          {/* Single label above the arc for the hovered mode */}
+          {/* Label above the shuffle button — only for the hovered mode */}
           {(() => {
             const hovOpt = SHUFFLE_OPTS.find(o => o.mode === hovered);
-            const labelY = cy - RADIAL_R - 56;
-            return hovOpt ? (
-              <div key={hovOpt.mode} style={{
+            if (!hovOpt) return null;
+            const labelW = 160;
+            const labelX = Math.max(8, Math.min(window.innerWidth - labelW - 8, cx - labelW / 2));
+            const labelY = Math.max(16, cy - RADIAL_R - 48);
+            return (
+              <div style={{
                 position: 'absolute',
-                left: 0, right: 0,
-                top: Math.max(24, labelY),
+                left: labelX,
+                top: labelY,
+                width: labelW,
                 textAlign: 'center',
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: 700,
                 letterSpacing: '0.1em',
                 textTransform: 'uppercase',
@@ -369,7 +374,7 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
               }}>
                 {hovOpt.label}
               </div>
-            ) : null;
+            );
           })()}
 
           {/* Bubbles */}
