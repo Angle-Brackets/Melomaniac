@@ -77,6 +77,30 @@ Melomaniac is a cross-platform music player built on **Tauri 2 + React/TypeScrip
 
 ---
 
+## Shipped — v1.0.1
+
+### Audio & Playback
+- [x] Shuffle modes: **Weighted** (play-count weighted, prefers less-played tracks) and **Discovery** (deprioritises recently played tracks) — two new modes beyond Random + Smart
+- [x] Long-press radial menu on mobile shuffle button to select shuffle mode in one gesture
+- [x] **AVAudioSession interruption handling** — music resumes automatically when another audio source (phone call, Siri, video) ends; respects iOS `shouldResume` flag
+
+### Theming & Appearance
+- [x] **Privacy Mode** — replaces album art with an accent-colored gradient overlay in the UI; withholds artwork from iOS lock screen/Control Centre
+- [x] Theme accent colors now propagate immediately to all UI elements when the theme is changed
+
+### Desktop UI
+- [x] In-app auto-update with progress bar in Settings (no manual download needed)
+
+### Mobile UI (iOS)
+- [x] Secondary icon buttons (heart, shuffle, loop) fill their icon when active
+- [x] Shuffle and heart icons are theme-colored (not tied to album art accent)
+- [x] Long-press radial shuffle-mode picker
+- [x] Queue panel has rounded top corners
+- [x] Artist text is always white in Now Playing
+- [x] Player tab glow respects active theme color
+
+---
+
 ## In Progress
 
 - [ ] **Discover tab** — AI-powered music discovery; UI placeholder (greyed out) exists on both desktop and mobile; backend not yet started

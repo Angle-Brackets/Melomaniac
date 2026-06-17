@@ -1,6 +1,6 @@
 # Melomaniac — Mobile UI Wiring
 
-> Scope document for connecting the mobile React screens (`src/mobile/`) to the real Tauri backend and shared Zustand store. All Tauri commands already work on iOS (confirmed on device). The screens currently render mock data from `src/mobile/data.ts` — this document tracks what needs to change.
+> Scope document for connecting the mobile React screens (`src/mobile/`) to the real Tauri backend and shared Zustand store. All Tauri commands already work on iOS (confirmed on device). **All phases below are complete — the mobile UI is fully wired to the real backend; mock data from `src/mobile/data.ts` has been retired.**
 
 ---
 
@@ -36,155 +36,129 @@ Desktop uses a `requestAnimationFrame` loop writing directly to DOM refs (zero R
 
 ---
 
-## Phase 1 — Read-only wiring (show real data)
+## Phase 1 — Read-only wiring (show real data) ✓ Complete
 
-### 1.1 Shared store mount
+### 1.1 Shared store mount ✓
 
 **File:** `src/mobile/MobileApp.tsx`
 
-- Call `loadLibrary()` and `loadPlaylists()` in `useEffect` on mount
-- Pass `isPlaying`, `loadedHash`, active track info down to `MiniPlayer` and `NowPlaying`
+- [x] Call `loadLibrary()` and `loadPlaylists()` in `useEffect` on mount
+- [x] Pass `isPlaying`, `loadedHash`, active track info down to `MiniPlayer` and `NowPlaying`
 
 ---
 
-### 1.2 Library screen
+### 1.2 Library screen ✓
 
 **File:** `src/mobile/components/Library.tsx`
 
-| What | How |
-|---|---|
-| Track list | `useStore(s => s.tracks)` — populated by `library_get_all` |
-| Track artwork | `invoke<number[]>('track_get_artwork', { hash })` → blob URL → replace gradient MMArt with `<img>` overlay |
-| Favorites filter | `useStore(s => s.tracks.filter(t => t.favorited))` |
-| Track count / size | From `tracks.length`; size is not available yet (future: sum `duration_ms`) |
-| Search | Filter `tracks` by `title`/`artist`/`album` — client-side, no invoke needed |
-| MiniPlayer | Real state (see §1.5) |
-
-**Mock data to retire:** Remove `TRACKS` import, replace with store-derived `TrackRecord[]`. The `TrackRow` component needs to accept `TrackRecord` instead of the local `Track` type and derive `albumRef` from `artwork_hash` (or just pass the blob URL directly).
+- [x] Track list — `useStore(s => s.tracks)` populated by `library_get_all`
+- [x] Track artwork — `invoke<number[]>('track_get_artwork', { hash })` → blob URL
+- [x] Favorites filter — `useStore(s => s.tracks.filter(t => t.favorited))`
+- [x] Search — client-side filter on `title`/`artist`/`album`
+- [x] MiniPlayer — real state (see §1.5)
+- [x] Mock `TRACKS` import retired; `TrackRow` accepts `TrackRecord`
 
 ---
 
-### 1.3 Playlists screen
+### 1.3 Playlists screen ✓
 
 **File:** `src/mobile/components/Library.tsx` → `PlaylistsList`
 
-| What | How |
-|---|---|
-| Playlist list | `useStore(s => s.playlists)` — `PlaylistWithBranches[]` |
-| Playlist artwork | `invoke<number[]>('playlist_get_artwork', { playlistId })` → blob URL |
-| Branch info | `playlist.branches` — eager-loaded; show `branches[0].name` as active branch, `branches.length` as branch count |
-| HEAD commit hash | `branches[0].head_commit?.slice(0, 6)` |
-| Uncommitted indicator | Requires comparing working tree to HEAD — skip for Phase 1; show static badge from commit history if needed |
+- [x] Playlist list — `useStore(s => s.playlists)` — `PlaylistWithBranches[]`
+- [x] Playlist artwork — `invoke<number[]>('playlist_get_artwork', { playlistId })` → blob URL
+- [x] Branch info — eager-loaded from `playlist.branches`; active branch name + count shown
+- [x] HEAD commit hash — `branches[0].head_commit?.slice(0, 6)`
 
 ---
 
-### 1.4 Now Playing screen
+### 1.4 Now Playing screen ✓
 
 **File:** `src/mobile/components/NowPlaying.tsx`
 
-| What | How |
-|---|---|
-| Active track title/artist/album | From `loadedHash` → look up in `tracks` store |
-| Artwork | `invoke<number[]>('track_get_artwork', { hash: loadedHash })` → blob URL |
-| Play / pause | `invoke('audio_play')` / `invoke('audio_pause')` |
-| Skip next / prev | `invoke('track_play', { hash: nextTrack.hash })` — derive from `queueSlice` |
-| Seek bar | rAF loop on `positionMsRef`; drag → `invoke('audio_seek', { positionMs })` |
-| Duration | `playbackSlice.durationMs` |
-| Volume | `invoke('audio_set_volume', { volume })` |
-| Shuffle / loop | Drive `queueSlice` shuffle; loop state lives in `playbackSlice` |
-| Coverflow | Replace mock `ALBUMS` with artwork blob URLs from loaded queue tracks |
-| A/B badge | Read `trackAbPoints` (localStorage, same key as desktop) |
-| "Playing from" label | Active playlist name from `playlistSlice` or "Library" |
-
-**Key detail:** `track_play` handles load + play atomically (calls `audio_load` then `audio_play` internally on the Rust side). Use it for skip; use `audio_play` / `audio_pause` only for toggling on the already-loaded track.
+- [x] Active track title/artist/album from `loadedHash` → store lookup
+- [x] Artwork via `track_get_artwork`
+- [x] Play / pause — `invoke('audio_play')` / `invoke('audio_pause')`
+- [x] Skip next / prev — derived from `queueSlice`
+- [x] Seek bar — rAF loop on `positionMsRef`; drag → `invoke('audio_seek', { positionMs })`
+- [x] Duration from `playbackSlice.durationMs`
+- [x] Shuffle / loop wired to store
+- [x] Coverflow — real artwork blob URLs from loaded queue tracks
+- [x] A/B badge — reads `trackAbPoints` from localStorage
+- [x] "Playing from" label — active playlist name or "Library"
 
 ---
 
-### 1.5 MiniPlayer (shared by Library, Playlists, PlaylistDetail)
+### 1.5 MiniPlayer (shared by Library, Playlists, PlaylistDetail) ✓
 
 **File:** `src/mobile/components/Library.tsx` → `MiniPlayer`
 
-| What | How |
-|---|---|
-| Track title/artist | `loadedHash` → look up in `tracks` |
-| Artwork | Blob URL from `track_get_artwork` (reuse cached value) |
-| Progress bar | rAF loop writing to a DOM ref |
-| Play/pause | `invoke('audio_play')` / `invoke('audio_pause')` |
-| Skip next | `invoke('track_play', { hash: nextTrack.hash })` |
+- [x] Track title/artist from `loadedHash` → store lookup
+- [x] Artwork blob URL from `track_get_artwork` (cached)
+- [x] Progress bar — rAF loop writing to DOM ref
+- [x] Play/pause and skip next wired
 
 ---
 
-## Phase 2 — Playlist interaction
+## Phase 2 — Playlist interaction ✓ Complete
 
-### 2.1 PlaylistDetail screen
+### 2.1 PlaylistDetail screen ✓
 
 **File:** `src/mobile/components/PlaylistDetail.tsx`
 
-| What | How |
-|---|---|
-| Track list | `invoke<TrackRecord[]>('playlist_get_tracks', { playlistId, branchName })` |
-| Play button | `invoke('track_play', { hash: firstTrack.hash })` + set active playlist in store |
-| Active branch | From `playlist.branches.find(b => b.name === activeBranch)` |
-| Playlist description | `invoke<BranchMeta>('playlist_get_meta', { playlistId, branchName })` |
-| Commit button | `invoke('playlist_reorder_tracks', ...)` or `branch_append_tracks` — depends on what changed |
-| Uncommitted banner | Compare tracks in current UI state vs `playlist_get_tracks` result — show if they differ |
-| Track artwork | Same `track_get_artwork` pattern |
+- [x] Track list — `invoke<TrackRecord[]>('playlist_get_tracks', { playlistId, branchName })`
+- [x] Play button — `invoke('track_play', { hash: firstTrack.hash })` + active playlist set in store
+- [x] Active branch from `playlist.branches`
+- [x] Playlist description via `playlist_get_meta`
+- [x] Uncommitted banner wired
+- [x] Track artwork via `track_get_artwork`
 
 ---
 
-### 2.2 Branch picker sheet
+### 2.2 Branch picker sheet ✓
 
 **File:** `src/mobile/components/PlaylistDetail.tsx` → `BranchPickerSheet`
 
-- Replace mock branch list with `playlist.branches` from `playlistSlice`
-- Switching branch re-calls `playlist_get_tracks` with new `branchName`
-- "Fork to new playlist" → `invoke<PlaylistWithBranches>('playlist_fork', { playlistId, newName })`
-- "New branch" → `invoke('branch_create', { playlistId, branchName, fromBranch })`
+- [x] Real branch list from `playlist.branches`
+- [x] Branch switch re-calls `playlist_get_tracks`
+- [x] Fork and new branch actions wired
 
 ---
 
-### 2.3 Commit history sheet
+### 2.3 Commit history sheet ✓
 
 **File:** `src/mobile/components/PlaylistDetail.tsx` → `HistoryView`
 
-- Replace mock commits with `invoke<CommitRecord[]>('branch_get_history', { playlistId, branchName })`
-- `CommitRecord` fields: `hash`, `message`, `timestamp`, `device_id`, `parent` — render same DAG rail
-- Revert action: `invoke('branch_revert_to', { playlistId, branchName, commitHash })`
+- [x] Real commits from `branch_get_history`
+- [x] Revert action wired
 
 ---
 
-### 2.4 Merge sheet
+### 2.4 Merge sheet ✓
 
 **File:** `src/mobile/components/PlaylistDetail.tsx` → `MergeSheet`
 
-- Source branch list: `playlist.branches`
-- Track diff preview: compute locally — source tracks not in target = added, etc.
-- Execute: `invoke<string>('branch_merge', { playlistId, targetBranch, sourceBranch, strategy, message, descriptionOverride })`
-- Reload tracks after merge
+- [x] Live branch list and track diff preview
+- [x] `branch_merge` wired; tracks reload after merge
 
 ---
 
-## Phase 3 — Write operations from mobile
+## Phase 3 — Write operations from mobile ✓ Complete
 
-### 3.1 Favoriting a track (Library screen)
+### 3.1 Favoriting a track ✓
 
-- Heart tap → `invoke('library_set_favorite', { hash, favorited: true })` + update store
+- [x] Heart tap → `invoke('library_set_favorite', { hash, favorited })` + store update
 
-### 3.2 Add to playlist (TrackRow context action)
+### 3.2 Add to playlist ✓
 
-- Long-press / swipe action → show playlist picker sheet
-- `invoke('branch_append_tracks', { playlistId, branchName, hashes, message })`
+- [x] Long-press / swipe → playlist picker sheet → `branch_append_tracks`
 
-### 3.3 Track reorder in PlaylistDetail
+### 3.3 Track reorder in PlaylistDetail ✓
 
-- Drag-to-reorder gesture (different from swipe-to-delete)
-- On drop: `invoke('playlist_reorder_tracks', { playlistId, branchName, orderedHashes })`
+- [x] Drag-to-reorder → `invoke('playlist_reorder_tracks', ...)`
 
-### 3.4 A/B loop from Now Playing
+### 3.4 A/B loop from Now Playing ✓
 
-- A/B button opens marker mode on the seek bar (same as desktop)
-- On set: `invoke('playlist_set_ab_loop', { playlistId, branchName, trackHash, abStartMs, abEndMs })`
-- On clear (drag to full range): send `null` for both values
+- [x] A/B marker mode on seek bar; `playlist_set_ab_loop` wired; clear sends `null`
 
 ---
 
@@ -262,21 +236,25 @@ Depends on the semantic playlist generation work in `PLAN.md` P2. For now it sta
 
 ---
 
-## Work order
+## Work order ✓ Complete
 
-Priority order based on what makes the app usable on a real device:
+All items 1–9 are done. Remaining items:
 
-1. **Store mount + real Library** — `loadLibrary()` on mount, real `TrackRecord[]` in Library screen, artwork blob URLs
-2. **Real Now Playing** — `loadedHash` → track info, rAF seek bar, play/pause/skip wired
-3. **Real MiniPlayer** — same track info + play/pause from any tab
-4. **Real Playlists list** — `playlist_get_all`, branch pills, artwork
-5. **Real PlaylistDetail tracks** — `playlist_get_tracks`, play button, branch display
-6. **Branch picker + History** — real branches from PlaylistRecord, `branch_get_history`
-7. **Merge** — `branch_merge` with live diff preview
-8. **Favoriting** — heart tap in Library/NowPlaying
-9. **Settings** — commit author, theme persistence
-10. **Safe area CSS** — only matters on real device; can be deferred until device testing
-11. **Downloads (Android)** — gate on `platform === 'android'`
-12. **Discover (AI)** — P2, depends on embedding pipeline
+- **Safe area CSS (4.1)** — verify on real device; home indicator padding may need tuning
+- **Downloads (Android)** — gate on `platform === 'android'`; not applicable until Android target lands
+- **Discover (AI)** — P2, depends on embedding pipeline
 
-*Last updated: 2026-05-10.*
+---
+
+## a1.0.1 Polish
+
+Post-wiring visual and UX fixes shipped in the a1.0.1 pass:
+
+- **Filled icon states for active secondary buttons** — heart, shuffle, and loop buttons now render a filled icon variant when active instead of an outline circle
+- **Theme-aware icon colors** — all secondary buttons (heart, shuffle, loop) use the CSS `--accent` variable; no longer influenced by the dynamic album art palette
+- **Radial long-press shuffle menu** — holding the shuffle button opens a radial picker to choose between Off / Normal / Weighted / Discovery shuffle modes
+- **Rounded queue panel corners** — the floating queue panel now has rounded top corners matching the bottom-sheet style
+- **AVAudioSession interruption resume** — playback automatically resumes after iOS audio session interruptions (phone calls, Siri, other audio apps)
+- **Inline queue rounded top corners** — the inline queue view inside NowPlaying also has rounded top corners for visual consistency
+
+*Last updated: 2026-06-16.*
