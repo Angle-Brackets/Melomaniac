@@ -2,6 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 
 export const ACCENT_FALLBACK: [string, string] = ['#d4803c', '#c06070'];
 
+/** Returns accent colors derived from the current CSS theme variables. */
+export function getCSSAccentFallback(): [string, string] {
+  try {
+    const s = getComputedStyle(document.documentElement);
+    const a = s.getPropertyValue('--accent').trim();
+    const l = s.getPropertyValue('--accent-light').trim();
+    if (a && l) return [a, l];
+  } catch { /* before DOM ready */ }
+  return ACCENT_FALLBACK;
+}
+
 // Keyed by data-URL so the same artwork blob is only sampled once per session.
 const accentsByUrl = new Map<string, [string, string]>();
 const inflight     = new Map<string, Promise<[string, string]>>();

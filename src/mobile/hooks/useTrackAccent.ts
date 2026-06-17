@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTrackArtwork } from './useTrackArtwork';
-import { extractAccents, withAlpha, useGlowFade, ACCENT_FALLBACK as FALLBACK } from '../../shared/artworkAccents';
+import { extractAccents, withAlpha, useGlowFade, getCSSAccentFallback } from '../../shared/artworkAccents';
 export { withAlpha, useGlowFade };
 
 // Cache: trackHash → [primary, secondary] hex pair
@@ -13,13 +13,13 @@ export function useTrackAccents(
 ): [string, string] {
   const artUrl = useTrackArtwork(trackHash ?? '', artworkHash);
   const cached = trackHash ? accentsByHash.get(trackHash) : undefined;
-  const [accents, setAccents] = useState<[string, string]>(cached ?? FALLBACK);
+  const [accents, setAccents] = useState<[string, string]>(cached ?? getCSSAccentFallback());
 
   useEffect(() => {
-    if (!trackHash) { setAccents(FALLBACK); return; }
+    if (!trackHash) { setAccents(getCSSAccentFallback()); return; }
     const c = accentsByHash.get(trackHash);
     if (c) { setAccents(c); return; }
-    if (!artUrl) { setAccents(FALLBACK); return; }
+    if (!artUrl) { setAccents(getCSSAccentFallback()); return; }
     let alive = true;
     extractAccents(artUrl).then(pair => {
       if (!alive) return;
@@ -28,6 +28,16 @@ export function useTrackAccents(
     }).catch(() => {});
     return () => { alive = false; };
   }, [trackHash, artUrl]);
+
+  // Re-read CSS accent when theme changes (only for tracks without artwork-extracted colors)
+  useEffect(() => {
+    const onTheme = () => {
+      if (trackHash && accentsByHash.has(trackHash)) return;
+      setAccents(getCSSAccentFallback());
+    };
+    window.addEventListener('mm-settings-change', onTheme);
+    return () => window.removeEventListener('mm-settings-change', onTheme);
+  }, [trackHash]);
 
   return accents;
 }
