@@ -1285,7 +1285,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             position: 'absolute', left: 0, right: 0,
             bottom: listScrolled ? 0 : 'var(--tab-h)',
             transition: `bottom ${SPRING}`,
-            zIndex: 10, background: 'var(--bg-0)', borderTop: '0.5px solid var(--border-1)',
+            zIndex: 10, background: 'var(--bg-0)',
+            borderTopLeftRadius: 20, borderTopRightRadius: 20,
+            border: '0.5px solid var(--border-1)', borderBottom: 'none',
           }}>
             {/* Queue header — drag up/down to expand/collapse; tap to toggle. */}
             <div
