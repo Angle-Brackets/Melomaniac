@@ -91,7 +91,14 @@ jobs:
         run: |
           BUILD=$(( ${{ github.run_number }} + 100 ))
           echo "BUILD=$BUILD" >> "$GITHUB_ENV"
-          echo "Build number: $BUILD"
+          while IFS= read -r plist; do
+            /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD" "$plist"
+            echo "CFBundleVersion=$BUILD → $plist"
+          done < <(find src-tauri/gen/apple -name "Info.plist")
+          echo "---"
+          find src-tauri/gen/apple -name "Info.plist" -exec \
+            /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" {} \;
 
       - name: Inject signing overrides via xcodebuild wrapper
         env:
