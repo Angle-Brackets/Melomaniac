@@ -227,12 +227,11 @@ function ShuffleModeIcon({ mode, size }: { mode: ShuffleMode; size: number }): R
   }
 }
 
-function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
+function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
   mode: ShuffleMode;
   onSelect: (m: ShuffleMode) => void;
   onTap: () => void;
   size: number;
-  accent: string;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<ShuffleMode>(mode);
@@ -337,7 +336,7 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
           width: size, height: size, borderRadius: size / 2,
           background: 'transparent',
           border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', color: active ? accent : 'var(--text-1)',
+          cursor: 'pointer', color: active ? 'var(--accent)' : 'var(--text-1)',
         }}
       >
         <CurrentIcon size={iconSize}/>
@@ -369,12 +368,12 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size, accent }: {
                   top: by - bubbleSize / 2,
                   width: bubbleSize, height: bubbleSize,
                   borderRadius: bubbleSize / 2,
-                  background: isHov ? accent : isCur ? `${accent}88` : 'rgba(255,255,255,0.10)',
-                  border: `1.5px solid ${isHov ? accent : isCur ? accent : 'rgba(255,255,255,0.18)'}`,
+                  background: isHov ? 'var(--accent)' : isCur ? 'color-mix(in srgb, var(--accent) 53%, transparent)' : 'rgba(255,255,255,0.10)',
+                  border: `1.5px solid ${isHov || isCur ? 'var(--accent)' : 'rgba(255,255,255,0.18)'}`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   transition: 'all 0.1s ease',
                   color: isHov ? '#fff' : isCur ? '#fff' : 'rgba(255,255,255,0.55)',
-                  boxShadow: isHov ? `0 0 16px ${accent}88` : 'none',
+                  boxShadow: isHov ? '0 0 16px color-mix(in srgb, var(--accent) 53%, transparent)' : 'none',
                 }}>
                   <ShuffleModeIcon mode={opt.mode} size={isHov ? 17 : 14}/>
                 </div>
@@ -1222,8 +1221,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             );
             return (
               <div style={{ display: 'flex', justifyContent: 'space-evenly', alignItems: 'center', padding: '2px 12px 6px', transition: `all ${SPRING}`, flexShrink: 0 }}>
-                <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={34} accent={accent}/>
-                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
+                <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={34}/>
+                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={34}/>
                 {tBtn(handlePrev, <Icons.prev size={22} stroke="var(--text-0)"/>)}
                 <button onClick={handlePlayPause} style={{
                   width: 58, height: 58, borderRadius: 29, border: 'none', flexShrink: 0,
@@ -1267,8 +1266,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 {tPrimary(handleNext, <Icons.next size={28} stroke="var(--text-0)"/>)}
               </div>
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 28px' }}>
-                <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={36} accent={accent}/>
-                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
+                <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={36}/>
+                <SecondaryBtn Icon={Icons.heart} IconActive={Icons.heartFill} active={browseTrack?.favorited ?? false} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
                 <SecondaryBtn Icon={LoopIco} IconActive={LoopIcoFill} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={36}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
               </div>
