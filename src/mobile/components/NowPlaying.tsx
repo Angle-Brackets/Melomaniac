@@ -205,7 +205,7 @@ function SecondaryBtn({ Icon, IconActive, active, color = 'var(--accent)', onCli
 
 // ── ShuffleRadialMenu ─────────────────────────────────────────────────────────
 
-const RADIAL_R = 80;          // px from button center to icon bubble center
+const RADIAL_R = 100;         // px from button center to icon bubble center
 const LONG_PRESS_MS = 320;    // ms hold before menu opens
 const DEAD_ZONE_PX = 22;      // px from center — keep current mode highlighted
 
@@ -255,7 +255,8 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    centerRef.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    // Horizontally center the arc on screen so all 5 bubbles are symmetrical
+    centerRef.current = { x: window.innerWidth / 2, y: r.top + r.height / 2 };
     hoveredRef.current = mode;
     setHovered(mode);
     setOpen(true);
@@ -350,49 +351,55 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
           userSelect: 'none',
           WebkitUserSelect: 'none' as React.CSSProperties['WebkitUserSelect'],
         }}>
+          {/* Single label above the arc for the hovered mode */}
+          {(() => {
+            const hovOpt = SHUFFLE_OPTS.find(o => o.mode === hovered);
+            const labelY = cy - RADIAL_R - 56;
+            return hovOpt ? (
+              <div key={hovOpt.mode} style={{
+                position: 'absolute',
+                left: 0, right: 0,
+                top: Math.max(24, labelY),
+                textAlign: 'center',
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: '#fff',
+                pointerEvents: 'none',
+              }}>
+                {hovOpt.label}
+              </div>
+            ) : null;
+          })()}
+
+          {/* Bubbles */}
           {SHUFFLE_OPTS.map(opt => {
             const rad = (opt.angleDeg * Math.PI) / 180;
             const ix = cx + Math.sin(rad) * RADIAL_R;
             const iy = cy - Math.cos(rad) * RADIAL_R;
             const isHov = hovered === opt.mode;
             const isCur = mode === opt.mode;
-            const bubbleSize = isHov ? 52 : 42;
+            const bubbleSize = isHov ? 54 : 44;
             const margin = 8;
             const bx = Math.max(bubbleSize / 2 + margin, Math.min(window.innerWidth  - bubbleSize / 2 - margin, ix));
             const by = Math.max(bubbleSize / 2 + margin, Math.min(window.innerHeight - bubbleSize / 2 - margin, iy));
             return (
-              <React.Fragment key={opt.mode}>
-                <div style={{
-                  position: 'absolute',
-                  left: bx - bubbleSize / 2,
-                  top: by - bubbleSize / 2,
-                  width: bubbleSize, height: bubbleSize,
-                  borderRadius: bubbleSize / 2,
-                  background: isHov ? 'var(--accent)' : isCur ? 'color-mix(in srgb, var(--accent) 53%, transparent)' : 'rgba(255,255,255,0.10)',
-                  border: `1.5px solid ${isHov || isCur ? 'var(--accent)' : 'rgba(255,255,255,0.18)'}`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.1s ease',
-                  color: isHov ? '#fff' : isCur ? '#fff' : 'rgba(255,255,255,0.55)',
-                  boxShadow: isHov ? '0 0 16px color-mix(in srgb, var(--accent) 53%, transparent)' : 'none',
-                }}>
-                  <ShuffleModeIcon mode={opt.mode} size={isHov ? 17 : 14}/>
-                </div>
-                <div style={{
-                  position: 'absolute',
-                  left: bx - 36,
-                  top: by + bubbleSize / 2 + 4,
-                  width: 72,
-                  textAlign: 'center',
-                  fontSize: 9,
-                  fontWeight: 700,
-                  letterSpacing: '0.06em',
-                  color: isHov ? '#fff' : 'rgba(255,255,255,0.45)',
-                  whiteSpace: 'nowrap',
-                  transition: 'color 0.1s ease',
-                }}>
-                  {opt.label.toUpperCase()}
-                </div>
-              </React.Fragment>
+              <div key={opt.mode} style={{
+                position: 'absolute',
+                left: bx - bubbleSize / 2,
+                top: by - bubbleSize / 2,
+                width: bubbleSize, height: bubbleSize,
+                borderRadius: bubbleSize / 2,
+                background: isHov ? 'var(--accent)' : isCur ? 'color-mix(in srgb, var(--accent) 53%, transparent)' : 'rgba(255,255,255,0.10)',
+                border: `1.5px solid ${isHov || isCur ? 'var(--accent)' : 'rgba(255,255,255,0.18)'}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all 0.1s ease',
+                color: isHov ? '#fff' : isCur ? '#fff' : 'rgba(255,255,255,0.55)',
+                boxShadow: isHov ? '0 0 16px color-mix(in srgb, var(--accent) 53%, transparent)' : 'none',
+              }}>
+                <ShuffleModeIcon mode={opt.mode} size={isHov ? 18 : 15}/>
+              </div>
             );
           })}
         </div>,
