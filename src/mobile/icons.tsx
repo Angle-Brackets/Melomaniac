@@ -61,9 +61,9 @@ export const Icons = {
   loopOneFill: (p: IconProps) => <Ic {...p} w={2.4}><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/><text x="12" y="14.5" fontSize="8" textAnchor="middle" fontWeight="900" fill="currentColor" stroke="none">1</text></Ic>,
   ab: (p: IconProps) => <Ic {...p}><path d="M3 18l4-12 4 12M4.5 14h5"/><path d="M14 6h3.5a2.5 2.5 0 010 5H14V6zm0 5h4a2.5 2.5 0 010 5h-4v-5z"/></Ic>,
   abFill: ({ size = 22 }: IconProps) => (
-    <svg width={size} height={size} viewBox="0 0 24 24">
-      <text x="6" y="17" fontSize="12" textAnchor="middle" fontWeight="900" fill="currentColor" fontFamily="system-ui,sans-serif">A</text>
-      <text x="18" y="17" fontSize="12" textAnchor="middle" fontWeight="900" fill="currentColor" fontFamily="system-ui,sans-serif">B</text>
+    <svg width={size} height={size} viewBox="2 3 20 20">
+      <text x="7" y="17" fontSize="14" textAnchor="middle" fontWeight="900" fill="currentColor" fontFamily="system-ui,sans-serif">A</text>
+      <text x="17" y="17" fontSize="14" textAnchor="middle" fontWeight="900" fill="currentColor" fontFamily="system-ui,sans-serif">B</text>
     </svg>
   ),
   heart: (p: IconProps) => <Ic {...p}><path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.6l-1-1a5.5 5.5 0 00-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 000-7.8z"/></Ic>,
