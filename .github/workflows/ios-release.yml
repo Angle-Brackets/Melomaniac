@@ -78,9 +78,12 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      - name: Apply app icons
+        run: npx tauri icon src-tauri/icons/icon.png
+
       - name: Set build number
         run: |
-          BUILD=${{ github.run_number + 100 }}
+          BUILD=$(( ${{ github.run_number }} + 100 ))
           while IFS= read -r plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$plist" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD" "$plist"
