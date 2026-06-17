@@ -67,7 +67,18 @@ export type CommitRecord = {
 }
 
 // Shared across library and playlist slices — avoids repeating the same union in each slice type
-export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
+export enum LoadStatus {
+  Idle    = 'idle',
+  Loading = 'loading',
+  Ready   = 'ready',
+  Error   = 'error',
+}
+
+export enum LoopMode {
+  Off = 'off',
+  One = 'one',
+  AB  = 'ab',
+}
 
 // ── Sync types ────────────────────────────────────────────────────────────────
 

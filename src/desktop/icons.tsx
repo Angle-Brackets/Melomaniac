@@ -1,6 +1,8 @@
 // Shared icon library.
 // react-icons/fi (Feather) for standard UI actions; custom SVGs for
 // music/melo-specific shapes that have no Feather equivalent.
+import { LoopMode } from './types';
+export { LoopMode };
 export {
   FiMenu as IcoMenu,
   FiDisc as IcoLibrary,
@@ -80,8 +82,8 @@ export function IcoDice({ size = 16 }: { size?: number }) {
 }
 
 // Loop mode icon — changes visual based on current mode
-export function IcoLoop({ mode }: { mode: 'off' | 'one' | 'ab' }) {
-  if (mode === 'ab') {
+export function IcoLoop({ mode }: { mode: LoopMode }) {
+  if (mode === LoopMode.AB) {
     return (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
         <text x="1.5" y="11.5" fontSize="8" fontWeight="800" fill="currentColor" stroke="none" fontFamily="monospace">A</text>
@@ -95,7 +97,7 @@ export function IcoLoop({ mode }: { mode: 'off' | 'one' | 'ab' }) {
       strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 4h8v3l3-3-3-3v3" />
       <path d="M12 12H4V9l-3 3 3 3v-3" />
-      {mode === 'one' && (
+      {mode === LoopMode.One && (
         <text x="6.5" y="10.5" fontSize="6" fontWeight="900"
           fill="currentColor" stroke="none" fontFamily="monospace">1</text>
       )}

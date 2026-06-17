@@ -12,13 +12,13 @@ import { useAccentsFromUrl, useGlowFade, withAlpha } from '../shared/artworkAcce
 import { ALBUMS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
 import type { AppSettings, ShuffleMode } from './types';
+import { LoopMode, Density, DefaultView } from './types';
 
 import TitleBar from './components/TitleBar';
 import LibrarySidebar, { AddToFolderPopup } from './components/Sidebar';
 import Carousel from './components/Carousel';
 import PlaylistHeader from './components/PlaylistHeader';
 import PlayerControls from './components/PlayerControls';
-import type { LoopMode } from './components/PlayerControls';
 import TrackList from './components/TrackList';
 import RightPanel from './components/RightPanel';
 import { CommitGraph, CommitGraphInline } from './components/CommitGraph';
@@ -122,8 +122,8 @@ const SETTING_DEFAULTS: AppSettings = {
   accentHue: 28,
   showRightPanel: false,
   carouselSize: 210,
-  density: 'relaxed',
-  defaultView: 'Tracks',
+  density: Density.Relaxed,
+  defaultView: DefaultView.Tracks,
   discordEnabled: false,
   commitAuthor: '',
   shuffleMode: 'fisher-yates',
@@ -197,7 +197,7 @@ export default function DesktopApp(): JSX.Element {
   const [showArtworkModal, setShowArtworkModal] = useState(false);
   const [pendingChanges, setPendingChanges] = useState<{ message: string; execute: () => Promise<void> }[]>([]);
   const [railItem, setRailItem] = useState('playlists');
-  const [activeTab, setActiveTab] = useState('Tracks');
+  const [activeTab, setActiveTab] = useState<string>(DefaultView.Tracks);
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('melomaniac.pinned') ?? '[]') as string[]); } catch { return new Set(); }
   });
@@ -205,7 +205,7 @@ export default function DesktopApp(): JSX.Element {
   const [hasUncommitted, setHasUncommitted] = useState(false);
   const [abA, setAbA] = useState(0);
   const [abB, setAbB] = useState(1);
-  const [loopMode, setLoopMode] = useState<LoopMode>('off');
+  const [loopMode, setLoopMode] = useState<LoopMode>(LoopMode.Off);
   // Keyed by track hash so points survive DB re-indexes and cross-device imports.
   const [trackAbPoints, setTrackAbPoints] = useState<Record<string, { a: number; b: number }>>(() => {
     try { return JSON.parse(localStorage.getItem('melomaniac.ab_points') ?? '{}'); } catch { return {}; }
@@ -677,7 +677,7 @@ export default function DesktopApp(): JSX.Element {
         const posMs = payload.PositionChanged;
         // ── A·B loop enforcement — runs regardless of seek throttle ──────────
         const { loopMode: lm, abA: a, abB: b, durationMs: dur } = sr.current;
-        if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+        if (lm === LoopMode.AB && dur > 0 && posMs >= b * dur) {
           const aMs = Math.round(a * dur);
           // Stamp lastSeekTime so the 600 ms debounce below doesn't overwrite livePositionMsRef.
           lastSeekTime.current = Date.now();
@@ -715,13 +715,13 @@ export default function DesktopApp(): JSX.Element {
         setPositionMs(0);
         const { loopMode: lm, loadedHash: lh, abA: a, durationMs: dur } = sr.current;
 
-        if (lm === 'one') {
+        if (lm === LoopMode.One) {
           if (lh) invoke('track_play', { hash: lh }).catch(console.error);
           hasRecordedPlayRef.current = false; // reset so each loop iteration counts
           useStore.getState().setPlaying(true);
           return;
         }
-        if (lm === 'ab') {
+        if (lm === LoopMode.AB) {
           const aMs = Math.floor(a * dur);
           lastSeekTime.current = Date.now();
           setPositionMs(aMs);
@@ -997,7 +997,7 @@ export default function DesktopApp(): JSX.Element {
       setPlaylistRecords(prev => prev.filter(p => p.id !== activePlaylistId));
       setActivePlaylistId(null);
       setPlaylistTracks(null);
-      setActiveTab('Tracks');
+      setActiveTab(DefaultView.Tracks);
       setMeloToast(`Deleted "${name}"`);
       setTimeout(() => setMeloToast(null), 2400);
     } catch (e) { console.error(e); }
@@ -1075,7 +1075,7 @@ export default function DesktopApp(): JSX.Element {
   };
 
   const handleLoopCycle = () => setLoopMode(m => {
-    const next = m === 'off' ? 'one' : m === 'one' ? 'ab' : 'off';
+    const next = m === LoopMode.Off ? LoopMode.One : m === LoopMode.One ? LoopMode.AB : LoopMode.Off;
     sr.current.loopMode = next; // sync update so TrackEnded sees it before next render
     return next;
   });
@@ -1112,7 +1112,7 @@ export default function DesktopApp(): JSX.Element {
     setRailItem(item);
     if (item === 'melo') setShowCommitGraph(true);
     if (item === 'editor') {
-      setActiveTab('Tracks');
+      setActiveTab(DefaultView.Tracks);
       // Lock in a concrete track so playback changes never hijack the editor display.
       setEditorTrackId(prev => prev ?? activeTrackId);
     }
@@ -1142,7 +1142,7 @@ export default function DesktopApp(): JSX.Element {
   const handleSkipNext = () => {
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
-    setLoopMode('off'); sr.current.loopMode = 'off';
+    setLoopMode(LoopMode.Off); sr.current.loopMode = LoopMode.Off;
     // Manual queue takes priority
     if (manualQueue.length > 0) {
       const [next, ...rest] = manualQueue;
@@ -1180,7 +1180,7 @@ export default function DesktopApp(): JSX.Element {
     }
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
-    setLoopMode('off'); sr.current.loopMode = 'off';
+    setLoopMode(LoopMode.Off); sr.current.loopMode = LoopMode.Off;
     const q = playQueue;
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
@@ -1235,7 +1235,7 @@ export default function DesktopApp(): JSX.Element {
           <LibrarySidebar
             playlists={playlistRecords.map(playlistRecordToPlaylist)}
             activePlaylistId={activePlaylistId}
-            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab('Tracks'); setRailItem('playlists'); }}
+            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab(DefaultView.Tracks); setRailItem('playlists'); }}
             activeRailItem={railItem}
             onRailChange={handleRailChange}
             expanded={leftExpanded}
@@ -1347,7 +1347,7 @@ export default function DesktopApp(): JSX.Element {
                   onResolveConflict={() => { if (activePlaylistId) reopenConflict(activePlaylistId); }}
                 />
 
-                {activeTab === 'Tracks' && (
+                {activeTab === DefaultView.Tracks && (
                   <div style={{ position: 'relative', flex: 1 }}>
                     <div style={{
                       position: 'absolute', left: 0, right: 0, top: 0,
@@ -1462,7 +1462,7 @@ export default function DesktopApp(): JSX.Element {
                   </div>
                 )}
 
-                {activeTab === 'History' && (
+                {activeTab === DefaultView.History && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <CommitGraphInline
                       playlistId={activePlaylistId}

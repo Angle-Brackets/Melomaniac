@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createStore } from 'zustand/vanilla'
 import { createPlaylistSlice, PlaylistSlice } from '../playlistSlice'
 import type { PlaylistRecord } from '../types'
+import { LoadStatus } from '../types'
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -32,7 +33,7 @@ it('starts idle with no playlists selected', () => {
   expect(s.playlists).toEqual([])
   expect(s.currentPlaylistId).toBeNull()
   expect(s.currentBranchName).toBe('main')
-  expect(s.playlistStatus).toBe('idle')
+  expect(s.playlistStatus).toBe(LoadStatus.Idle)
 })
 
 // ── loadPlaylists ─────────────────────────────────────────────────────────────
@@ -43,16 +44,16 @@ describe('loadPlaylists', () => {
     mockInvoke.mockResolvedValueOnce(playlists)
 
     const promise = store.getState().loadPlaylists()
-    expect(store.getState().playlistStatus).toBe('loading')
+    expect(store.getState().playlistStatus).toBe(LoadStatus.Loading)
     await promise
-    expect(store.getState().playlistStatus).toBe('ready')
+    expect(store.getState().playlistStatus).toBe(LoadStatus.Ready)
     expect(store.getState().playlists).toEqual(playlists)
   })
 
   it('sets status to error when invoke rejects', async () => {
     mockInvoke.mockRejectedValueOnce(new Error('storage error'))
     await store.getState().loadPlaylists()
-    expect(store.getState().playlistStatus).toBe('error')
+    expect(store.getState().playlistStatus).toBe(LoadStatus.Error)
     expect(store.getState().playlists).toEqual([])
   })
 

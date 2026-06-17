@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import type { Track } from '../data';
 import type { ShuffleMode } from '../types';
+import { LoopMode } from '../types';
 import {
   IcoPlay, IcoPause, IcoNext, IcoPrev,
   IcoShuffle, IcoHeart, IcoVolume, IcoLoop, IcoQueue,
@@ -10,7 +11,7 @@ import { withAlpha } from '../../shared/artworkAccents';
 import { SHIMMER_DURATION, TRANSITION_FAST, TRANSITION_GLOW } from '../animations';
 import ScrollText from './ScrollText';
 
-export type LoopMode = 'off' | 'one' | 'ab';
+export type { LoopMode };
 
 // Pure helper — defined at module level so useEffect deps stay stable
 function fmtMs(ms: number) {
@@ -118,7 +119,7 @@ export default function PlayerControls({
   const abDragging       = useRef<'A' | 'B' | null>(null);
   const seekHoveredRef   = useRef(false);
   const isActiveLoadedRef = useRef(isActiveLoaded);
-  const abActive         = loopMode === 'ab';
+  const abActive         = loopMode === LoopMode.AB;
 
   useEffect(() => { isActiveLoadedRef.current = isActiveLoaded; }, [isActiveLoaded]);
 
@@ -167,8 +168,8 @@ export default function PlayerControls({
   }, [onSeek, onVolume, onAbChange, abA, abB]);
 
   const loopTip =
-    loopMode === 'off' ? 'Loop: Off — click for Single Track' :
-    loopMode === 'one' ? 'Loop: Single Track — click for A·B' :
+    loopMode === LoopMode.Off ? 'Loop: Off — click for Single Track' :
+    loopMode === LoopMode.One ? 'Loop: Single Track — click for A·B' :
     'Loop: A·B — drag handles on seek bar';
 
   return (
@@ -234,7 +235,7 @@ export default function PlayerControls({
           <CtrlBtn active={isFav} onClick={onFav} title={isFav ? 'Unfavorite' : 'Favorite'}>
             <IcoHeart size={16} />
           </CtrlBtn>
-          <CtrlBtn active={loopMode !== 'off'} onClick={onLoopCycle} title={loopTip}>
+          <CtrlBtn active={loopMode !== LoopMode.Off} onClick={onLoopCycle} title={loopTip}>
             <IcoLoop mode={loopMode} />
           </CtrlBtn>
           <CtrlBtn active={bigPicture} onClick={onBigPicture} title={bigPicture ? 'Shrink artwork' : 'Expand artwork'}>

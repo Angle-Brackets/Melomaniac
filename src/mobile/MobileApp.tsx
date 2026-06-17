@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import './style.css';
 import { applyTheme, writeCustomHue } from '../shared/themes';
 import { useStore } from '../store';
-import { ShuffleMode } from '../store/types';
+import { LoopMode } from '../store/types';
 import { positionMsRef, loopStateRef } from './playerContext';
 import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
@@ -18,16 +18,6 @@ import type { TabId } from './components/common';
 
 // TAB_ORDER defines the spatial layout used to derive slide direction.
 const TAB_ORDER: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
-
-type MobileSavedPlaybackState = {
-  hash: string; durationMs: number;
-  playlistId: string | null; branchName: string | null;
-  shuffle: ShuffleMode;
-  shuffledQueue?: string[];
-  shuffleIndex?: number;
-  positionMs?: number;
-  loopMode?: 'off' | 'one' | 'ab';
-};
 
 export default function MobileApp() {
   const [tab, setTab] = useState<TabId>('now');
@@ -46,7 +36,6 @@ export default function MobileApp() {
   const syncToast            = useStore(s => s.syncToast);
   const setDownloadProgress  = useStore(s => s.setDownloadProgress);
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
-  const refreshKnownDevices  = useStore(s => s.refreshKnownDevices);
 
   useEffect(() => {
     const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
@@ -54,31 +43,17 @@ export default function MobileApp() {
     if (theme === 'custom') { writeCustomHue(saved.customAccentHue ?? saved.accentHue ?? 28); applyTheme('custom'); }
     else { applyTheme(theme); }
     // Load library then eagerly prefetch all track artwork into the cache.
+    // By the time the user sees Library or NowPlaying the images are ready.
     loadLibrary().then(() => {
       const { tracks } = useStore.getState();
       tracks.forEach(t => { if (t.artwork_hash) getTrackArtwork(t.hash, t.artwork_hash); });
     });
-
-    // Check if audio is still running from a previous session (e.g. after a WebView restart).
-    // audio_position resolving means the bridge still has a track loaded — pair with saved state.
-    const savedPlayback = (() => {
-      try {
-        const raw = localStorage.getItem('melomaniac.playback_state');
-        return raw ? JSON.parse(raw) as MobileSavedPlaybackState : null;
-      } catch { return null; }
-    })();
-    const audioCheckPromise: Promise<MobileSavedPlaybackState | null> = savedPlayback
-      ? invoke<number>('audio_position')
-          .then(() => savedPlayback)
-          .catch(() => { localStorage.removeItem('melomaniac.playback_state'); return null; })
-      : Promise.resolve(null);
-
-    // Restore last-selected playlist and queue, then apply playback restore if needed.
-    Promise.all([loadPlaylists(), audioCheckPromise]).then(([, restore]) => {
+    // Restore last-selected playlist after playlists load and pre-populate the queue
+    loadPlaylists().then(() => {
       const { playlists, setCurrentPlaylist, setPlayingBranch, loadQueue, branchByPlaylist } = useStore.getState();
       if (!playlists.length) return;
-      const savedPl = localStorage.getItem('mm_last_playlist');
-      const targetId = (savedPl && playlists.find(p => p.id === savedPl)) ? savedPl : playlists[0].id;
+      const saved = localStorage.getItem('mm_last_playlist');
+      const targetId = (saved && playlists.find(p => p.id === saved)) ? saved : playlists[0].id;
       const pl = playlists.find(p => p.id === targetId)!;
       setCurrentPlaylist(targetId);
       const branchName = useStore.getState().currentBranchName;
@@ -88,34 +63,6 @@ export default function MobileApp() {
         .then(ptracks => {
           loadQueue(ptracks.map(t => t.hash));
           useStore.getState().hydrateTracksFromPlaylist(ptracks);
-          if (restore && restore.playlistId === targetId && restore.branchName === validBranch) {
-            const track = ptracks.find(t => t.hash === restore.hash);
-            if (track) {
-              const s = useStore.getState();
-              s.setLoaded(restore.hash, restore.durationMs);
-              s.setPlaying(false);
-              invoke('audio_pause').catch(console.error);
-              if (restore.shuffle !== ShuffleMode.Off) {
-                s.setShuffle(restore.shuffle); // sets mode + refills queue
-                if (restore.shuffledQueue?.length && restore.shuffleIndex != null) {
-                  const validSet = new Set(ptracks.map(t => t.hash));
-                  const filtered = restore.shuffledQueue.filter(h => validSet.has(h));
-                  if (filtered.length > 0) {
-                    useStore.setState({ shuffledQueue: filtered, shuffleIndex: restore.shuffleIndex });
-                  }
-                }
-              } else {
-                const idx = ptracks.findIndex(t => t.hash === restore.hash);
-                if (idx >= 0) s.jumpTo(idx);
-              }
-              if (restore.loopMode && restore.loopMode !== 'off') {
-                loopStateRef.loopMode = restore.loopMode;
-              }
-              if (restore.positionMs && restore.positionMs > 0) {
-                invoke('audio_seek', { positionMs: restore.positionMs }).catch(console.error);
-              }
-            }
-          }
         })
         .catch(() => {});
       playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
@@ -130,81 +77,9 @@ export default function MobileApp() {
     });
   }, []);
 
-  // Persist playback state for WebView-restart recovery
-  useEffect(() => {
-    return useStore.subscribe(state => {
-      if (state.loadedTrackHash) {
-        localStorage.setItem('melomaniac.playback_state', JSON.stringify({
-          hash: state.loadedTrackHash,
-          durationMs: state.duration_ms,
-          playlistId: state.currentPlaylistId,
-          branchName: state.playingBranchName,
-          shuffle: state.shuffle,
-          shuffledQueue: state.shuffle !== ShuffleMode.Off ? state.shuffledQueue : undefined,
-          shuffleIndex: state.shuffle !== ShuffleMode.Off ? state.shuffleIndex : undefined,
-        } satisfies MobileSavedPlaybackState));
-      } else {
-        localStorage.removeItem('melomaniac.playback_state');
-      }
-    });
-  }, []);
-
-  // Patch position and loop mode into the saved state periodically and when the
-  // app is backgrounded — these change without going through the Zustand store.
-  useEffect(() => {
-    const patch = () => {
-      const raw = localStorage.getItem('melomaniac.playback_state');
-      if (!raw) return;
-      try {
-        const s = JSON.parse(raw);
-        s.positionMs = positionMsRef.current;
-        s.loopMode   = loopStateRef.loopMode;
-        localStorage.setItem('melomaniac.playback_state', JSON.stringify(s));
-      } catch {}
-    };
-    const id = setInterval(patch, 10_000);
-    const onHide = () => patch();
-    const onVisibility = () => { if (document.visibilityState === 'hidden') patch(); };
-    window.addEventListener('pagehide', onHide);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener('pagehide', onHide);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
-
-  // ── Keep lock-screen like button in sync with favorites ──────────────────────
-  useEffect(() => {
-    let prevHash: string | null = null;
-    let prevFavorited: boolean | undefined;
-    return useStore.subscribe(state => {
-      const hash = state.loadedTrackHash;
-      const favorited = hash ? (state.tracks.find(t => t.hash === hash)?.favorited ?? false) : false;
-      if (hash !== prevHash || favorited !== prevFavorited) {
-        if (hash) invoke('audio_set_like_state', { isActive: favorited }).catch(() => {});
-        prevHash = hash;
-        prevFavorited = favorited;
-      }
-    });
-  }, []);
-
-  // ── Keep lock-screen shuffle button in sync with in-app shuffle state ────────
-  useEffect(() => {
-    let prevShuffle: ShuffleMode | undefined;
-    return useStore.subscribe(state => {
-      if (state.shuffle !== prevShuffle) {
-        const mode = state.shuffle === ShuffleMode.Random ? 1 : state.shuffle === ShuffleMode.Smart ? 2 : 0;
-        invoke('audio_set_shuffle_state', { mode }).catch(() => {});
-        prevShuffle = state.shuffle;
-      }
-    });
-  }, []);
-
   // ── Background peer poll — drives auto-sync when a known device comes online ──
   useEffect(() => {
     refreshLivePeers()
-    refreshKnownDevices()
     // Second poll after 4 s catches mDNS re-discovery lag after app resume —
     // NWBrowser can take a few seconds to re-find peers on the local network.
     const earlyId = setTimeout(refreshLivePeers, 4_000)
@@ -231,8 +106,6 @@ export default function MobileApp() {
     type AudioPayload =
       | 'TrackEnded' | 'RemotePlay' | 'RemotePause'
       | 'RemoteNextTrack' | 'RemotePreviousTrack' | 'RemoteTogglePlayPause'
-      | 'RemoteLike'
-      | { RemoteShuffleChange: number }
       | { PositionChanged: number }
       | { DurationKnown: number }
       | { RemoteSeek: number }
@@ -297,7 +170,7 @@ export default function MobileApp() {
       if (typeof payload === 'object' && 'PositionChanged' in payload) {
         const posMs = payload.PositionChanged;
         const { loopMode: lm, abA: a, abB: b, durMs: dur } = loopStateRef;
-        if (lm === 'ab' && dur > 0 && posMs >= b * dur) {
+        if (lm === LoopMode.AB && dur > 0 && posMs >= b * dur) {
           const aMs = Math.round(a * dur);
           positionMsRef.current = aMs;
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
@@ -326,45 +199,33 @@ export default function MobileApp() {
       if (payload === 'TrackEnded') {
         positionMsRef.current = 0;
         const { loopMode: lm, abA: a, durMs: dur } = loopStateRef;
-        if (lm === 'one') {
+        if (lm === LoopMode.One) {
           const s = useStore.getState();
           const hash = s.currentHash();
           if (hash) invoke('track_play', { hash }).catch(console.error);
           s.setPlaying(true);
           return;
         }
-        if (lm === 'ab') {
+        if (lm === LoopMode.AB) {
           const aMs = Math.round(a * dur);
           positionMsRef.current = aMs;
           invoke('audio_seek', { positionMs: aMs }).catch(console.error);
-          useStore.getState().resumeAudio().catch(console.error);
+          invoke('audio_play').catch(console.error);
+          useStore.getState().setPlaying(true);
           return;
         }
         playNext();
         return;
       }
-      if (payload === 'RemotePlay')            { useStore.getState().resumeAudio().catch(console.error); return; }
-      if (payload === 'RemotePause')           { useStore.getState().pauseAudio().catch(console.error);  return; }
-      if (payload === 'RemoteTogglePlayPause') { useStore.getState().toggleAudio().catch(console.error); return; }
+      if (payload === 'RemotePlay')  { useStore.getState().setPlaying(true); return; }
+      if (payload === 'RemotePause') { useStore.getState().setPlaying(false); return; }
+      if (payload === 'RemoteTogglePlayPause') {
+        const s = useStore.getState();
+        s.setPlaying(!s.isPlaying);
+        return;
+      }
       if (payload === 'RemoteNextTrack')     { playNext(true); return; }
       if (payload === 'RemotePreviousTrack') { playPrev(); return; }
-      if (typeof payload === 'object' && 'RemoteShuffleChange' in payload) {
-        const mode = payload.RemoteShuffleChange;
-        const shuffleMode = mode === 1 ? ShuffleMode.Random : mode === 2 ? ShuffleMode.Smart : ShuffleMode.Off;
-        useStore.getState().setShuffle(shuffleMode);
-        invoke('audio_set_shuffle_state', { mode }).catch(console.error);
-        return;
-      }
-      if (payload === 'RemoteLike') {
-        const s = useStore.getState();
-        const hash = s.loadedTrackHash;
-        if (!hash) return;
-        // Compute new state before toggling so we don't need to re-read the store
-        const nowFavorited = !(s.tracks.find(t => t.hash === hash)?.favorited ?? false);
-        s.toggleFavorite(hash);
-        invoke('audio_set_like_state', { isActive: nowFavorited }).catch(console.error);
-        return;
-      }
       if (typeof payload === 'object' && 'RemoteSeek' in payload) {
         const posMs = payload.RemoteSeek;
         positionMsRef.current = posMs;

@@ -1,3 +1,5 @@
+import { LoopMode } from '../store/types';
+
 // ── Module-level playback refs ─────────────────────────────────────────────────
 // These are plain objects, NOT React state, for a deliberate reason:
 // `PositionChanged` events arrive every ~250 ms from Rust.  If positionMsRef were
@@ -16,8 +18,8 @@
 export const positionMsRef: { current: number } = { current: 0 };
 
 export const loopStateRef: {
-  loopMode: 'off' | 'one' | 'ab';
+  loopMode: LoopMode;
   abA: number;   // A-B loop start (fraction of total duration)
   abB: number;   // A-B loop end (fraction of total duration)
   durMs: number; // cached track duration, updated on DurationKnown events
-} = { loopMode: 'off', abA: 0, abB: 1, durMs: 0 };
+} = { loopMode: LoopMode.Off, abA: 0, abB: 1, durMs: 0 };

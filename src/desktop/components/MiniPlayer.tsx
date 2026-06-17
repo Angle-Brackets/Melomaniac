@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from 'react';
 import type { Track } from '../data';
-import type { LoopMode } from './PlayerControls';
+import { LoopMode } from '../types';
 import { IcoPlay, IcoPause, IcoNext, IcoPrev, IcoVolume, IcoLoop, IcoQueue } from '../icons';
 import ScrollText from './ScrollText';
 
@@ -95,8 +95,8 @@ export default function MiniPlayer({
   }, [onSeek]);
 
   const loopTitle =
-    loopMode === 'off' ? 'Loop off' :
-    loopMode === 'one' ? 'Loop: one track' : 'Loop: A·B';
+    loopMode === LoopMode.Off ? 'Loop off' :
+    loopMode === LoopMode.One ? 'Loop: one track' : 'Loop: A·B';
 
   return (
     <div style={{
@@ -128,7 +128,7 @@ export default function MiniPlayer({
             borderRadius: '0 2px 2px 0',
           }}
         />
-        {loopMode === 'ab' && (
+        {loopMode === LoopMode.AB && (
           <>
             <svg width="7" height="7" viewBox="0 0 7 7" style={{
               position: 'absolute', top: '50%', left: `${abA * 100}%`,
@@ -203,7 +203,7 @@ export default function MiniPlayer({
           <MiniBtn active={showQueue} onClick={onQueueToggle} title="Queue">
             <IcoQueue size={14} />
           </MiniBtn>
-          <MiniBtn active={loopMode !== 'off'} onClick={onLoopCycle} title={loopTitle}>
+          <MiniBtn active={loopMode !== LoopMode.Off} onClick={onLoopCycle} title={loopTitle}>
             <IcoLoop mode={loopMode} />
           </MiniBtn>
           <IcoVolume size={13} style={{ color: 'var(--text-2)', flexShrink: 0 }} />

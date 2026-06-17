@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AppSettings } from '../types';
+import { Density, DefaultView } from '../types';
 import { NAMED_THEMES } from '../../shared/themes';
 import type { ThemeName } from '../../shared/themes';
 import { useStore } from '../../store';
@@ -23,7 +24,7 @@ interface SettingsModalProps {
   onRelaunch?: () => void;
 }
 
-const DENSITIES = ['compact', 'normal', 'relaxed'] as const;
+const DENSITIES = [Density.Compact, Density.Normal, Density.Relaxed] as const;
 
 export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing, pendingUpdate, isInstalling, updateProgress, updateReady, onInstallUpdate, onRelaunch }: SettingsModalProps) {
   const livePeers           = useStore(s => s.livePeers);
@@ -151,7 +152,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
             <div className="flex items-center justify-between py-2 border-b border-mm-b0">
               <span className="text-xs text-mm-t1">Default playlist view</span>
               <div className="flex gap-1">
-                {(['Tracks', 'History'] as const).map(v => (
+                {([DefaultView.Tracks, DefaultView.History] as const).map(v => (
                   <button
                     key={v}
                     onClick={() => updateSetting('defaultView', v)}

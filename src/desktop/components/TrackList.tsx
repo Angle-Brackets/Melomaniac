@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
+import { Density } from '../types';
 import { IcoDragHandle, IcoDots } from '../icons';
 import { FiEdit2, FiTrash2, FiHeart, FiArrowUp, FiPlay, FiPause, FiSearch, FiX, FiChevronDown } from 'react-icons/fi';
 import ScrollText from './ScrollText';
@@ -27,7 +28,7 @@ interface TrackListProps {
   onAddTracks?: () => void;
   onPlayNext?: (track: Track) => void;
   onAddToQueue?: (track: Track) => void;
-  density?: 'compact' | 'normal' | 'relaxed';
+  density?: Density;
   favorites?: Set<string>;
   onCollapse?: () => void;
 }
@@ -35,7 +36,7 @@ interface TrackListProps {
 export default function TrackList({
   tracks, activeTrackId, loadedHash, isPlaying, onSelect, onPlayPause, onReorder,
   hasUncommitted, onCommitChanges, onEditTrack, artworkUrls,
-  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = 'relaxed', favorites, onCollapse,
+  onRemoveTrack, onAddTracks, onPlayNext, onAddToQueue, density = Density.Relaxed, favorites, onCollapse,
 }: TrackListProps): JSX.Element {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);

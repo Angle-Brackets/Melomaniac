@@ -4,7 +4,7 @@ import { FiLayers, FiBarChart2, FiStar } from 'react-icons/fi';
 import { invoke } from '@tauri-apps/api/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useStore } from '../../store';
-import { RepeatMode, ShuffleMode } from '../../store/types';
+import { LoopMode, RepeatMode, ShuffleMode } from '../../store/types';
 import type { TrackRecord, PlaylistRecord, PlaylistTrackRecord, BranchRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
@@ -645,7 +645,6 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   }, []);
 
   // ── AB loop state ─────────────────────────────────────────────────────────
-  type LoopMode = 'off' | 'one' | 'ab';
   const [loopMode, setLoopMode] = useState<LoopMode>(() => loopStateRef.loopMode);
   // abA and abB are fractional positions (0.0–1.0) of total duration, not ms.
   // This makes them resolution-independent and trivial to render on the seek bar.
@@ -837,9 +836,9 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
   const handleLoopCycle = () => {
     setLoopMode(prev => {
-      const next: LoopMode = prev === 'off' ? 'one' : prev === 'one' ? 'ab' : 'off';
+      const next = prev === LoopMode.Off ? LoopMode.One : prev === LoopMode.One ? LoopMode.AB : LoopMode.Off;
       loopStateRef.loopMode = next;
-      setRepeat(next === 'one' ? RepeatMode.One : RepeatMode.None);
+      setRepeat(next === LoopMode.One ? RepeatMode.One : RepeatMode.None);
       return next;
     });
   };
@@ -857,7 +856,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     // on mobile where the touch easily leaves the narrow seek bar.
     e.currentTarget.setPointerCapture(e.pointerId);
     const pct = getSeekPct(e.clientX);
-    if (loopMode === 'ab') {
+    if (loopMode === LoopMode.AB) {
       if (Math.abs(pct - abA) < 0.05) { abDragging.current = 'A'; return; }
       if (Math.abs(pct - abB) < 0.05) { abDragging.current = 'B'; return; }
     }
@@ -1111,7 +1110,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               textStyle={{ fontSize: 13, color: isBrowsing ? 'var(--text-2)' : 'var(--text-1)', textAlign: 'center' }}
             />
           )}
-          {loopMode === 'ab' && duration_ms > 0 && (
+          {loopMode === LoopMode.AB && duration_ms > 0 && (
             // Multiply fraction by duration_ms here — the only place display needs absolute ms.
             <div style={{ fontSize: 10.5, color: accent, marginTop: 3, fontFamily: 'JetBrains Mono, monospace', letterSpacing: 0.05 }}>
               A·B {fmtMs(abA * duration_ms)} → {fmtMs(abB * duration_ms)}
@@ -1126,10 +1125,10 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
             onPointerDown={handleSeekPointerDown}
             onPointerMove={handleSeekPointerMove}
             onPointerUp={handleSeekPointerUp}
-            style={{ position: 'relative', height: 36, display: 'flex', alignItems: 'center', cursor: loopMode === 'ab' ? 'default' : 'pointer', touchAction: 'none' }}
+            style={{ position: 'relative', height: 36, display: 'flex', alignItems: 'center', cursor: loopMode === LoopMode.AB ? 'default' : 'pointer', touchAction: 'none' }}
           >
             <div style={{ width: '100%', height: 4, borderRadius: 2, background: 'var(--bg-3)', position: 'relative', overflow: 'visible' }}>
-              {loopMode === 'ab' && (
+              {loopMode === LoopMode.AB && (
                 <div style={{
                   position: 'absolute', left: `${abA * 100}%`, width: `${(abB - abA) * 100}%`,
                   top: 0, bottom: 0, borderRadius: 2,
@@ -1141,7 +1140,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                 background: `linear-gradient(90deg, ${accent1}, ${accent2})`, borderRadius: 2,
                 boxShadow: `0 0 12px ${withAlpha(accent1, 0.5)}`,
               }}/>
-              {loopMode !== 'ab' && (
+              {loopMode !== LoopMode.AB && (
                 <div ref={thumbRef} style={{
                   position: 'absolute', left: '0%', top: '50%',
                   width: 14, height: 14, transform: 'translate(-50%,-50%)',
@@ -1149,7 +1148,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   boxShadow: `0 0 10px ${withAlpha(accent1, 0.7)}, 0 2px 4px rgba(0,0,0,0.5)`,
                 }}/>
               )}
-              {loopMode === 'ab' && (
+              {loopMode === LoopMode.AB && (
                 <>
                   <div style={{
                     position: 'absolute', left: `${abA * 100}%`, top: '50%',
@@ -1179,7 +1178,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
 
         {/* controls — two-row when tracklist collapsed, single-row when expanded to avoid overflow */}
         {(() => {
-          const LoopIco = loopMode === 'ab' ? Icons.ab : loopMode === 'one' ? Icons.loopOne : Icons.loop;
+          const LoopIco = loopMode === LoopMode.AB ? Icons.ab : loopMode === LoopMode.One ? Icons.loopOne : Icons.loop;
           if (queueExpanded) {
             // Compact single row matching original layout
             const tBtn = (onClick: () => void, children: React.ReactNode): React.ReactElement => (
@@ -1204,7 +1203,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   </span>
                 </button>
                 {tBtn(handleNext, <Icons.next size={22} stroke="var(--text-0)"/>)}
-                <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={34}/>
+                <SecondaryBtn Icon={LoopIco} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={34}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={34}/>
               </div>
             );
@@ -1234,7 +1233,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
               <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 28px' }}>
                 <ShuffleRadialMenu mode={shuffle} onSelect={m => setShuffle(m)} onTap={handleShuffle} size={36} accent={accent}/>
                 <SecondaryBtn Icon={Icons.heartFill} active={browseTrack?.favorited ?? false} color={accent} onClick={() => browseTrack && toggleFavorite(browseTrack.hash)} size={36}/>
-                <SecondaryBtn Icon={LoopIco} active={loopMode !== 'off'} onClick={handleLoopCycle} size={36}/>
+                <SecondaryBtn Icon={LoopIco} active={loopMode !== LoopMode.Off} onClick={handleLoopCycle} size={36}/>
                 <SecondaryBtn Icon={Icons.queue} active={showQueue} onClick={() => setShowQueue(true)} size={36}/>
               </div>
             </div>
