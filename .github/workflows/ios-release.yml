@@ -90,9 +90,8 @@ jobs:
       - name: Set build number
         run: |
           BUILD=$(( ${{ github.run_number }} + 100 ))
-          find src-tauri/gen/apple -name "project.pbxproj" -exec \
-            sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9.]*;/CURRENT_PROJECT_VERSION = $BUILD;/g" {} \;
-          echo "Set CURRENT_PROJECT_VERSION=$BUILD"
+          echo "BUILD=$BUILD" >> "$GITHUB_ENV"
+          echo "Build number: $BUILD"
 
       - name: Inject signing overrides via xcodebuild wrapper
         env:
@@ -146,7 +145,8 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             PROVISIONING_PROFILE="$PROFILE_UUID" \
-            DEVELOPMENT_TEAM=$APPLE_TEAM_ID
+            DEVELOPMENT_TEAM=$APPLE_TEAM_ID \
+            CURRENT_PROJECT_VERSION=$BUILD
           WRAPPER
           chmod +x /tmp/ci-bin/xcodebuild
           echo "/tmp/ci-bin" >> "$GITHUB_PATH"
