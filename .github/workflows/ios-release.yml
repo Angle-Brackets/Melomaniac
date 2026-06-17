@@ -87,11 +87,9 @@ jobs:
       - name: Set build number
         run: |
           BUILD=$(( ${{ github.run_number }} + 100 ))
-          while IFS= read -r plist; do
-            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$plist" 2>/dev/null || \
-            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD" "$plist"
-            echo "Set CFBundleVersion=$BUILD in $plist"
-          done < <(find src-tauri/gen/apple -name "Info.plist")
+          find src-tauri/gen/apple -name "project.pbxproj" -exec \
+            sed -i '' "s/CURRENT_PROJECT_VERSION = [0-9.]*;/CURRENT_PROJECT_VERSION = $BUILD;/g" {} \;
+          echo "Set CURRENT_PROJECT_VERSION=$BUILD"
 
       - name: Inject signing overrides via xcodebuild wrapper
         env:
