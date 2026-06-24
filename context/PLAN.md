@@ -329,6 +329,7 @@ The tree schema has an `includes` array (reserved field). After design review, p
 - **Playlist descriptions** — per-branch description stored in tree blob; `playlist_get_meta` reads from tree (not SQL cache); `playlist_set_description` commits and updates SQL cache; description shown in `PlaylistHeader` subtitle and editable in `PlaylistSettingsPanel`; `branchMeta` state in `DesktopApp` overrides SQL-cached description so each branch shows its own value
 - **Merge description conflicts** — `MergeBranchModal` fetches both branches' descriptions and shows a conflict chooser when they differ; `branch_merge` accepts `description_override: Option<String>`; `branchMeta` refreshes after merge
 - **Sidebar folders** — real folder grouping, drag-and-drop (HTML5 DnD with `dataTransfer.setData` for WebKit), folder delete, "No folder" drop zone, all state persisted to `localStorage`
+- **iOS CI App Icon fix** — after `ios init` regenerates `gen/apple/`, CI copies `src-tauri/icons/ios/*.png` directly into the Xcode `AppIcon.appiconset` so the correct dark-background icons are used instead of the default Tauri ones
 
 ### Completed since 2026-05-09 (third pass)
 
