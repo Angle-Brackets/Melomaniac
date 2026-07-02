@@ -163,6 +163,7 @@ export default function DesktopApp(): JSX.Element {
   const refreshLivePeers         = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices      = useStore(s => s.refreshKnownDevices);
   const loadPlaylists            = useStore(s => s.loadPlaylists);
+  const setDownloadProgress      = useStore(s => s.setDownloadProgress);
   const artworkVersion           = useStore(s => s.artworkVersion);
   const syncVersion              = useStore(s => s.syncVersion);
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
@@ -444,6 +445,16 @@ export default function DesktopApp(): JSX.Element {
     return () => { unsub.then(fn => fn()); };
   }, [reloadLibrary]);
 
+  // ── Forward Rust sync progress events to the store ───────────────────────
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ playlist_id: string; done: number; total: number }>('sync://progress', ({ payload }) => {
+      const pct = payload.total > 0 ? payload.done / payload.total : 0;
+      setDownloadProgress(payload.playlist_id, pct);
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [setDownloadProgress]);
+
   // ── Load real playlists from backend ─────────────────────────────────────
   const reloadPlaylists = useCallback(() => {
     invoke<PlaylistRecord[]>('playlist_get_all')
@@ -460,6 +471,11 @@ export default function DesktopApp(): JSX.Element {
   }, []);
 
   useEffect(() => { reloadPlaylists(); }, []);
+
+  // When a sync downloads a new playlist, refresh the local playlist list.
+  useEffect(() => {
+    if (syncVersion > 0) reloadPlaylists();
+  }, [syncVersion, reloadPlaylists]);
 
   // Persist active playlist so it survives restarts
   useEffect(() => {
