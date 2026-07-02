@@ -351,10 +351,12 @@ export default function DesktopApp(): JSX.Element {
     let saved: SavedPlaybackState;
     try { saved = JSON.parse(raw); } catch { return; }
     invoke<number>('audio_position')
-      .then(() => { pendingRestoreRef.current = saved; })
+      .then((pos) => {
+        // pos > 0: audio is genuinely still running (Windows WebView2 frontend restart).
+        // pos === 0: cold start — AtomicU64 is just zeroed, no track actually loaded.
+        pendingRestoreRef.current = pos > 0 ? saved : { ...saved, coldStart: true };
+      })
       .catch(() => {
-        // Cold start — audio engine is not running, but we still restore the track
-        // as a paused restore (load without play, seek to saved position).
         pendingRestoreRef.current = { ...saved, coldStart: true };
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps

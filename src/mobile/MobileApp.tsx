@@ -4,7 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 import './style.css';
 import { applyTheme, writeCustomHue } from '../shared/themes';
 import { useStore } from '../store';
-import { LoopMode } from '../store/types';
+import { LoopMode, RepeatMode, ShuffleMode } from '../store/types';
+import type { PlaylistTrackRecord } from '../store/types';
 import { positionMsRef, loopStateRef } from './playerContext';
 import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
@@ -18,6 +19,22 @@ import type { TabId } from './components/common';
 
 // TAB_ORDER defines the spatial layout used to derive slide direction.
 const TAB_ORDER: TabId[] = ['library', 'playlists', 'now', 'discover', 'settings'];
+
+const SESSION_KEY = 'melomaniac.playback_state';
+
+type SessionState = {
+  hash: string;
+  durationMs: number;
+  playlistId: string;
+  branchName: string;
+  positionMs: number;
+  shuffle: ShuffleMode;
+  repeat: RepeatMode;
+  loopMode: LoopMode;
+  currentIndex: number;
+  shuffledQueue?: string[];
+  shuffleIndex?: number;
+};
 
 export default function MobileApp() {
   const [tab, setTab] = useState<TabId>('now');
@@ -36,6 +53,45 @@ export default function MobileApp() {
   const syncToast            = useStore(s => s.syncToast);
   const setDownloadProgress  = useStore(s => s.setDownloadProgress);
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
+
+  const restoreSession = (ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as SessionState;
+      if (saved.playlistId !== playlistId || saved.branchName !== branchName) return;
+      const hashes = ptracks.map(t => t.hash);
+      if (!hashes.includes(saved.hash)) return;
+
+      const trackRecord = ptracks.find(t => t.hash === saved.hash)!;
+      useStore.getState().setLoaded(saved.hash, trackRecord.duration_ms);
+      loopStateRef.durMs    = trackRecord.duration_ms;
+      loopStateRef.loopMode = saved.loopMode;
+      useStore.getState().setRepeat(saved.repeat);
+
+      if (saved.shuffle !== ShuffleMode.Off && saved.shuffledQueue?.length) {
+        const validQueue = saved.shuffledQueue.filter(h => hashes.includes(h));
+        useStore.setState({
+          shuffle:      saved.shuffle,
+          shuffledQueue: validQueue.length ? validQueue : hashes,
+          shuffleIndex:  saved.shuffleIndex ?? 0,
+        });
+      } else {
+        const idx = hashes.indexOf(saved.hash);
+        useStore.setState({ currentIndex: idx >= 0 ? idx : 0 });
+      }
+
+      invoke('track_load_paused', { hash: saved.hash })
+        .then(() => {
+          if (saved.positionMs > 0) {
+            positionMsRef.current = saved.positionMs;
+            invoke('audio_seek', { positionMs: saved.positionMs }).catch(console.error);
+          }
+        })
+        .catch(console.error);
+      useStore.getState().setPlaying(false);
+    } catch {}
+  };
 
   useEffect(() => {
     const saved = (() => { try { return JSON.parse(localStorage.getItem('melomaniac.settings') ?? '{}'); } catch { return {}; } })();
@@ -59,10 +115,11 @@ export default function MobileApp() {
       const branchName = useStore.getState().currentBranchName;
       const validBranch = pl.branches.find(b => b.name === branchName)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
       setPlayingBranch(validBranch);
-      invoke<import('../store/types').PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: targetId, branchName: validBranch })
+      invoke<PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: targetId, branchName: validBranch })
         .then(ptracks => {
           loadQueue(ptracks.map(t => t.hash));
           useStore.getState().hydrateTracksFromPlaylist(ptracks);
+          restoreSession(ptracks, targetId, validBranch);
         })
         .catch(() => {});
       playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
@@ -75,6 +132,48 @@ export default function MobileApp() {
       const id = state.currentPlaylistId;
       if (id) localStorage.setItem('mm_last_playlist', id);
     });
+  }, []);
+
+  // Persist full playback session so track/position/shuffle/repeat survive restarts
+  useEffect(() => {
+    return useStore.subscribe(state => {
+      const { loadedTrackHash, duration_ms, currentPlaylistId, playingBranchName,
+              shuffle, repeat, currentIndex, shuffledQueue, shuffleIndex } = state;
+      if (!loadedTrackHash || !currentPlaylistId) {
+        localStorage.removeItem(SESSION_KEY);
+        return;
+      }
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        hash: loadedTrackHash,
+        durationMs: duration_ms,
+        playlistId: currentPlaylistId,
+        branchName: playingBranchName,
+        positionMs: positionMsRef.current,
+        shuffle,
+        repeat,
+        loopMode: loopStateRef.loopMode,
+        currentIndex,
+        shuffledQueue: shuffle !== ShuffleMode.Off ? shuffledQueue : undefined,
+        shuffleIndex:  shuffle !== ShuffleMode.Off ? shuffleIndex  : undefined,
+      } satisfies SessionState));
+    });
+  }, []);
+
+  // Patch saved position every 10 s and on unload so cold-start restore seeks correctly
+  useEffect(() => {
+    const patch = () => {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return;
+      try {
+        const s = JSON.parse(raw) as SessionState;
+        s.positionMs = positionMsRef.current;
+        s.loopMode   = loopStateRef.loopMode;
+        localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+      } catch {}
+    };
+    const id = setInterval(patch, 10_000);
+    window.addEventListener('beforeunload', patch);
+    return () => { clearInterval(id); window.removeEventListener('beforeunload', patch); };
   }, []);
 
   // ── Background peer poll — drives auto-sync when a known device comes online ──
