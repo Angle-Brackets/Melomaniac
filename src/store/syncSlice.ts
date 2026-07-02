@@ -376,6 +376,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       }))
       await Promise.all([get().loadPlaylists(), get().loadLibrary()])
       get().bumpArtworkVersion()
+      set(s => ({ syncVersion: s.syncVersion + 1 }))
 
       if (report.conflicts.length > 0) {
         get().openDiffViewer(playlistId, report.conflicts)
