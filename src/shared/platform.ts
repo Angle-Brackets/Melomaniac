@@ -16,3 +16,6 @@ function detect(): Platform {
 export const platform: Platform = detect();
 
 export const isMobile = platform === 'ios' || platform === 'android';
+
+/** True on macOS desktop only (never iOS, which also reports "Mac" in some UAs). */
+export const isMac = platform === 'desktop' && /Mac/.test(navigator.userAgent);
