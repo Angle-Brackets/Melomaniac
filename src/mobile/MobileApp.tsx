@@ -55,9 +55,8 @@ export default function MobileApp() {
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices  = useStore(s => s.refreshKnownDevices);
 
-  const restoreSession = (ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
+  const restoreSession = (raw: string | null, ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
     try {
-      const raw = localStorage.getItem(SESSION_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw) as SessionState;
       if (saved.playlistId !== playlistId || saved.branchName !== branchName) return;
@@ -109,6 +108,11 @@ export default function MobileApp() {
     loadPlaylists().then(() => {
       const { playlists, setCurrentPlaylist, setPlayingBranch, loadQueue, branchByPlaylist } = useStore.getState();
       if (!playlists.length) return;
+      // Capture the saved session before setCurrentPlaylist runs — it clears
+      // loadedTrackHash, which the session-persist subscriber (below) reads as
+      // "nothing playing" and immediately wipes SESSION_KEY from localStorage,
+      // deleting it before restoreSession ever gets a chance to read it back.
+      const savedSessionRaw = localStorage.getItem(SESSION_KEY);
       const saved = localStorage.getItem('mm_last_playlist');
       const targetId = (saved && playlists.find(p => p.id === saved)) ? saved : playlists[0].id;
       const pl = playlists.find(p => p.id === targetId)!;
@@ -120,7 +124,7 @@ export default function MobileApp() {
         .then(ptracks => {
           loadQueue(ptracks.map(t => t.hash));
           useStore.getState().hydrateTracksFromPlaylist(ptracks);
-          restoreSession(ptracks, targetId, validBranch);
+          restoreSession(savedSessionRaw, ptracks, targetId, validBranch);
         })
         .catch(() => {});
       playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
