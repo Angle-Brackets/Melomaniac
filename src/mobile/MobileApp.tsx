@@ -53,6 +53,7 @@ export default function MobileApp() {
   const syncToast            = useStore(s => s.syncToast);
   const setDownloadProgress  = useStore(s => s.setDownloadProgress);
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
+  const refreshKnownDevices  = useStore(s => s.refreshKnownDevices);
 
   const restoreSession = (ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
     try {
@@ -178,11 +179,16 @@ export default function MobileApp() {
 
   // ── Background peer poll — drives auto-sync when a known device comes online ──
   useEffect(() => {
-    refreshLivePeers()
+    const poll = () => { refreshLivePeers(); refreshKnownDevices() }
+    poll()
     // Second poll after 4 s catches mDNS re-discovery lag after app resume —
     // NWBrowser can take a few seconds to re-find peers on the local network.
-    const earlyId = setTimeout(refreshLivePeers, 4_000)
-    const id = setInterval(refreshLivePeers, 15_000)
+    const earlyId = setTimeout(poll, 4_000)
+    // Also re-poll knownDevices here: an inbound QR pairing (peer scans our
+    // code and POSTs to our /pair endpoint) updates the trust list on disk
+    // with no frontend notification, so the store's copy goes stale until
+    // we re-fetch it.
+    const id = setInterval(poll, 15_000)
     return () => { clearTimeout(earlyId); clearInterval(id) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

@@ -451,23 +451,26 @@ export default function LibrarySidebar({
   const [noFolderCount, setNoFolderCount] = useState(0);
 
   // ── Peer manifest state ───────────────────────────────────────────────────
-  const livePeers            = useStore(s => s.livePeers);
-  const knownDevices         = useStore(s => s.knownDevices);
-  const peerManifest         = useStore(s => s.peerManifest);
-  const peerManifestPeer     = useStore(s => s.peerManifestPeer);
-  const peerManifestLoading  = useStore(s => s.peerManifestLoading);
-  const downloadingPlaylists = useStore(s => s.downloadingPlaylists);
-  const downloadProgress     = useStore(s => s.downloadProgress);
-  const openPeerManifest     = useStore(s => s.openPeerManifest);
-  const downloadPlaylist     = useStore(s => s.downloadPlaylist);
+  // Uses the sidebar-scoped manifest state, NOT peerManifest*/openPeerManifest —
+  // those drive PeerPlaylistsModal (manual "Sync" clicks only). Reusing them here
+  // would pop the modal open on every background peer poll.
+  const livePeers                  = useStore(s => s.livePeers);
+  const knownDevices               = useStore(s => s.knownDevices);
+  const sidebarPeerManifest        = useStore(s => s.sidebarPeerManifest);
+  const sidebarPeerManifestPeer    = useStore(s => s.sidebarPeerManifestPeer);
+  const sidebarPeerManifestLoading = useStore(s => s.sidebarPeerManifestLoading);
+  const downloadingPlaylists       = useStore(s => s.downloadingPlaylists);
+  const downloadProgress           = useStore(s => s.downloadProgress);
+  const refreshSidebarPeerManifest = useStore(s => s.refreshSidebarPeerManifest);
+  const downloadPlaylist           = useStore(s => s.downloadPlaylist);
 
   // Auto-fetch the manifest from the first trusted live peer — same logic as mobile PlaylistsList.
   useEffect(() => {
     if (livePeers.length === 0) return;
     const trusted = livePeers.find(p => knownDevices.some(k => k.public_key_b64 === p.public_key_b64));
     if (!trusted) return;
-    if (peerManifestPeer?.public_key_b64 === trusted.public_key_b64 && peerManifest !== null) return;
-    openPeerManifest(trusted);
+    if (sidebarPeerManifestPeer?.public_key_b64 === trusted.public_key_b64 && sidebarPeerManifest !== null) return;
+    refreshSidebarPeerManifest(trusted);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livePeers, knownDevices]);
 
@@ -475,8 +478,8 @@ export default function LibrarySidebar({
   // downloadPlaylist resolves (via loadPlaylists), before the prop refreshes.
   const storePlaylists = useStore(s => s.playlists);
   const localIds   = new Set(storePlaylists.map(p => p.id));
-  const peerName   = peerManifestPeer?.display_name ?? 'Peer';
-  const peerItems  = peerManifest ?? [];
+  const peerName   = sidebarPeerManifestPeer?.display_name ?? 'Peer';
+  const peerItems  = sidebarPeerManifest ?? [];
 
   const pinned = playlists.filter(p => pinnedIds.has(p.id));
   const unassigned = playlists.filter(p => !pinnedIds.has(p.id) && folderAssignments[p.id] == null);
@@ -603,7 +606,7 @@ export default function LibrarySidebar({
           )}
 
           {/* Peer playlists — shown inline when a trusted peer is online */}
-          {(peerManifestLoading || peerItems.length > 0) && (
+          {(sidebarPeerManifestLoading || peerItems.length > 0) && (
             <div>
               <div className="h-px bg-mm-b0 mx-2.5 my-1" />
               <div style={{
@@ -614,7 +617,7 @@ export default function LibrarySidebar({
                 display: 'flex', alignItems: 'center', gap: 5,
               }}>
                 From {peerName}
-                {peerManifestLoading && (
+                {sidebarPeerManifestLoading && (
                   <div style={{
                     width: 8, height: 8,
                     border: '1.5px solid var(--accent)', borderTopColor: 'transparent',
@@ -631,10 +634,11 @@ export default function LibrarySidebar({
                   isDownloading={downloadingPlaylists.includes(manifest.id)}
                   progress={downloadProgress[manifest.id] ?? 0}
                   onDownload={() => {
+                    if (!sidebarPeerManifestPeer) return;
                     const branches = manifest.branches.length > 0
                       ? manifest.branches.map(b => b.name)
                       : ['main'];
-                    downloadPlaylist(manifest.id, branches);
+                    downloadPlaylist(manifest.id, branches, sidebarPeerManifestPeer.public_key_b64);
                   }}
                 />
               ))}
