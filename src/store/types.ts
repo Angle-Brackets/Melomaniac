@@ -131,6 +131,32 @@ export type QrPayload = {
   exp:            number  // Unix timestamp seconds
 }
 
+// Raw track from the Spotify Web API client (spotify_get_playlist_tracks /
+// spotify_get_liked_tracks), before import/matching.
+export type SpotifyTrack = {
+  id:          string | null
+  title:       string
+  artist:      string
+  album:       string
+  duration_ms: number
+  isrc:        string | null
+}
+
+// Mirrors the Rust SpotifyTrackRecord. matched_hash null = external row (not
+// yet in the local library); set = silently linked to an existing TrackRecord.
+export type SpotifyTrackRecord = {
+  spotify_id:   string
+  title:        string
+  artist:       string
+  album:        string | null
+  duration_ms:  number
+  isrc:         string | null
+  source:       string   // "playlist:<id>" or "liked"
+  matched_hash: string | null
+  confidence:   number | null
+  imported_at:  number
+}
+
 export type TrackStats = {
   play_count:      number
   skip_count:      number

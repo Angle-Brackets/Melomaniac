@@ -463,6 +463,7 @@ pub async fn playlist_get_tracks(
                     ingested_at:  0,
                     source_url:   None,
                     mime_type:    entry.mime_type.clone(),
+                    isrc:         None,
                 }
             }
             None => continue,
@@ -1417,6 +1418,7 @@ mod tests {
             mime_type:    None,
             ingested_at:  0,
             source_url:   None,
+            isrc:         None,
         }
     }
 

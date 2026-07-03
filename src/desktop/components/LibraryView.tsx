@@ -6,11 +6,12 @@ import { listen } from '@tauri-apps/api/event';
 import type { Track, TrackRecord } from '../data';
 import { trackRecordToTrack } from '../data';
 import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
-import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart } from 'react-icons/fi';
+import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart, FiDownloadCloud, FiSlash } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import BulkEditPanel from './BulkEditPanel';
 import DownloadModal from './DownloadModal';
+import { useStore } from '../../store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,10 @@ type SortField = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
 type SortDir   = 'asc' | 'desc';
 type Filter    = 'all' | 'new' | 'stray' | 'local' | 'downloaded';
 type ColKey    = 'title' | 'artist' | 'album' | 'source';
+
+// External (not-yet-downloaded) Spotify rows are synthesised as TrackRecord-shaped
+// so they can flow through the same sort/filter/render pipeline as real tracks.
+type Row = TrackRecord & { isExternal?: boolean; spotifyId?: string };
 
 interface ColWidths { title: number; artist: number; album: number; source: number; }
 const DEFAULT_COLS: ColWidths = { title: 280, artist: 160, album: 160, source: 100 };
@@ -85,12 +90,45 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [showBulkEdit,      setShowBulkEdit]      = useState(false);
   const [showDownload,      setShowDownload]      = useState(false);
-  const [contextMenu,       setContextMenu]       = useState<{ x: number; y: number; hash: string } | null>(null);
+  const [contextMenu,       setContextMenu]       = useState<{ x: number; y: number; hash: string; isExternal?: boolean; spotifyId?: string } | null>(null);
   const [playingHash,       setPlayingHash]       = useState<string | null>(null);
+
+  const importedTracks             = useStore(s => s.importedTracks);
+  const downloadingSpotifyIds      = useStore(s => s.downloadingSpotifyIds);
+  const fetchImportedTracks        = useStore(s => s.fetchImportedTracks);
+  const unlinkSpotifyTrack         = useStore(s => s.unlinkTrack);
+  const downloadAndLinkSpotifyTrack = useStore(s => s.downloadAndLinkExternalTrack);
 
   const lastClickRef = useRef<{ hash: string; idx: number } | null>(null);
   const nowSecs = useMemo(() => Date.now() / 1000, []);
   const COL = buildCOL(colWidths);
+
+  // Rows for imported-but-not-downloaded Spotify tracks — shown as dashed,
+  // non-selectable entries with only a "Get track" action.
+  const externalRows: Row[] = useMemo(() => importedTracks
+    .filter(t => t.matched_hash == null)
+    .map((t): Row => ({
+      hash:         `spotify:${t.spotify_id}`,
+      title:        t.title,
+      artist:       t.artist,
+      album:        t.album,
+      artwork_hash: null,
+      duration_ms:  t.duration_ms,
+      favorited:    false,
+      mime_type:    null,
+      ingested_at:  0,
+      source_url:   null,
+      isExternal:   true,
+      spotifyId:    t.spotify_id,
+    })), [importedTracks]);
+
+  // Local tracks the matcher (or the user) silently linked to a Spotify import —
+  // keyed by local hash so rows can show a small provenance badge.
+  const linkedSpotifyByHash = useMemo(() => {
+    const map = new Map<string, string>(); // hash -> spotify_id
+    for (const t of importedTracks) if (t.matched_hash) map.set(t.matched_hash, t.spotify_id);
+    return map;
+  }, [importedTracks]);
 
   // ── Data loading ──────────────────────────────────────────────────────────
 
@@ -110,6 +148,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load(); }, []);
+  useEffect(() => { fetchImportedTracks(); }, [fetchImportedTracks]);
 
   useEffect(() => {
     const unsub = listen('download://done', () => load());
@@ -165,7 +204,9 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   // ── Sort + filter ─────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    let rows = records;
+    // External rows only show up under the "All" filter — the other chips
+    // (NEW/STRAY/Local/Downloaded) describe properties real library rows have.
+    let rows: Row[] = filter === 'all' ? [...records, ...externalRows] : records;
     if (filter === 'new')        rows = rows.filter(r => r.ingested_at > 0 && (nowSecs - r.ingested_at) < 7 * 86400);
     if (filter === 'stray')      rows = rows.filter(r => strayHashes.has(r.hash));
     if (filter === 'local')      rows = rows.filter(r => !r.source_url);
@@ -187,7 +228,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
         ? av - bv : String(av).localeCompare(String(bv));
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [records, strayHashes, search, filter, sortField, sortDir, nowSecs]);
+  }, [records, externalRows, strayHashes, search, filter, sortField, sortDir, nowSecs]);
 
   // ── Selection ─────────────────────────────────────────────────────────────
 
@@ -197,7 +238,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
       if (shift && lastClickRef.current) {
         const lo = Math.min(lastClickRef.current.idx, idx);
         const hi = Math.max(lastClickRef.current.idx, idx);
-        filtered.slice(lo, hi + 1).forEach(r => next.add(r.hash));
+        filtered.slice(lo, hi + 1).filter(r => !r.isExternal).forEach(r => next.add(r.hash));
       } else {
         next.has(hash) ? next.delete(hash) : next.add(hash);
       }
@@ -206,12 +247,13 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
     lastClickRef.current = { hash, idx };
   };
 
-  const allVisibleSelected = filtered.length > 0 && filtered.every(r => selected.has(r.hash));
+  const selectableRows    = useMemo(() => filtered.filter(r => !r.isExternal), [filtered]);
+  const allVisibleSelected = selectableRows.length > 0 && selectableRows.every(r => selected.has(r.hash));
   const toggleAll = () => {
     if (allVisibleSelected) {
-      setSelected(prev => { const n = new Set(prev); filtered.forEach(r => n.delete(r.hash)); return n; });
+      setSelected(prev => { const n = new Set(prev); selectableRows.forEach(r => n.delete(r.hash)); return n; });
     } else {
-      setSelected(prev => { const n = new Set(prev); filtered.forEach(r => n.add(r.hash)); return n; });
+      setSelected(prev => { const n = new Set(prev); selectableRows.forEach(r => n.add(r.hash)); return n; });
     }
   };
 
@@ -353,7 +395,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace" }}>
-          {filtered.length !== records.length && `${filtered.length} shown · `}{records.length} total
+          {filtered.length !== records.length + externalRows.length && `${filtered.length} shown · `}
+          {records.length + externalRows.length} total
         </span>
       </div>
 
@@ -409,29 +452,34 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
         )}
 
         {filtered.map((r, idx) => {
-          const sel       = selected.has(r.hash);
-          const art       = artworkUrls[r.hash];
-          const isNew     = r.ingested_at > 0 && (nowSecs - r.ingested_at) < 7 * 86400;
-          const isStray   = strayHashes.has(r.hash);
-          const source    = sourceDomain(r.source_url);
-          const isPlaying = playingHash === r.hash;
+          const sel        = selected.has(r.hash);
+          const art        = artworkUrls[r.hash];
+          const isNew      = r.ingested_at > 0 && (nowSecs - r.ingested_at) < 7 * 86400;
+          const isStray    = strayHashes.has(r.hash);
+          const source     = sourceDomain(r.source_url);
+          const isPlaying  = playingHash === r.hash;
+          const isExternal = !!r.isExternal;
+          const linkedSpotifyId = linkedSpotifyByHash.get(r.hash);
+          const isDownloadingThis = !!r.spotifyId && downloadingSpotifyIds.includes(r.spotifyId);
 
           return (
             <div
               key={r.hash}
-              onClick={e => toggleSelect(r.hash, idx, e.shiftKey)}
-              onDoubleClick={() => playTrack(r.hash)}
+              onClick={e => { if (!isExternal) toggleSelect(r.hash, idx, e.shiftKey); }}
+              onDoubleClick={() => { if (!isExternal) playTrack(r.hash); }}
               onContextMenu={e => {
                 e.preventDefault();
-                setContextMenu({ x: e.clientX, y: e.clientY, hash: r.hash });
-                if (!selected.has(r.hash)) setSelected(new Set([r.hash]));
+                setContextMenu({ x: e.clientX, y: e.clientY, hash: r.hash, isExternal, spotifyId: r.spotifyId });
+                if (!isExternal && !selected.has(r.hash)) setSelected(new Set([r.hash]));
               }}
               style={{
                 display: 'grid', gridTemplateColumns: COL,
                 padding: '0 14px', height: 34, alignItems: 'center', gap: 8,
                 background: sel ? 'var(--accent-dim)' : idx % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-1)',
-                cursor: 'pointer',
+                cursor: isExternal ? 'default' : 'pointer',
                 borderLeft: sel ? '2px solid var(--accent)' : isPlaying ? '2px solid var(--accent-light)' : '2px solid transparent',
+                border: isExternal ? '1px dashed var(--border-2)' : undefined,
+                opacity: isExternal ? 0.85 : 1,
                 transition: 'background 0.1s',
                 minWidth: 'max-content',
               }}
@@ -441,8 +489,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
               {/* Checkbox */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <input
-                  type="checkbox" checked={sel} onChange={() => {}} onClick={e => e.stopPropagation()}
-                  style={{ width: 13, height: 13, cursor: 'pointer', accentColor: 'var(--accent)', pointerEvents: 'none', margin: 0 }}
+                  type="checkbox" checked={sel} disabled={isExternal} onChange={() => {}} onClick={e => e.stopPropagation()}
+                  style={{ width: 13, height: 13, cursor: isExternal ? 'not-allowed' : 'pointer', accentColor: 'var(--accent)', pointerEvents: 'none', margin: 0, opacity: isExternal ? 0.4 : 1 }}
                 />
               </div>
 
@@ -471,9 +519,15 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
                   {favorites?.has(r.hash) && (
                     <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
                   )}
+                  {!isExternal && linkedSpotifyId && <Badge label="SPOTIFY" />}
                 </div>
                 {isNew   && <Badge label="NEW"   accent />}
                 {isStray && <Badge label="STRAY" />}
+                {isExternal && (
+                  isDownloadingThis
+                    ? <Badge label="FETCHING…" accent />
+                    : <Badge label="SPOTIFY" accent />
+                )}
               </div>
 
               {/* Artist */}
@@ -495,9 +549,11 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
               {/* Source */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
-                {source !== 'Local'
-                  ? <><IcoDownload size={9} style={{ color: sel ? 'var(--text-0)' : 'var(--accent)', flexShrink: 0 }} /><span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>{source}</span></>
-                  : <span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>Local</span>
+                {isExternal
+                  ? <span style={{ ...cellStyle, fontSize: 10, color: 'var(--accent-light)' }}>Spotify</span>
+                  : source !== 'Local'
+                    ? <><IcoDownload size={9} style={{ color: sel ? 'var(--text-0)' : 'var(--accent)', flexShrink: 0 }} /><span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>{source}</span></>
+                    : <span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>Local</span>
                 }
               </div>
             </div>
@@ -566,11 +622,21 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           x={contextMenu.x}
           y={contextMenu.y}
           singleSelected={selected.size === 1}
+          isExternal={contextMenu.isExternal}
+          linkedSpotifyId={linkedSpotifyByHash.get(contextMenu.hash)}
           onPlay={() => { playTrack(contextMenu.hash); setContextMenu(null); }}
           onAddToPlaylist={() => { setContextMenu(null); setShowAddToPlaylist(true); }}
           onBulkEdit={() => { setContextMenu(null); setShowBulkEdit(true); }}
           onOpenInEditor={() => { setContextMenu(null); onOpenInEditor(contextMenu.hash); }}
           onDelete={() => { setContextMenu(null); deleteSelected(); }}
+          onGetTrack={contextMenu.spotifyId
+            ? () => { const id = contextMenu.spotifyId!; setContextMenu(null); downloadAndLinkSpotifyTrack(id); }
+            : undefined}
+          onUnlinkSpotify={() => {
+            const spotifyId = linkedSpotifyByHash.get(contextMenu.hash);
+            setContextMenu(null);
+            if (spotifyId) unlinkSpotifyTrack(spotifyId);
+          }}
         />
       )}
 
@@ -667,15 +733,35 @@ function SortableHeader({ field, label, sortField, sortDir, onSort, onResize }: 
 
 interface ContextMenuProps {
   x: number; y: number;
-  singleSelected: boolean;
+  singleSelected:  boolean;
+  isExternal?:     boolean;
+  linkedSpotifyId?: string;
   onPlay:          () => void;
   onAddToPlaylist: () => void;
   onBulkEdit:      () => void;
   onOpenInEditor:  () => void;
   onDelete:        () => void;
+  onGetTrack?:      () => void;
+  onUnlinkSpotify?: () => void;
 }
 
-function ContextMenu({ x, y, singleSelected, onPlay, onAddToPlaylist, onBulkEdit, onOpenInEditor, onDelete }: ContextMenuProps) {
+function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay, onAddToPlaylist, onBulkEdit, onOpenInEditor, onDelete, onGetTrack, onUnlinkSpotify }: ContextMenuProps) {
+  if (isExternal) {
+    return (
+      <div
+        style={{
+          position: 'fixed', top: y, left: x, zIndex: 300,
+          background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 6,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.6)', overflow: 'hidden', minWidth: 170,
+          fontFamily: "'Outfit', sans-serif",
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <MenuItem icon={<FiDownloadCloud size={11} />} label="Get track" onClick={() => onGetTrack?.()} />
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -690,6 +776,9 @@ function ContextMenu({ x, y, singleSelected, onPlay, onAddToPlaylist, onBulkEdit
       <MenuItem icon={<FiPlus size={11} />}   label="Add to Playlist" onClick={onAddToPlaylist} />
       <MenuItem icon={<FiTag size={11} />}    label="Bulk Edit"       onClick={onBulkEdit} />
       {singleSelected && <MenuItem icon={<FiEdit2 size={11} />} label="Open in Editor" onClick={onOpenInEditor} />}
+      {linkedSpotifyId && (
+        <MenuItem icon={<FiSlash size={11} />} label="Unlink Spotify match" onClick={() => onUnlinkSpotify?.()} />
+      )}
       <div style={{ height: 1, background: 'var(--border-1)', margin: '2px 0' }} />
       <MenuItem icon={<FiTrash2 size={11} />} label="Delete"          onClick={onDelete} danger />
     </div>

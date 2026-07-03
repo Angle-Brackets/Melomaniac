@@ -5,6 +5,7 @@ import { createLibrarySlice } from '../librarySlice'
 import { createPlaybackSlice } from '../playbackSlice'
 import { createPlaylistSlice } from '../playlistSlice'
 import { createSyncSlice } from '../syncSlice'
+import { createSpotifySlice } from '../spotifySlice'
 import type { StoreState } from '../index'
 import { RepeatMode, ShuffleMode } from '../types'
 
@@ -27,6 +28,7 @@ function makeStore() {
     ...createLibrarySlice(...a),
     ...createPlaylistSlice(...a),
     ...createSyncSlice(...a),
+    ...createSpotifySlice(...a),
   }))
 }
 

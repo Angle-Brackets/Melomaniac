@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from '../../store';
-import type { TrackRecord } from '../../store/types';
+import type { TrackRecord, SpotifyTrackRecord } from '../../store/types';
 import { Icons } from '../icons';
 import { MMArt, MMTabBar, MMHash, MMBranchPill, MMSheet, MarqueeText, iconBtn, usePullToRefresh, PullSpinner } from './common';
 import type { TabId } from './common';
@@ -211,14 +211,30 @@ function AddToPlaylistSheet({ hashes, onClose, onSuccess }: {
 
 type FlatItem =
   | { kind: 'section'; label: string; trailing?: string }
-  | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean };
+  | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean }
+  | { kind: 'external-track'; track: SpotifyTrackRecord };
+
+// Small tag mirroring the desktop Library's `Badge` — used for the SPOTIFY
+// provenance marker on both linked local rows and external (not-yet-fetched) rows.
+function MMBadge({ label, accent }: { label: string; accent?: boolean }) {
+  return (
+    <span style={{
+      fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em', flexShrink: 0,
+      padding: '1px 5px', borderRadius: 3,
+      background: accent ? 'var(--accent-dim)' : 'var(--bg-4)',
+      color:      accent ? 'var(--accent-light, var(--accent))' : 'var(--text-3)',
+      border:     `1px solid ${accent ? 'var(--accent)' : 'var(--border-2)'}`,
+      fontFamily: "'JetBrains Mono', monospace",
+    }}>{label}</span>
+  );
+}
 
 // ── TrackRow ───────────────────────────────────────────────────────────────────
 // Long-press (500 ms) opens the "Add to Playlist" action sheet.
 // In select-mode the row becomes a checkbox; long-press is disabled to avoid
 // conflicting with the selection tap target.
-function TrackRow({ track, idx, playing = false, onLongPress, onFavorite, selected, onSelect }: {
-  track: TrackRecord; idx: number; playing?: boolean;
+function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onFavorite, selected, onSelect }: {
+  track: TrackRecord; idx: number; playing?: boolean; spotifyLinked?: boolean;
   onLongPress?: () => void; onFavorite?: () => void; selected?: boolean; onSelect?: () => void;
 }) {
   // useTrackArtwork reads from the module-level artwork cache (artworkCache.ts)
@@ -267,6 +283,7 @@ function TrackRow({ track, idx, playing = false, onLongPress, onFavorite, select
             style={{ flex: 1, minWidth: 0 }}
             textStyle={{ fontSize: 14, color: playing ? 'var(--accent)' : 'var(--text-0)', fontWeight: 500 }}
           />
+          {!inSelectMode && spotifyLinked && <MMBadge label="SPOTIFY"/>}
           {!inSelectMode && (
             <button
               onClick={e => { e.stopPropagation(); onFavorite?.(); }}
@@ -291,6 +308,76 @@ function TrackRow({ track, idx, playing = false, onLongPress, onFavorite, select
         {fmtDuration(track.duration_ms)}
       </span>
     </div>
+  );
+}
+
+// ── ExternalTrackRow ──────────────────────────────────────────────────────────
+// Imported-but-not-downloaded Spotify track. Dashed border distinguishes it
+// from real library rows; not selectable/playable. Long-press opens the
+// "Get track" action sheet (same gesture TrackRow uses for Add-to-Playlist).
+function ExternalTrackRow({ track, downloading, onLongPress }: {
+  track: SpotifyTrackRecord; downloading: boolean; onLongPress: () => void;
+}) {
+  const subtext = [track.artist, track.album].filter(Boolean).join(' | ');
+  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startLp = () => {
+    lpTimer.current = setTimeout(() => { lpTimer.current = null; onLongPress(); }, 500);
+  };
+  const cancelLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
+  return (
+    <div
+      onPointerDown={e => { (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId); startLp(); }}
+      onPointerUp={cancelLp}
+      onPointerCancel={cancelLp}
+      onPointerMove={e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
+      style={{
+        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', margin: '0 10px',
+        borderRadius: 10, border: '1px dashed var(--border-2)', opacity: 0.85,
+      }}>
+      <MMArt size={42} radius={7}/>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+          <MarqueeText
+            text={track.title}
+            active={false}
+            style={{ flex: 1, minWidth: 0 }}
+            textStyle={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}
+          />
+          <MMBadge label={downloading ? 'FETCHING…' : 'SPOTIFY'} accent/>
+        </div>
+        <MarqueeText
+          text={subtext}
+          active={false}
+          style={{ marginTop: 1 }}
+          textStyle={{ fontSize: 11.5, color: 'var(--text-2)' }}
+        />
+      </div>
+      <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
+        {fmtDuration(track.duration_ms)}
+      </span>
+    </div>
+  );
+}
+
+// Long-press action sheet for an external Spotify row — a single "Get track" action.
+function GetTrackSheet({ label, downloading, onGetTrack, onClose }: {
+  label: string; downloading: boolean; onGetTrack: () => void; onClose: () => void;
+}) {
+  return (
+    <button
+      onClick={() => { onGetTrack(); onClose(); }}
+      disabled={downloading}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+        padding: '12px 0', background: 'none', border: 'none', cursor: downloading ? 'default' : 'pointer',
+        color: 'inherit', opacity: downloading ? 0.5 : 1,
+      }}
+    >
+      <Icons.download size={17} stroke="var(--accent)"/>
+      <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 500 }}>
+        {downloading ? `Fetching "${label}"…` : `Get "${label}"`}
+      </span>
+    </button>
   );
 }
 
@@ -522,10 +609,15 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const libraryStatus   = useStore(s => s.libraryStatus);
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
   const toggleFavorite  = useStore(s => s.toggleFavorite);
+  const importedTracks              = useStore(s => s.importedTracks);
+  const downloadingSpotifyIds       = useStore(s => s.downloadingSpotifyIds);
+  const fetchImportedTracks         = useStore(s => s.fetchImportedTracks);
+  const downloadAndLinkSpotifyTrack = useStore(s => s.downloadAndLinkExternalTrack);
   const [filter,         setFilter]         = useState<FilterId>('all');
   const [query,          setQuery]          = useState('');
   const [sortCriteria,   setSortCriteria]   = useState<SortCriterion[]>(loadCriteria);
   const [actionSheet,    setActionSheet]    = useState<{ hashes: string[]; label: string } | null>(null);
+  const [externalSheet,  setExternalSheet]  = useState<{ spotifyId: string; label: string } | null>(null);
   const [selectMode,     setSelectMode]     = useState(false);
   const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
   const [toast,          setToast]          = useState<string | null>(null);
@@ -574,7 +666,34 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     });
   };
 
+  useEffect(() => { fetchImportedTracks(); }, [fetchImportedTracks]);
+
   const favCount = useMemo(() => tracks.filter(t => t.favorited).length, [tracks]);
+
+  // Local tracks the matcher (or the user) silently linked to a Spotify import —
+  // keyed by local hash so TrackRow can show a small provenance badge.
+  const linkedSpotifyByHash = useMemo(() => {
+    const map = new Map<string, string>(); // hash -> spotify_id
+    for (const t of importedTracks) if (t.matched_hash) map.set(t.matched_hash, t.spotify_id);
+    return map;
+  }, [importedTracks]);
+
+  // Imported-but-not-downloaded rows — only shown under the "All" filter, same
+  // reasoning as desktop: Favorites/Recently Added describe properties real
+  // library rows have.
+  const externalDisplayed = useMemo(() => {
+    if (filter !== 'all') return [];
+    let list = importedTracks.filter(t => t.matched_hash == null);
+    if (query.trim()) {
+      const q = query.toLowerCase();
+      list = list.filter(t =>
+        t.title.toLowerCase().includes(q) ||
+        t.artist.toLowerCase().includes(q) ||
+        (t.album ?? '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [importedTracks, filter, query]);
 
   const displayed = useMemo<TrackRecord[]>(() => {
     let list = tracks;
@@ -626,8 +745,12 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
     } else {
       displayed.forEach(t => items.push({ kind: 'track', track: t, idx: ++rowIdx, playing: t.hash === loadedTrackHash }));
     }
+    if (externalDisplayed.length > 0) {
+      items.push({ kind: 'section', label: 'Spotify', trailing: String(externalDisplayed.length) });
+      externalDisplayed.forEach(t => items.push({ kind: 'external-track', track: t }));
+    }
     return items;
-  }, [displayed, grouped, query, loadedTrackHash]);
+  }, [displayed, grouped, query, loadedTrackHash, externalDisplayed]);
 
   // overscan=6 keeps 6 extra rows rendered above/below the visible window to
   // absorb fast flings without momentary blank rows.
@@ -720,8 +843,15 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                 <div key={vItem.key} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${vItem.start}px)`, height: vItem.size }}>
                   {item.kind === 'section'
                     ? <SectionHead label={item.label} trailing={item.trailing}/>
+                    : item.kind === 'external-track'
+                    ? <ExternalTrackRow
+                        track={item.track}
+                        downloading={downloadingSpotifyIds.includes(item.track.spotify_id)}
+                        onLongPress={() => setExternalSheet({ spotifyId: item.track.spotify_id, label: item.track.title })}
+                      />
                     : <TrackRow
                         track={item.track} idx={item.idx} playing={item.playing}
+                        spotifyLinked={linkedSpotifyByHash.has(item.track.hash)}
                         onLongPress={selectMode ? undefined : () => setActionSheet({ hashes: [item.track.hash], label: item.track.title })}
                         onFavorite={() => toggleFavorite(item.track.hash)}
                         selected={selectMode ? selectedHashes.has(item.track.hash) : undefined}
@@ -772,6 +902,31 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
               label={actionSheet.label}
               onClose={() => setActionSheet(null)}
               onSuccess={msg => { setActionSheet(null); showToast(msg); exitSelectMode(); }}
+            />
+          </MMSheet>
+        </div>
+      )}
+
+      {externalSheet && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+          <div onClick={() => setExternalSheet(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
+          <MMSheet
+            title="Spotify Track"
+            subtitle={externalSheet.label}
+            height="26%"
+            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
+            onClose={() => setExternalSheet(null)}
+          >
+            <GetTrackSheet
+              label={externalSheet.label}
+              downloading={downloadingSpotifyIds.includes(externalSheet.spotifyId)}
+              onGetTrack={() => {
+                const id = externalSheet.spotifyId;
+                downloadAndLinkSpotifyTrack(id)
+                  .then(() => showToast(`Fetched "${externalSheet.label}"`))
+                  .catch(e => showToast(String(e)));
+              }}
+              onClose={() => setExternalSheet(null)}
             />
           </MMSheet>
         </div>

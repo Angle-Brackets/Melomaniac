@@ -153,10 +153,26 @@
 - [ ] Build query UI in the frontend
 
 ### Spotify Integration
-- [ ] Integrate `librespot` for Spotify playback
-- [ ] Implement Spotify authentication flow
-- [ ] Map Spotify tracks to local CAS blobs where duplicates exist
-- [ ] Surface Spotify tracks alongside local library in UI
+See `context/SPOTIFY.md` for full design + progress.
+- [x] Implement Spotify authentication flow (desktop PKCE + loopback listener)
+- [x] Spotify Web API client (account, playlists, liked tracks)
+- [ ] iOS auth bridge (`ASWebAuthenticationSession`)
+- [x] Persisted `spotify_tracks` table + fuzzy matching engine (title/artist/
+      duration, ISRC short-circuit hook) — imported tracks either silently
+      link to an existing local track (>=90% confidence, user-overridable)
+      or show up as external rows for the user to fetch manually
+- [ ] Surface external Spotify tracks in the Library UI (desktop + mobile) —
+      dashed styling, "Get track" (reuses existing yt-dlp `download_enqueue`,
+      no new download infra), "Unlink Spotify match"
+- [ ] Build Spotify Settings UI (connect/disconnect, playlist picker, trigger
+      import)
+- [ ] (deferred) Acoustic fingerprinting / MusicBrainz enrichment — Chromaprint
+      fingerprinting + AcoustID lookup + MusicBrainz ISRC lookup for the
+      *local* library, to feed the matcher's already-wired ISRC short-circuit
+      (`tracks.isrc` column exists, always NULL until this lands). Real
+      subsystem on its own: rate-limited external APIs, resumable backfill
+      job, no guaranteed ISRC coverage. Not started.
+- [ ] (deferred/maybe never) live `librespot` playback streaming
 
 ### Developer Mode — Commit Graph
 - [x] Visual commit history graph for playlists — SVG DAG with lane layout, branch colours, cubic-bezier curves; inline (History tab) + full-screen overlay variants
