@@ -199,11 +199,16 @@ pub async fn sync_fetch_peer_manifest(
     state: State<'_, SyncState>,
 ) -> Result<Vec<PlaylistManifest>, String> {
     let bridge = Arc::clone(&state.bridge);
-    tokio::task::spawn_blocking(move || {
+    let pk_for_log = public_key_b64.clone();
+    let result = tokio::task::spawn_blocking(move || {
         bridge.get_peer_manifest(&public_key_b64).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    if let Err(ref e) = result {
+        eprintln!("[sync] sync_fetch_peer_manifest failed for {}…: {e}", &pk_for_log[..8.min(pk_for_log.len())]);
+    }
+    result
 }
 
 #[tauri::command]
