@@ -5,6 +5,7 @@ import { createLibrarySlice } from '../librarySlice'
 import { createPlaybackSlice } from '../playbackSlice'
 import { createPlaylistSlice } from '../playlistSlice'
 import { createQueueSlice } from '../queueSlice'
+import { createSpotifySlice } from '../spotifySlice'
 import type { StoreState } from '../index'
 import type { ConflictChunk, ConflictResolution } from '../types'
 
@@ -30,6 +31,7 @@ function makeStore() {
     ...createLibrarySlice(...a),
     ...createPlaylistSlice(...a),
     ...createSyncSlice(...a),
+    ...createSpotifySlice(...a),
   }))
 }
 

@@ -537,6 +537,7 @@ async fn sync_one_branch_async(
                             mime_type:    entry.mime_type.clone(),
                             ingested_at:  0,
                             source_url:   None,
+                            isrc:         None,
                         };
                         if let Err(e) = db.upsert_track_from_sync(&record).await {
                             eprintln!("[sync] upsert_track_from_sync: {e}");
@@ -579,6 +580,7 @@ async fn sync_one_branch_async(
                             mime_type:    r.mime_type,
                             ingested_at:  0,
                             source_url:   None,
+                            isrc:         None,
                         };
                         if let Err(e) = db.upsert_track_from_sync(&record).await {
                             eprintln!("[sync] upsert_track_from_sync: {e}");
@@ -598,6 +600,7 @@ async fn sync_one_branch_async(
                                 mime_type:    None,
                                 ingested_at:  0,
                                 source_url:   None,
+                                isrc:         None,
                             };
                             if let Err(e) = db.upsert_track_from_sync(&stub).await {
                                 eprintln!("[sync] upsert_track_from_sync (stub): {e}");
@@ -1075,6 +1078,7 @@ impl SyncBridge for DesktopSyncBridge {
                         mime_type:    r.mime_type,
                         ingested_at:  0,
                         source_url:   None,
+                        isrc:         None,
                     };
                     if let Err(e) = db.upsert_track_from_sync(&record).await {
                         eprintln!("[sync] metadata refresh upsert: {e}");

@@ -20,6 +20,7 @@ fn track(hash: &str) -> TrackRecord {
         mime_type:    None,
         ingested_at:  0,
         source_url:   None,
+        isrc:         None,
     }
 }
 

@@ -2696,13 +2696,17 @@ version = "1.0.2-alpha"
 dependencies = [
  "base64 0.22.1",
  "discord-rich-presence",
+ "keyring",
  "melomaniac-audio",
  "melomaniac-storage",
  "melomaniac-sync",
+ "rand 0.8.6",
  "reqwest 0.12.28",
  "rodio",
  "serde",
  "serde_json",
+ "sha2",
+ "strsim",
  "sysinfo",
  "tauri",
  "tauri-build",
@@ -2713,6 +2717,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "tokio",
+ "url",
  "uuid 1.23.1",
 ]
 

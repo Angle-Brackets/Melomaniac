@@ -23,6 +23,42 @@ pub struct TrackRecord {
     pub ingested_at:  i64,
     /// Original source URL if downloaded, NULL for locally imported files.
     pub source_url:   Option<String>,
+    /// International Standard Recording Code. NULL until an acoustic-fingerprinting/
+    /// MusicBrainz enrichment pass (not yet built) populates it. Lets the Spotify
+    /// matcher short-circuit to an exact match when both sides have an ISRC.
+    pub isrc:         Option<String>,
+}
+
+/// A Spotify track imported via playlist/liked-songs sync, persisted so it
+/// survives restarts and shows up in the Library as an external row until
+/// downloaded or silently linked to an existing local track.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub struct SpotifyTrackRecord {
+    pub spotify_id:   String,
+    pub title:        String,
+    pub artist:       String,
+    pub album:        Option<String>,
+    pub duration_ms:  i64,
+    pub isrc:         Option<String>,
+    /// `"playlist:<id>"` or `"liked"`.
+    pub source:       String,
+    /// NULL = shows as an external row; set = silently linked to a local track.
+    pub matched_hash: Option<String>,
+    /// NULL for manual links/unlinks, algorithmic score otherwise.
+    pub confidence:   Option<f32>,
+    pub imported_at:  i64,
+}
+
+/// Input shape for upserting a Spotify track. Mirrors `SpotifyTrackRecord`
+/// minus the match-state fields, which `upsert_spotify_tracks` never touches.
+pub struct NewSpotifyTrack {
+    pub spotify_id:  String,
+    pub title:       String,
+    pub artist:      String,
+    pub album:       Option<String>,
+    pub duration_ms: i64,
+    pub isrc:        Option<String>,
+    pub source:      String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -272,6 +308,12 @@ impl Database {
     pub async fn remove_track(&self, hash: &str) -> Result<(), StorageError> {
         sqlx::query("DELETE FROM tracks WHERE hash = ?")
             .bind(hash).execute(&self.pool).await?;
+        // Demote any Spotify track that was silently linked to this hash back
+        // to an external row, rather than leaving a dangling reference.
+        sqlx::query(
+            "UPDATE spotify_tracks SET matched_hash = NULL, confidence = NULL WHERE matched_hash = ?"
+        )
+        .bind(hash).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -280,6 +322,57 @@ impl Database {
         let rows: Vec<(String,)> = sqlx::query_as("SELECT hash FROM tracks")
             .fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|(h,)| h).collect())
+    }
+
+    // ── Spotify tracks ────────────────────────────────────────────────────────
+
+    /// Upsert imported Spotify tracks. Never touches `matched_hash`/`confidence`
+    /// so re-importing a playlist can't clobber an existing manual link/unlink
+    /// decision made by the user.
+    pub async fn upsert_spotify_tracks(&self, tracks: &[NewSpotifyTrack]) -> Result<(), StorageError> {
+        let now = unix_now();
+        let mut tx = self.pool.begin().await?;
+        for t in tracks {
+            sqlx::query(
+                "INSERT INTO spotify_tracks
+                 (spotify_id, title, artist, album, duration_ms, isrc, source, matched_hash, confidence, imported_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                 ON CONFLICT(spotify_id) DO UPDATE SET
+                   title       = excluded.title,
+                   artist      = excluded.artist,
+                   album       = excluded.album,
+                   duration_ms = excluded.duration_ms,
+                   isrc        = excluded.isrc,
+                   source      = excluded.source"
+            )
+            .bind(&t.spotify_id).bind(&t.title).bind(&t.artist)
+            .bind(&t.album).bind(t.duration_ms).bind(&t.isrc)
+            .bind(&t.source).bind(now)
+            .execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn get_spotify_tracks(&self) -> Result<Vec<SpotifyTrackRecord>, StorageError> {
+        Ok(sqlx::query_as::<_, SpotifyTrackRecord>(
+            "SELECT * FROM spotify_tracks ORDER BY artist, album, title"
+        )
+        .fetch_all(&self.pool).await?)
+    }
+
+    /// Set (or clear, passing `None, None`) a Spotify track's link to a local
+    /// track hash. Shared by auto-matching, manual linking, and unlinking.
+    pub async fn set_spotify_track_match(
+        &self,
+        spotify_id: &str,
+        hash:       Option<&str>,
+        confidence: Option<f32>,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE spotify_tracks SET matched_hash = ?, confidence = ? WHERE spotify_id = ?")
+            .bind(hash).bind(confidence).bind(spotify_id)
+            .execute(&self.pool).await?;
+        Ok(())
     }
 
     // ── Playlists ─────────────────────────────────────────────────────────────
@@ -926,6 +1019,7 @@ mod tests {
             mime_type:    None,
             ingested_at:  0,
             source_url:   None,
+            isrc:         None,
         }
     }
 

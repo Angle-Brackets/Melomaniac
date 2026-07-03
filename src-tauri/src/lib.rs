@@ -2,7 +2,9 @@ mod audio;
 mod discord;
 mod downloader;
 mod editor;
+mod matching;
 mod network;
+mod spotify;
 mod stats;
 mod storage;
 mod sync;
@@ -206,6 +208,7 @@ pub fn run() {
 
             app.manage(Arc::new(DownloadManager::new()));
             app.manage(discord::DiscordState::new());
+            app.manage(spotify::SpotifyState::new());
             app.manage(stats::SystemState(std::sync::Mutex::new(
                 sysinfo::System::new(),
             )));
@@ -307,6 +310,19 @@ pub fn run() {
             sync::sync_get_fingerprint,
             sync::sync_get_pending_conflicts,
             sync::resolve_merge_conflict,
+            spotify::spotify_connect,
+            spotify::spotify_disconnect,
+            spotify::spotify_is_connected,
+            spotify::spotify_get_account,
+            spotify::spotify_get_playlists,
+            spotify::spotify_get_playlist_tracks,
+            spotify::spotify_get_liked_tracks,
+            #[cfg(debug_assertions)]
+            spotify::spotify_debug_raw,
+            matching::spotify_import_playlist_tracks,
+            matching::spotify_get_imported_tracks,
+            matching::spotify_link_track,
+            matching::spotify_unlink_track,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

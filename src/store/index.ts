@@ -7,8 +7,9 @@ import { createQueueSlice, QueueSlice } from './queueSlice'
 import { createLibrarySlice, LibrarySlice } from './librarySlice'
 import { createPlaylistSlice, PlaylistSlice } from './playlistSlice'
 import { createSyncSlice, SyncSlice } from './syncSlice'
+import { createSpotifySlice, SpotifySlice } from './spotifySlice'
 
-export type StoreState = PlaybackSlice & QueueSlice & LibrarySlice & PlaylistSlice & SyncSlice
+export type StoreState = PlaybackSlice & QueueSlice & LibrarySlice & PlaylistSlice & SyncSlice & SpotifySlice
 
 export const useStore = create<StoreState>()((...a) => ({
   ...createPlaybackSlice(...a),
@@ -16,4 +17,5 @@ export const useStore = create<StoreState>()((...a) => ({
   ...createLibrarySlice(...a),
   ...createPlaylistSlice(...a),
   ...createSyncSlice(...a),
+  ...createSpotifySlice(...a),
 }))
