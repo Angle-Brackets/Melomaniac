@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStore } from '../../store';
 import type { Playlist } from '../data';
+import type { PlaylistManifest } from '../../store/types';
 import {
   IcoMenu, IcoLibrary, IcoMusicLib, IcoHistory, IcoBranch,
   IcoEditor, IcoSettings, IcoPin, IcoChevron, IcoDiscover,
@@ -346,6 +347,81 @@ function FolderRow({ folder, playlists, activeId, onSelect, pinnedIds, onToggleP
   );
 }
 
+// ── SVG progress ring (compact, for sidebar) ──────────────────────────────────
+function SidebarProgressRing({ pct }: { pct: number }) {
+  const r = 5;
+  const circ = 2 * Math.PI * r;
+  return (
+    <svg width={14} height={14} style={{ flexShrink: 0, transform: 'rotate(-90deg)' }}>
+      <circle cx={7} cy={7} r={r} fill="none" stroke="var(--border-2)" strokeWidth={2}/>
+      <circle cx={7} cy={7} r={r} fill="none" stroke="var(--accent)" strokeWidth={2}
+        strokeDasharray={`${pct * circ} ${circ}`} strokeLinecap="round"
+        style={{ transition: 'stroke-dasharray 0.2s ease' }}
+      />
+    </svg>
+  );
+}
+
+// ── Peer playlist row ─────────────────────────────────────────────────────────
+// Shows undownloaded peer playlists with dashed styling; downloaded ones solid.
+function PeerPlaylistRow({ manifest, isLocal, isDownloading, progress, onDownload }: {
+  manifest: PlaylistManifest; isLocal: boolean;
+  isDownloading: boolean; progress: number; onDownload: () => void;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={isDownloading || isLocal ? undefined : onDownload}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '4px 10px 4px 10px',
+        margin: '1px 6px',
+        borderRadius: 5,
+        border: isLocal ? '1px solid transparent' : '1px dashed var(--border-2)',
+        background: hov && !isLocal ? 'var(--bg-3)' : 'transparent',
+        opacity: isLocal ? 1 : 0.8,
+        cursor: isDownloading || isLocal ? 'default' : 'pointer',
+        transition: 'background 0.1s, opacity 0.1s',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 12, fontWeight: 500,
+          color: isLocal ? 'var(--text-0)' : 'var(--text-1)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {manifest.name}
+        </div>
+        <div style={{
+          fontSize: 9.5, color: 'var(--text-3)',
+          fontFamily: "'JetBrains Mono', monospace", marginTop: 1,
+        }}>
+          {manifest.track_count} track{manifest.track_count !== 1 ? 's' : ''}
+          {manifest.branches.length > 1 && ` · ${manifest.branches.length} branches`}
+        </div>
+      </div>
+      {isDownloading
+        ? <SidebarProgressRing pct={progress}/>
+        : isLocal
+          ? (
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
+              stroke="var(--green, #4ade80)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 5l2.2 2.2L8 3"/>
+            </svg>
+          )
+          : hov && (
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
+              stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 1v6M2.5 5L5 7.5 7.5 5M1 9h8"/>
+            </svg>
+          )
+      }
+    </div>
+  );
+}
+
 // ── LibrarySidebar ────────────────────────────────────────────────────────────
 interface LibrarySidebarProps {
   playlists: Playlist[]; activePlaylistId: string | null;
@@ -373,6 +449,37 @@ export default function LibrarySidebar({
 }: LibrarySidebarProps): JSX.Element {
   const [isDragging, setIsDragging] = useState(false);
   const [noFolderCount, setNoFolderCount] = useState(0);
+
+  // ── Peer manifest state ───────────────────────────────────────────────────
+  // Uses the sidebar-scoped manifest state, NOT peerManifest*/openPeerManifest —
+  // those drive PeerPlaylistsModal (manual "Sync" clicks only). Reusing them here
+  // would pop the modal open on every background peer poll.
+  const livePeers                  = useStore(s => s.livePeers);
+  const knownDevices               = useStore(s => s.knownDevices);
+  const sidebarPeerManifest        = useStore(s => s.sidebarPeerManifest);
+  const sidebarPeerManifestPeer    = useStore(s => s.sidebarPeerManifestPeer);
+  const sidebarPeerManifestLoading = useStore(s => s.sidebarPeerManifestLoading);
+  const downloadingPlaylists       = useStore(s => s.downloadingPlaylists);
+  const downloadProgress           = useStore(s => s.downloadProgress);
+  const refreshSidebarPeerManifest = useStore(s => s.refreshSidebarPeerManifest);
+  const downloadPlaylist           = useStore(s => s.downloadPlaylist);
+
+  // Auto-fetch the manifest from the first trusted live peer — same logic as mobile PlaylistsList.
+  useEffect(() => {
+    if (livePeers.length === 0) return;
+    const trusted = livePeers.find(p => knownDevices.some(k => k.public_key_b64 === p.public_key_b64));
+    if (!trusted) return;
+    if (sidebarPeerManifestPeer?.public_key_b64 === trusted.public_key_b64 && sidebarPeerManifest !== null) return;
+    refreshSidebarPeerManifest(trusted);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [livePeers, knownDevices]);
+
+  // Use the Zustand store's playlists for localIds — it updates immediately after
+  // downloadPlaylist resolves (via loadPlaylists), before the prop refreshes.
+  const storePlaylists = useStore(s => s.playlists);
+  const localIds   = new Set(storePlaylists.map(p => p.id));
+  const peerName   = sidebarPeerManifestPeer?.display_name ?? 'Peer';
+  const peerItems  = sidebarPeerManifest ?? [];
 
   const pinned = playlists.filter(p => pinnedIds.has(p.id));
   const unassigned = playlists.filter(p => !pinnedIds.has(p.id) && folderAssignments[p.id] == null);
@@ -495,6 +602,46 @@ export default function LibrarySidebar({
               }}
             >
               No folder
+            </div>
+          )}
+
+          {/* Peer playlists — shown inline when a trusted peer is online */}
+          {(sidebarPeerManifestLoading || peerItems.length > 0) && (
+            <div>
+              <div className="h-px bg-mm-b0 mx-2.5 my-1" />
+              <div style={{
+                padding: '4px 10px 2px',
+                fontSize: 9, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'var(--text-3)',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}>
+                From {peerName}
+                {sidebarPeerManifestLoading && (
+                  <div style={{
+                    width: 8, height: 8,
+                    border: '1.5px solid var(--accent)', borderTopColor: 'transparent',
+                    borderRadius: '50%', animation: 'spin 0.7s linear infinite',
+                    flexShrink: 0,
+                  }}/>
+                )}
+              </div>
+              {peerItems.map(manifest => (
+                <PeerPlaylistRow
+                  key={manifest.id}
+                  manifest={manifest}
+                  isLocal={localIds.has(manifest.id)}
+                  isDownloading={downloadingPlaylists.includes(manifest.id)}
+                  progress={downloadProgress[manifest.id] ?? 0}
+                  onDownload={() => {
+                    if (!sidebarPeerManifestPeer) return;
+                    const branches = manifest.branches.length > 0
+                      ? manifest.branches.map(b => b.name)
+                      : ['main'];
+                    downloadPlaylist(manifest.id, branches, sidebarPeerManifestPeer.public_key_b64);
+                  }}
+                />
+              ))}
             </div>
           )}
 

@@ -163,6 +163,7 @@ export default function DesktopApp(): JSX.Element {
   const refreshLivePeers         = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices      = useStore(s => s.refreshKnownDevices);
   const loadPlaylists            = useStore(s => s.loadPlaylists);
+  const setDownloadProgress      = useStore(s => s.setDownloadProgress);
   const artworkVersion           = useStore(s => s.artworkVersion);
   const syncVersion              = useStore(s => s.syncVersion);
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
@@ -351,10 +352,12 @@ export default function DesktopApp(): JSX.Element {
     let saved: SavedPlaybackState;
     try { saved = JSON.parse(raw); } catch { return; }
     invoke<number>('audio_position')
-      .then(() => { pendingRestoreRef.current = saved; })
+      .then((pos) => {
+        // pos > 0: audio is genuinely still running (Windows WebView2 frontend restart).
+        // pos === 0: cold start — AtomicU64 is just zeroed, no track actually loaded.
+        pendingRestoreRef.current = pos > 0 ? saved : { ...saved, coldStart: true };
+      })
       .catch(() => {
-        // Cold start — audio engine is not running, but we still restore the track
-        // as a paused restore (load without play, seek to saved position).
         pendingRestoreRef.current = { ...saved, coldStart: true };
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,7 +369,14 @@ export default function DesktopApp(): JSX.Element {
   useEffect(() => {
     loadPlaylists().then(() => refreshLivePeers())
     refreshKnownDevices()
-    const id = setInterval(refreshLivePeers, 15_000)
+    // Also re-poll knownDevices here: an inbound QR pairing (peer scans our
+    // code and POSTs to our /pair endpoint) updates the trust list on disk
+    // with no frontend notification, so the store's copy goes stale until
+    // we re-fetch it.
+    const id = setInterval(() => {
+      refreshLivePeers()
+      refreshKnownDevices()
+    }, 15_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -442,6 +452,16 @@ export default function DesktopApp(): JSX.Element {
     return () => { unsub.then(fn => fn()); };
   }, [reloadLibrary]);
 
+  // ── Forward Rust sync progress events to the store ───────────────────────
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ playlist_id: string; done: number; total: number }>('sync://progress', ({ payload }) => {
+      const pct = payload.total > 0 ? payload.done / payload.total : 0;
+      setDownloadProgress(payload.playlist_id, pct);
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [setDownloadProgress]);
+
   // ── Load real playlists from backend ─────────────────────────────────────
   const reloadPlaylists = useCallback(() => {
     invoke<PlaylistRecord[]>('playlist_get_all')
@@ -458,6 +478,11 @@ export default function DesktopApp(): JSX.Element {
   }, []);
 
   useEffect(() => { reloadPlaylists(); }, []);
+
+  // When a sync downloads a new playlist, refresh the local playlist list.
+  useEffect(() => {
+    if (syncVersion > 0) reloadPlaylists();
+  }, [syncVersion, reloadPlaylists]);
 
   // Persist active playlist so it survives restarts
   useEffect(() => {

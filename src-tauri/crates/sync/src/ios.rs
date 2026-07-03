@@ -168,6 +168,15 @@ fn local_ip() -> Option<std::net::IpAddr> {
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
+// Unreachable peers (asleep, off the network, firewalled) would otherwise
+// hang on TCP connect for minutes with no client-side bound. Fail fast instead.
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_default()
+}
+
 struct SyncClient {
     identity: Arc<NodeIdentity>,
     http: reqwest::Client,
@@ -599,6 +608,7 @@ impl SyncBridge for IosSyncBridge {
             db:               self.db.clone(),
             cas:              self.cas.clone(),
             pending_qr_token: self.pending_qr_token.clone(),
+            sync_trust_mirror: Some(self.trust_list.clone()),
         };
         let router = build_router(server_state);
         let bind_addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("valid bind address");
@@ -748,7 +758,7 @@ impl SyncBridge for IosSyncBridge {
                     "display_name":   own_name,
                     "token":          token,
                 });
-                match reqwest::Client::new()
+                match http_client()
                     .post(&url)
                     .json(&body)
                     .send()
@@ -777,22 +787,50 @@ impl SyncBridge for IosSyncBridge {
     }
 
     fn remove_device(&self, public_key_b64: &str) -> Result<(), SyncError> {
-        let mut list = self
-            .trust_list
-            .write()
-            .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
-        list.remove(public_key_b64);
-        list.save(&self.identity)?;
+        {
+            let mut list = self
+                .trust_list
+                .write()
+                .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
+            list.remove(public_key_b64);
+            list.save(&self.identity)?;
+        }
+        // Evict from the live peer list too so a currently-connected peer
+        // disappears from the UI immediately instead of lingering until the
+        // next mDNS re-resolution or app restart.
+        if let Ok(mut peers) = self.peers.write() {
+            peers.retain(|p| p.public_key_b64 != public_key_b64);
+        }
+        // Also revoke in the HTTP server's copy, otherwise the removed device
+        // would keep passing auth checks (check_auth reads http_trust_list,
+        // not the std-locked copy above) until the app restarts.
+        let pk = public_key_b64.to_string();
+        let http_trust_list = self.http_trust_list.clone();
+        // This method runs directly on the async command thread (not inside
+        // spawn_blocking like sync_playlist below), so block_on would panic —
+        // spawn a task instead. The lock is uncontended and completes almost
+        // immediately, so the fire-and-forget race is not observable in practice.
+        tokio::spawn(async move {
+            http_trust_list.write().await.remove(&pk);
+        });
         Ok(())
     }
 
     fn rename_device(&self, public_key_b64: &str, new_name: &str) -> Result<(), SyncError> {
-        let mut list = self
-            .trust_list
-            .write()
-            .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
-        list.rename(public_key_b64, new_name.to_string());
-        list.save(&self.identity)?;
+        {
+            let mut list = self
+                .trust_list
+                .write()
+                .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
+            list.rename(public_key_b64, new_name.to_string());
+            list.save(&self.identity)?;
+        }
+        let pk = public_key_b64.to_string();
+        let name = new_name.to_string();
+        let http_trust_list = self.http_trust_list.clone();
+        tokio::spawn(async move {
+            http_trust_list.write().await.rename(&pk, name);
+        });
         Ok(())
     }
 
@@ -826,7 +864,7 @@ impl SyncBridge for IosSyncBridge {
             let peer = peer.ok_or(SyncError::NotPaired)?;
             let client = SyncClient {
                 identity: Arc::clone(&identity),
-                http: reqwest::Client::new(),
+                http: http_client(),
                 base_url: format!("http://{}", peer.addr),
             };
 
@@ -862,7 +900,7 @@ impl SyncBridge for IosSyncBridge {
             let peer = peer.ok_or_else(|| SyncError::PeerUnreachable(pk.clone()))?;
             let client = SyncClient {
                 identity: Arc::clone(&identity),
-                http: reqwest::Client::new(),
+                http: http_client(),
                 base_url: format!("http://{}", peer.addr),
             };
 
@@ -921,7 +959,7 @@ impl SyncBridge for IosSyncBridge {
             let peer = peer.ok_or_else(|| SyncError::PeerUnreachable(pk.clone()))?;
             let client = SyncClient {
                 identity: Arc::clone(&identity),
-                http: reqwest::Client::new(),
+                http: http_client(),
                 base_url: format!("http://{}", peer.addr),
             };
             client.get_manifest().await
