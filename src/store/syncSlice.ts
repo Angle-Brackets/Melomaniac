@@ -389,7 +389,9 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
       })
       set({ sidebarPeerManifest: result, sidebarPeerManifestLoading: false })
     } catch {
-      set({ sidebarPeerManifestLoading: false })
+      // Peer went unreachable (asleep, off-network) — hide the section rather
+      // than leave stale playlists from a previous successful fetch on screen.
+      set({ sidebarPeerManifest: null, sidebarPeerManifestPeer: null, sidebarPeerManifestLoading: false })
     }
   },
 

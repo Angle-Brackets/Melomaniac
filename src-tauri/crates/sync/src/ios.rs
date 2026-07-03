@@ -168,6 +168,15 @@ fn local_ip() -> Option<std::net::IpAddr> {
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
+// Unreachable peers (asleep, off the network, firewalled) would otherwise
+// hang on TCP connect for minutes with no client-side bound. Fail fast instead.
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .build()
+        .unwrap_or_default()
+}
+
 struct SyncClient {
     identity: Arc<NodeIdentity>,
     http: reqwest::Client,
@@ -748,7 +757,7 @@ impl SyncBridge for IosSyncBridge {
                     "display_name":   own_name,
                     "token":          token,
                 });
-                match reqwest::Client::new()
+                match http_client()
                     .post(&url)
                     .json(&body)
                     .send()
@@ -826,7 +835,7 @@ impl SyncBridge for IosSyncBridge {
             let peer = peer.ok_or(SyncError::NotPaired)?;
             let client = SyncClient {
                 identity: Arc::clone(&identity),
-                http: reqwest::Client::new(),
+                http: http_client(),
                 base_url: format!("http://{}", peer.addr),
             };
 
@@ -862,7 +871,7 @@ impl SyncBridge for IosSyncBridge {
             let peer = peer.ok_or_else(|| SyncError::PeerUnreachable(pk.clone()))?;
             let client = SyncClient {
                 identity: Arc::clone(&identity),
-                http: reqwest::Client::new(),
+                http: http_client(),
                 base_url: format!("http://{}", peer.addr),
             };
 
@@ -921,7 +930,7 @@ impl SyncBridge for IosSyncBridge {
             let peer = peer.ok_or_else(|| SyncError::PeerUnreachable(pk.clone()))?;
             let client = SyncClient {
                 identity: Arc::clone(&identity),
-                http: reqwest::Client::new(),
+                http: http_client(),
                 base_url: format!("http://{}", peer.addr),
             };
             client.get_manifest().await

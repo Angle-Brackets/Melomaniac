@@ -284,6 +284,20 @@ fn local_ip_from_interfaces() -> Option<std::net::IpAddr> {
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
 
+// reqwest::Error's Display only shows the top-level "error sending request"
+// wrapper; the actual cause (connection refused, timed out, dns failure...)
+// lives in the source chain. Surface it so sync failures are diagnosable
+// from logs instead of a useless generic message.
+fn describe_reqwest_error(e: &reqwest::Error) -> String {
+    let mut msg = e.to_string();
+    let mut source = std::error::Error::source(e);
+    while let Some(s) = source {
+        msg.push_str(&format!(" — caused by: {s}"));
+        source = s.source();
+    }
+    msg
+}
+
 struct SyncClient {
     identity: Arc<NodeIdentity>,
     http: reqwest::Client,
@@ -294,7 +308,14 @@ impl SyncClient {
     fn new(identity: Arc<NodeIdentity>, addr: SocketAddr) -> Self {
         Self {
             identity,
-            http: reqwest::Client::new(),
+            // Unreachable peers (asleep, off the network, firewalled) would
+            // otherwise hang on TCP connect for minutes with no client-side
+            // bound, leaving callers like the sidebar's peer-manifest poll
+            // stuck "loading" indefinitely. Fail fast instead.
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(8))
+                .build()
+                .unwrap_or_default(),
             base_url: format!("http://{addr}"),
         }
     }
@@ -318,11 +339,11 @@ impl SyncClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))?;
 
         resp.json::<Vec<PlaylistManifest>>()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))
     }
 
     async fn get_blob(&self, hash: &str) -> Result<Vec<u8>, SyncError> {
@@ -332,7 +353,7 @@ impl SyncClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))?;
 
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Err(SyncError::BlobTransferFailed(format!("blob not found: {hash}")));
@@ -341,7 +362,7 @@ impl SyncClient {
         resp.bytes()
             .await
             .map(|b| b.to_vec())
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))
     }
 
     async fn get_commits(
@@ -355,11 +376,11 @@ impl SyncClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))?;
 
         resp.json::<Vec<CommitRecord>>()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))
     }
 
     async fn get_tracks(&self, hashes: &[String]) -> Result<Vec<TrackSyncRecord>, SyncError> {
@@ -370,11 +391,11 @@ impl SyncClient {
             .json(hashes)
             .send()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))?;
 
         resp.json::<Vec<TrackSyncRecord>>()
             .await
-            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))
     }
 }
 
