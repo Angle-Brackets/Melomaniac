@@ -369,7 +369,14 @@ export default function DesktopApp(): JSX.Element {
   useEffect(() => {
     loadPlaylists().then(() => refreshLivePeers())
     refreshKnownDevices()
-    const id = setInterval(refreshLivePeers, 15_000)
+    // Also re-poll knownDevices here: an inbound QR pairing (peer scans our
+    // code and POSTs to our /pair endpoint) updates the trust list on disk
+    // with no frontend notification, so the store's copy goes stale until
+    // we re-fetch it.
+    const id = setInterval(() => {
+      refreshLivePeers()
+      refreshKnownDevices()
+    }, 15_000)
     return () => clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

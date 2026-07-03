@@ -50,6 +50,13 @@ export type SyncSlice = {
   peerManifestLoading:  boolean
   downloadingPlaylists: string[]
 
+  // Separate from peerManifest* above: powers the always-visible inline
+  // "From <peer>" section in the desktop/mobile sidebar. Kept independent so
+  // background refreshes never pop open the manual-sync modal (peerManifestOpen).
+  sidebarPeerManifestPeer:    PeerInfo | null
+  sidebarPeerManifest:        PlaylistManifest[] | null
+  sidebarPeerManifestLoading: boolean
+
   openPairingDisplay:  () => Promise<void>
   openPairingScanner:  () => void
   closePairing:        () => void
@@ -59,9 +66,10 @@ export type SyncSlice = {
   syncWithPeer:        (publicKeyB64: string) => Promise<void>
   dismissSyncToast:    () => void
 
-  openPeerManifest:  (peer: PeerInfo) => Promise<void>
-  closePeerManifest: () => void
-  downloadPlaylist:  (playlistId: string, branchNames: string[]) => Promise<void>
+  openPeerManifest:         (peer: PeerInfo) => Promise<void>
+  closePeerManifest:        () => void
+  refreshSidebarPeerManifest: (peer: PeerInfo) => Promise<void>
+  downloadPlaylist:         (playlistId: string, branchNames: string[], publicKeyB64?: string) => Promise<void>
 }
 
 // Per-peer, per-branch last-known HEAD commit: Map<peerPk, Map<"id:branch", headCommit>>
@@ -261,6 +269,10 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
   peerManifestLoading:  false,
   downloadingPlaylists: [],
 
+  sidebarPeerManifestPeer:    null,
+  sidebarPeerManifest:        null,
+  sidebarPeerManifestLoading: false,
+
   openPairingDisplay: async () => {
     const [payload, fp, peers] = await Promise.all([
       invoke<QrPayload>('sync_generate_qr_payload'),
@@ -363,8 +375,29 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     peerManifestLoading: false,
   }),
 
-  downloadPlaylist: async (playlistId, branchNames) => {
-    const publicKeyB64 = get().peerManifestPeer?.public_key_b64 ?? null
+  // Silent counterpart to openPeerManifest — used by the always-visible
+  // sidebar section. Never touches peerManifestOpen, so it can't pop the
+  // manual-sync modal (PeerPlaylistsModal is reserved for explicit "Sync" clicks).
+  refreshSidebarPeerManifest: async (peer) => {
+    set({
+      sidebarPeerManifestPeer: peer,
+      sidebarPeerManifestLoading: true,
+    })
+    try {
+      const result = await invoke<PlaylistManifest[]>('sync_fetch_peer_manifest', {
+        publicKeyB64: peer.public_key_b64,
+      })
+      set({ sidebarPeerManifest: result, sidebarPeerManifestLoading: false })
+    } catch {
+      set({ sidebarPeerManifestLoading: false })
+    }
+  },
+
+  downloadPlaylist: async (playlistId, branchNames, publicKeyB64Override) => {
+    const publicKeyB64 = publicKeyB64Override
+      ?? get().peerManifestPeer?.public_key_b64
+      ?? get().sidebarPeerManifestPeer?.public_key_b64
+      ?? null
     set(state => ({ downloadingPlaylists: [...state.downloadingPlaylists, playlistId] }))
     try {
       const report = branchNames.length === 1
