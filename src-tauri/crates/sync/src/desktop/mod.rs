@@ -713,6 +713,7 @@ impl SyncBridge for DesktopSyncBridge {
             db: self.db.clone(),
             cas: self.cas.clone(),
             pending_qr_token: self.pending_qr_token.clone(),
+            sync_trust_mirror: None,
         };
         let router = build_router(server_state);
         let bind_addr: SocketAddr =
@@ -874,7 +875,13 @@ impl SyncBridge for DesktopSyncBridge {
         block(async {
             let mut tl = self.trust_list.write().await;
             tl.remove(&pk);
-            tl.save(&identity)
+            let result = tl.save(&identity);
+            drop(tl);
+            // Evict from the live peer map too so a currently-connected peer
+            // disappears from the UI immediately instead of lingering until
+            // the next mDNS re-resolution or app restart.
+            self.peers.write().await.remove(&pk);
+            result
         })
     }
 
