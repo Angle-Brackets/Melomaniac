@@ -28,6 +28,13 @@ pub(crate) struct ServerState {
     /// Token stored when we generate a QR code; the scanning device POSTs it
     /// back to /pair so we can add it to our trust list.
     pub(crate) pending_qr_token:  Arc<std::sync::Mutex<Option<(String, u64)>>>,
+    /// iOS only: a second, sync-flavoured copy of the trust list that FFI
+    /// callbacks and `SyncBridge::known_devices`/`remove_device` read from
+    /// directly (they can't await a tokio lock). `handle_pair` writes here too
+    /// so a device that pairs *into* us shows up immediately instead of only
+    /// after the next app restart. Desktop shares one Arc for both fields, so
+    /// this is always `None` there.
+    pub(crate) sync_trust_mirror: Option<Arc<std::sync::RwLock<TrustList>>>,
 }
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
@@ -287,9 +294,14 @@ pub(crate) async fn handle_pair(
     };
     eprintln!("[sync] /pair: adding '{}' to trust list", req.display_name);
     let mut tl = state.trust_list.write().await;
-    tl.add(device);
+    tl.add(device.clone());
     tl.save(&state.identity).unwrap_or_else(|e| eprintln!("[sync] /pair: save error: {e}"));
     drop(tl);
+    if let Some(mirror) = &state.sync_trust_mirror {
+        if let Ok(mut m) = mirror.write() {
+            m.add(device);
+        }
+    }
 
     // Immediately surface the newly paired device as a live peer so it appears
     // in the UI without waiting for the next mDNS advertisement cycle.

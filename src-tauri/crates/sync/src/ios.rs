@@ -608,6 +608,7 @@ impl SyncBridge for IosSyncBridge {
             db:               self.db.clone(),
             cas:              self.cas.clone(),
             pending_qr_token: self.pending_qr_token.clone(),
+            sync_trust_mirror: Some(self.trust_list.clone()),
         };
         let router = build_router(server_state);
         let bind_addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("valid bind address");
@@ -786,22 +787,50 @@ impl SyncBridge for IosSyncBridge {
     }
 
     fn remove_device(&self, public_key_b64: &str) -> Result<(), SyncError> {
-        let mut list = self
-            .trust_list
-            .write()
-            .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
-        list.remove(public_key_b64);
-        list.save(&self.identity)?;
+        {
+            let mut list = self
+                .trust_list
+                .write()
+                .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
+            list.remove(public_key_b64);
+            list.save(&self.identity)?;
+        }
+        // Evict from the live peer list too so a currently-connected peer
+        // disappears from the UI immediately instead of lingering until the
+        // next mDNS re-resolution or app restart.
+        if let Ok(mut peers) = self.peers.write() {
+            peers.retain(|p| p.public_key_b64 != public_key_b64);
+        }
+        // Also revoke in the HTTP server's copy, otherwise the removed device
+        // would keep passing auth checks (check_auth reads http_trust_list,
+        // not the std-locked copy above) until the app restarts.
+        let pk = public_key_b64.to_string();
+        let http_trust_list = self.http_trust_list.clone();
+        // This method runs directly on the async command thread (not inside
+        // spawn_blocking like sync_playlist below), so block_on would panic —
+        // spawn a task instead. The lock is uncontended and completes almost
+        // immediately, so the fire-and-forget race is not observable in practice.
+        tokio::spawn(async move {
+            http_trust_list.write().await.remove(&pk);
+        });
         Ok(())
     }
 
     fn rename_device(&self, public_key_b64: &str, new_name: &str) -> Result<(), SyncError> {
-        let mut list = self
-            .trust_list
-            .write()
-            .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
-        list.rename(public_key_b64, new_name.to_string());
-        list.save(&self.identity)?;
+        {
+            let mut list = self
+                .trust_list
+                .write()
+                .map_err(|_| SyncError::IdentityError("trust list lock poisoned".into()))?;
+            list.rename(public_key_b64, new_name.to_string());
+            list.save(&self.identity)?;
+        }
+        let pk = public_key_b64.to_string();
+        let name = new_name.to_string();
+        let http_trust_list = self.http_trust_list.clone();
+        tokio::spawn(async move {
+            http_trust_list.write().await.rename(&pk, name);
+        });
         Ok(())
     }
 

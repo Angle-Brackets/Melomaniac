@@ -262,7 +262,15 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                     <span className="font-mono text-[9px] text-mm-t2 shrink-0">{peer.latency_ms}ms</span>
                   )}
                 </div>
-                <button className="btn btn-xs btn-primary shrink-0" onClick={() => openPeerManifest(peer)}>Sync</button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button className="btn btn-xs btn-primary" onClick={() => openPeerManifest(peer)}>Sync</button>
+                  <button
+                    className="btn btn-xs btn-ghost text-[10px] text-mm-t2"
+                    onClick={() => invoke('sync_remove_device', { publicKeyB64: peer.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
+                  >
+                    Remove
+                  </button>
+                </div>
               </div>
             ))}
 

@@ -513,6 +513,10 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
               )}
               {peer.latency_ms != null && <span style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace' }}>{peer.latency_ms}ms</span>}
               <span onClick={() => openPeerManifest(peer)} style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, cursor: 'pointer' }}>Sync</span>
+              <button
+                onClick={() => invoke('sync_remove_device', { publicKeyB64: peer.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}
+                style={{ fontSize: 12, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+              >Remove</button>
             </div>
           ))}
           {offlineDevices.map((device) => (
