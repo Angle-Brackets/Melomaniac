@@ -1155,9 +1155,11 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
 
 // Virtual/ephemeral Spotify playlist entry — dashed styling distinguishes it
 // from real local playlists, same visual language as PeerPlaylistCard's
-// not-yet-downloaded state.
-function SpotifyPlaylistCard({ name, trackCount, imageUrl, onPress }: {
-  name: string; trackCount?: number; imageUrl?: string | null; onPress: () => void;
+// not-yet-downloaded state. Once promoted, it also exists as a real local
+// playlist, so it's shown solid instead — dashed would wrongly suggest it's
+// still ephemeral/unlinked.
+function SpotifyPlaylistCard({ name, trackCount, imageUrl, promoted, onPress }: {
+  name: string; trackCount?: number; imageUrl?: string | null; promoted: boolean; onPress: () => void;
 }) {
   return (
     <div
@@ -1165,7 +1167,7 @@ function SpotifyPlaylistCard({ name, trackCount, imageUrl, onPress }: {
       style={{
         margin: '4px 16px', padding: '10px 12px',
         background: 'color-mix(in srgb, var(--bg-2) 60%, transparent)',
-        border: '0.5px dashed var(--border-2)',
+        border: promoted ? '0.5px solid var(--border-1)' : '0.5px dashed var(--border-2)',
         borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
         cursor: 'pointer',
       }}
@@ -1184,7 +1186,7 @@ function SpotifyPlaylistCard({ name, trackCount, imageUrl, onPress }: {
           {name}
         </span>
         {trackCount != null && (
-          <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', display: 'block', marginTop: 5 }}>
+          <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', display: 'block', marginTop: 5 }}>
             {trackCount} track{trackCount !== 1 ? 's' : ''}
           </span>
         )}
@@ -1212,7 +1214,19 @@ export function PlaylistsList({ onTab, onPlaylistDetail, onSpotifyPlaylistDetail
   const spotifyConnected        = useStore(s => s.spotifyConnected);
   const spotifyPlaylists        = useStore(s => s.spotifyPlaylists);
   const openSpotifyPlaylist     = useStore(s => s.openSpotifyPlaylist);
+  const promotedSpotifySources  = useStore(s => s.promotedSpotifySources);
+  const importedSpotifyTracks   = useStore(s => s.importedTracks);
   const [query, setQuery]       = useState('');
+
+  // Spotify's playlist API reports a raw track total that includes local
+  // files it can't hand us the audio for, so it overcounts vs. what we can
+  // actually import. Once a playlist's been opened at least once,
+  // `importedTracks` holds the true, already-filtered count for it —
+  // prefer that over the raw API count.
+  const spotifyTrackCount = (source: string, fallback?: number) => {
+    const real = importedSpotifyTracks.filter(t => t.source === source).length;
+    return real > 0 ? real : fallback;
+  };
 
   // Auto-fetch the manifest from the first trusted live peer so ghost cards
   // appear without the user having to navigate to Settings first.
@@ -1328,14 +1342,17 @@ export function PlaylistsList({ onTab, onPlaylistDetail, onSpotifyPlaylistDetail
             <SectionHeadPlain label="Spotify" trailing={String(spotifyPlaylists.length + 1)}/>
             <SpotifyPlaylistCard
               name="Liked Songs"
+              trackCount={spotifyTrackCount('liked')}
+              promoted={promotedSpotifySources.includes('liked')}
               onPress={() => { openSpotifyPlaylist('liked'); onSpotifyPlaylistDetail(); }}
             />
             {spotifyPlaylists.map(p => (
               <SpotifyPlaylistCard
                 key={p.id}
                 name={p.name}
-                trackCount={p.track_count}
+                trackCount={spotifyTrackCount(`playlist:${p.id}`, p.track_count)}
                 imageUrl={p.image_url}
+                promoted={promotedSpotifySources.includes(`playlist:${p.id}`)}
                 onPress={() => { openSpotifyPlaylist(`playlist:${p.id}`); onSpotifyPlaylistDetail(); }}
               />
             ))}

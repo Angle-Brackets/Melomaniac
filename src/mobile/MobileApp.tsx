@@ -57,6 +57,7 @@ export default function MobileApp() {
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices  = useStore(s => s.refreshKnownDevices);
   const refreshSpotifyStatus = useStore(s => s.refreshSpotifyStatus);
+  const fetchImportedTracks  = useStore(s => s.fetchImportedTracks);
   const activeSpotifySource  = useStore(s => s.activeSpotifySource);
 
   const restoreSession = (raw: string | null, ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
@@ -103,6 +104,11 @@ export default function MobileApp() {
     if (theme === 'custom') { writeCustomHue(saved.customAccentHue ?? saved.accentHue ?? 28); applyTheme('custom'); }
     else { applyTheme(theme); }
     refreshSpotifyStatus();
+    // Populate `importedTracks` up front (not just when the Library tab is
+    // visited) so the playlist list's Spotify track counts are accurate — a
+    // playlist's real, already-imported count overrides Spotify's raw API
+    // total, which includes local files it can't hand us the audio for.
+    fetchImportedTracks();
     // Load library then eagerly prefetch all track artwork into the cache.
     // By the time the user sees Library or NowPlaying the images are ready.
     loadLibrary().then(() => {

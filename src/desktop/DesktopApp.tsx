@@ -178,6 +178,7 @@ export default function DesktopApp(): JSX.Element {
   const loadedHash = useStore(s => s.loadedTrackHash);
   const durationMs = useStore(s => s.duration_ms);
   const refreshSpotifyStatus = useStore(s => s.refreshSpotifyStatus);
+  const fetchImportedTracks  = useStore(s => s.fetchImportedTracks);
   const openSpotifyPlaylist  = useStore(s => s.openSpotifyPlaylist);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
@@ -515,6 +516,11 @@ export default function DesktopApp(): JSX.Element {
 
   useEffect(() => { reloadLibrary(); }, []);
   useEffect(() => { refreshSpotifyStatus(); }, []);
+  // Populate `importedTracks` up front (not just when the Library tab is
+  // visited) so the sidebar's Spotify track counts are accurate — a
+  // playlist's real, already-imported count overrides Spotify's raw API
+  // total, which includes local files it can't hand us the audio for.
+  useEffect(() => { fetchImportedTracks(); }, []);
   // The above `reloadLibrary` only populates this component's own local
   // `trackOrder` state — it never touches the store's `s.tracks`, which
   // `useActiveSpotifyRows` reads to resolve a Spotify track's `matched_hash`
