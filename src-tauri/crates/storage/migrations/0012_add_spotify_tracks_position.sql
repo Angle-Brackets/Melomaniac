@@ -1,0 +1,1 @@
+ALTER TABLE spotify_tracks ADD COLUMN position INTEGER NOT NULL DEFAULT 0;

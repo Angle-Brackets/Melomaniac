@@ -148,21 +148,81 @@ command):
   does *not* share the `track`/`item` rename quirk; `SavedTrackItem.track`
   deserializes correctly as-is.
 
+**Done (continued):**
+- [x] Track matching engine — `spotify_import_playlist_tracks` matches each
+      `SpotifyTrack` (title/artist/duration, ISRC short-circuit hook wired
+      but not yet fed — see the fingerprinting backlog item in `PLAN.md`)
+      against local CAS library tracks; >=90% confidence auto-links silently,
+      otherwise the track is persisted as an external (unmatched) row.
+      Persisted in the `spotify_tracks` table (`crates/storage`), including a
+      `position` column preserving Spotify's native track order.
+- [x] Unmatched tracks wired into the existing yt-dlp pipeline —
+      `downloadAndLinkExternalTrack` (frontend) composes
+      `download_enqueue` with a `ytsearch1:<query>` pseudo-URL and links the
+      resulting hash on completion; no new download infra needed.
+- [x] Spotify UI — **not a modal**: after discussion, playlist browsing moved
+      to first-class virtual entries in the sidebar (desktop) / playlist list
+      (mobile). Settings only holds a small connect/disconnect row
+      (`SettingsModal.tsx` desktop, `Settings.tsx` mobile). Clicking a virtual
+      playlist entry fetches + shows its tracks reusing the same external-row
+      rendering (badge for matched, dashed + "Get track" for unmatched).
+      Once every track in a virtual playlist is matched/downloaded, a
+      Promote button lets the user manually turn it into a real local
+      playlist (own commit history) — deliberately not automatic, so
+      bulk-downloading tracks doesn't force a matching playlist into the
+      sidebar. See the
+      "Spotify Playlists as Virtual Sidebar Entries" plan for the full
+      component breakdown (desktop: `Sidebar.tsx`, `SpotifyPlaylistView.tsx`,
+      `SpotifyTrackRow.tsx`; mobile: `Library.tsx`'s `PlaylistsList`,
+      `SpotifyPlaylistDetail.tsx`, `spotifyRows.tsx`).
+
+**Done (continued) — download quality + rejection:**
+- [x] Post-download duration validation — the yt-dlp `ytsearch1:` pipeline
+      takes YouTube's top hit unconditionally, which is occasionally wrong
+      (cover, extended mix, wrong song entirely). `DonePayload`
+      (`src-tauri/src/downloader.rs`) now carries `duration_ms` (available
+      in-process from `ingest_bytes`/`extract_tags`, no extra round-trip
+      needed). `downloadAndLinkExternalTrack` (`spotifySlice.ts`) compares it
+      against the Spotify track's expected `duration_ms`; a mismatch beyond
+      ±8s (mirrors the matcher's `DURATION_GATE_MS`) skips auto-link and
+      surfaces a "needs review" row instead (`SpotifyRow.kind === 'review'`)
+      with Keep-anyway / Discard-and-retry actions, rendered in
+      `SpotifyPlaylistView.tsx` (desktop) and `SpotifyPlaylistDetail.tsx`
+      (mobile). Discard deletes the downloaded blob/DB row via
+      `library_remove_track` and leaves the Spotify track external so the
+      user can retry later; Keep links it despite the mismatch.
+- [x] Persistent, provider-agnostic match-rejection mechanism — a matched
+      track (even at high algorithmic confidence) can be flatly wrong, and
+      the old "Unlink" just demoted it back to external without stopping the
+      matcher from re-suggesting the same wrong hash on the next re-import.
+      New `track_rejections` table (migration 0013), keyed by
+      `(external_id, hash)` where `external_id` is provider-prefixed
+      (`"spotify:<spotify_id>"` today) rather than a `spotify_tracks` foreign
+      key — deliberately generalized per explicit user request ("rejection
+      should actually apply to ALL external tracks from spotify or yt or
+      elsewhere") so a future provider can reuse it without a schema change.
+      `best_match` (`matching.rs`) excludes rejected hashes from
+      consideration, including through the ISRC short-circuit — rejection
+      applies regardless of confidence score. "Unlink" is now "Reject
+      match"/"Reject Spotify match" everywhere it appeared (desktop context
+      menu + row action, mobile long-press sheet); it unlinks and blacklists
+      in one action rather than being a separate softer option. Does not
+      touch the local library track itself — it may be legitimately correct
+      for something else.
+
 **Not started:**
 - [ ] iOS `ASWebAuthenticationSession` bridge (`spotify_connect` is
       stub-only on iOS)
-- [ ] Track matching engine — match `SpotifyTrack` (title/artist/duration/isrc)
-      against local CAS library tracks
-- [ ] Wire unmatched tracks into the existing yt-dlp pipeline — reuse
-      `downloader::download_enqueue` with a `ytsearch1:<query>` pseudo-URL,
-      no new download infra needed
-- [ ] Spotify Settings UI — connect/disconnect button, playlist picker,
-      match-results review screen (matched / needs-download / ambiguous)
 
 **Deferred / open questions:**
 - Live Spotify streaming playback (`librespot` integration, per the older
   `PLAN.md` checklist) — out of scope for this staged rollout; import+match
   only for now.
+- Ongoing Spotify → local sync for already-promoted playlists (diff commits
+  when the Spotify-side playlist later changes) — `promotedSpotifySources` is
+  session-only today, and revisiting a promoted playlist's source doesn't
+  re-sync it at all. Needs a persisted local-playlist ↔ Spotify-source link;
+  see `PLAN.md`'s Spotify Integration backlog.
 - YouTube Music integration — second provider, after Spotify path is proven.
 - `tauri_plugin_shell::Shell::open` is deprecated in favor of
   `tauri-plugin-opener` upstream; left as-is for now (still functional, just

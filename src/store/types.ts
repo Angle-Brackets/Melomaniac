@@ -140,6 +140,7 @@ export type SpotifyTrack = {
   album:       string
   duration_ms: number
   isrc:        string | null
+  artwork_url: string | null
 }
 
 // Mirrors the Rust SpotifyTrackRecord. matched_hash null = external row (not
@@ -151,10 +152,27 @@ export type SpotifyTrackRecord = {
   album:        string | null
   duration_ms:  number
   isrc:         string | null
+  artwork_url:  string | null
   source:       string   // "playlist:<id>" or "liked"
   matched_hash: string | null
   confidence:   number | null
   imported_at:  number
+  position:     number   // index within `source`'s track list, Spotify's native order
+}
+
+// Mirrors the Rust SpotifyAccount (spotify_get_account).
+export type SpotifyAccount = {
+  id:           string
+  display_name: string | null
+  email:        string | null
+}
+
+// Mirrors the Rust SpotifyPlaylist (spotify_get_playlists).
+export type SpotifyPlaylist = {
+  id:          string
+  name:        string
+  track_count: number
+  image_url:   string | null
 }
 
 export type TrackStats = {

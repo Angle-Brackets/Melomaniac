@@ -292,7 +292,7 @@ pub struct SpotifyPlaylist {
     pub image_url: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct SpotifyImage {
     url: String,
 }
@@ -328,6 +328,7 @@ pub struct SpotifyTrack {
     pub album: String,
     pub duration_ms: u64,
     pub isrc: Option<String>,
+    pub artwork_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -338,6 +339,7 @@ struct ArtistObject {
 #[derive(Deserialize)]
 struct AlbumObject {
     name: String,
+    images: Vec<SpotifyImage>,
 }
 
 #[derive(Deserialize)]
@@ -391,6 +393,7 @@ fn track_object_to_spotify_track(t: TrackObject) -> SpotifyTrack {
             .map(|a| a.name)
             .collect::<Vec<_>>()
             .join(", "),
+        artwork_url: t.album.images.into_iter().next().map(|i| i.url),
         album: t.album.name,
         duration_ms: t.duration_ms,
         isrc: t.external_ids.and_then(|e| e.isrc),
@@ -600,4 +603,43 @@ pub async fn spotify_get_liked_tracks(
     }
 
     Ok(tracks)
+}
+
+/// Overwrite a freshly-downloaded track's title/artist/album with Spotify's
+/// known-accurate metadata, and (if `artwork_url` is set) fetch and store
+/// Spotify's album art as the track's artwork. Called right after a
+/// "Get track" download completes and before it's added to any playlist, so
+/// this bypasses the commit/DAG-aware editor path entirely -- yt-dlp's
+/// guessed tags (or lack thereof) never need to be trusted for a Spotify-
+/// identified track.
+#[tauri::command]
+pub async fn spotify_apply_track_metadata(
+    hash: String,
+    title: String,
+    artist: String,
+    album: Option<String>,
+    artwork_url: Option<String>,
+    storage: tauri::State<'_, crate::storage::StorageState>,
+) -> Result<(), String> {
+    storage
+        .db
+        .update_track_fields(&hash, &title, &artist, album.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Some(url) = artwork_url {
+        let image_bytes = crate::network::fetch_image_url(url).await?;
+        let artwork_hash = storage
+            .cas
+            .write_blob(&image_bytes)
+            .await
+            .map_err(|e| e.to_string())?;
+        storage
+            .db
+            .update_artwork_hash(&hash, &artwork_hash)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }

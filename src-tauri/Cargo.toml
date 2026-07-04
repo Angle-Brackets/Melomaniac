@@ -32,7 +32,6 @@ reqwest = { version = "0.12", features = ["rustls-tls", "json"], default-feature
 tokio   = { version = "1",   features = ["sync", "fs", "macros", "rt", "net", "io-util", "time"] }
 uuid    = { version = "1",   features = ["v4"] }
 discord-rich-presence = "1"
-keyring = "3"
 rand    = "0.8"
 sha2    = "0.10"
 url     = "2"
@@ -42,6 +41,21 @@ strsim  = "0.11"
 rodio = { version = "0.22", features = ["symphonia-all"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# keyring has no default storage backend -- without one of these features it
+# silently falls back to a no-op mock store (writes "succeed" but nothing is
+# ever actually persisted, so the very next read returns NoEntry).
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
 
 [dev-dependencies]
 tokio    = { version = "1", features = ["macros", "rt-multi-thread"] }

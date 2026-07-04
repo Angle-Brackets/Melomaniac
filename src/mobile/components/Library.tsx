@@ -10,6 +10,7 @@ import type { PlaylistRecord } from '../../store/types';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { usePlaylistArtwork } from '../hooks/usePlaylistArtwork';
 import { positionMsRef } from '../playerContext';
+import { MMBadge, ExternalTrackRow, GetTrackSheet } from './spotifyRows';
 
 // ── useHorizDragScroll ─────────────────────────────────────────────────────────
 // Enables mouse/pointer drag to scroll horizontal pill rows that have no native
@@ -214,21 +215,6 @@ type FlatItem =
   | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean }
   | { kind: 'external-track'; track: SpotifyTrackRecord };
 
-// Small tag mirroring the desktop Library's `Badge` — used for the SPOTIFY
-// provenance marker on both linked local rows and external (not-yet-fetched) rows.
-function MMBadge({ label, accent }: { label: string; accent?: boolean }) {
-  return (
-    <span style={{
-      fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em', flexShrink: 0,
-      padding: '1px 5px', borderRadius: 3,
-      background: accent ? 'var(--accent-dim)' : 'var(--bg-4)',
-      color:      accent ? 'var(--accent-light, var(--accent))' : 'var(--text-3)',
-      border:     `1px solid ${accent ? 'var(--accent)' : 'var(--border-2)'}`,
-      fontFamily: "'JetBrains Mono', monospace",
-    }}>{label}</span>
-  );
-}
-
 // ── TrackRow ───────────────────────────────────────────────────────────────────
 // Long-press (500 ms) opens the "Add to Playlist" action sheet.
 // In select-mode the row becomes a checkbox; long-press is disabled to avoid
@@ -308,76 +294,6 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
         {fmtDuration(track.duration_ms)}
       </span>
     </div>
-  );
-}
-
-// ── ExternalTrackRow ──────────────────────────────────────────────────────────
-// Imported-but-not-downloaded Spotify track. Dashed border distinguishes it
-// from real library rows; not selectable/playable. Long-press opens the
-// "Get track" action sheet (same gesture TrackRow uses for Add-to-Playlist).
-function ExternalTrackRow({ track, downloading, onLongPress }: {
-  track: SpotifyTrackRecord; downloading: boolean; onLongPress: () => void;
-}) {
-  const subtext = [track.artist, track.album].filter(Boolean).join(' | ');
-  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startLp = () => {
-    lpTimer.current = setTimeout(() => { lpTimer.current = null; onLongPress(); }, 500);
-  };
-  const cancelLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
-  return (
-    <div
-      onPointerDown={e => { (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId); startLp(); }}
-      onPointerUp={cancelLp}
-      onPointerCancel={cancelLp}
-      onPointerMove={e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
-      style={{
-        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', margin: '0 10px',
-        borderRadius: 10, border: '1px dashed var(--border-2)', opacity: 0.85,
-      }}>
-      <MMArt size={42} radius={7}/>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-          <MarqueeText
-            text={track.title}
-            active={false}
-            style={{ flex: 1, minWidth: 0 }}
-            textStyle={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}
-          />
-          <MMBadge label={downloading ? 'FETCHING…' : 'SPOTIFY'} accent/>
-        </div>
-        <MarqueeText
-          text={subtext}
-          active={false}
-          style={{ marginTop: 1 }}
-          textStyle={{ fontSize: 11.5, color: 'var(--text-2)' }}
-        />
-      </div>
-      <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
-        {fmtDuration(track.duration_ms)}
-      </span>
-    </div>
-  );
-}
-
-// Long-press action sheet for an external Spotify row — a single "Get track" action.
-function GetTrackSheet({ label, downloading, onGetTrack, onClose }: {
-  label: string; downloading: boolean; onGetTrack: () => void; onClose: () => void;
-}) {
-  return (
-    <button
-      onClick={() => { onGetTrack(); onClose(); }}
-      disabled={downloading}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-        padding: '12px 0', background: 'none', border: 'none', cursor: downloading ? 'default' : 'pointer',
-        color: 'inherit', opacity: downloading ? 0.5 : 1,
-      }}
-    >
-      <Icons.download size={17} stroke="var(--accent)"/>
-      <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 500 }}>
-        {downloading ? `Fetching "${label}"…` : `Get "${label}"`}
-      </span>
-    </button>
   );
 }
 
@@ -610,6 +526,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
   const toggleFavorite  = useStore(s => s.toggleFavorite);
   const importedTracks              = useStore(s => s.importedTracks);
+  const reviewTracks                = useStore(s => s.reviewTracks);
   const downloadingSpotifyIds       = useStore(s => s.downloadingSpotifyIds);
   const fetchImportedTracks         = useStore(s => s.fetchImportedTracks);
   const downloadAndLinkSpotifyTrack = useStore(s => s.downloadAndLinkExternalTrack);
@@ -680,10 +597,12 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
 
   // Imported-but-not-downloaded rows — only shown under the "All" filter, same
   // reasoning as desktop: Favorites/Recently Added describe properties real
-  // library rows have.
+  // library rows have. Tracks awaiting a duration-mismatch review are
+  // excluded (resolve those from the Spotify playlist detail view instead of
+  // re-triggering a second concurrent download here).
   const externalDisplayed = useMemo(() => {
     if (filter !== 'all') return [];
-    let list = importedTracks.filter(t => t.matched_hash == null);
+    let list = importedTracks.filter(t => t.matched_hash == null && !reviewTracks[t.spotify_id]);
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter(t =>
@@ -1234,7 +1153,48 @@ function PeerPlaylistCard({ manifest, peerAddr, peerName, isDownloading, isLocal
   )
 }
 
-export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) => void; onPlaylistDetail: () => void }) {
+// Virtual/ephemeral Spotify playlist entry — dashed styling distinguishes it
+// from real local playlists, same visual language as PeerPlaylistCard's
+// not-yet-downloaded state.
+function SpotifyPlaylistCard({ name, trackCount, imageUrl, onPress }: {
+  name: string; trackCount?: number; imageUrl?: string | null; onPress: () => void;
+}) {
+  return (
+    <div
+      onClick={onPress}
+      style={{
+        margin: '4px 16px', padding: '10px 12px',
+        background: 'color-mix(in srgb, var(--bg-2) 60%, transparent)',
+        border: '0.5px dashed var(--border-2)',
+        borderRadius: 14, display: 'flex', alignItems: 'center', gap: 12,
+        cursor: 'pointer',
+      }}
+    >
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          style={{ width: 54, height: 54, borderRadius: 9, objectFit: 'cover', flexShrink: 0 }}
+          onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+        />
+      ) : (
+        <MMArt size={54} radius={9}/>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 15, color: 'var(--text-0)', fontWeight: 600, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {name}
+        </span>
+        {trackCount != null && (
+          <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', display: 'block', marginTop: 5 }}>
+            {trackCount} track{trackCount !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
+      <Icons.chevRight size={14} stroke="var(--text-3)"/>
+    </div>
+  );
+}
+
+export function PlaylistsList({ onTab, onPlaylistDetail, onSpotifyPlaylistDetail }: { onTab: (id: TabId) => void; onPlaylistDetail: () => void; onSpotifyPlaylistDetail: () => void }) {
   const playlists            = useStore(s => s.playlists);
   const setCurrentPlaylist   = useStore(s => s.setCurrentPlaylist);
   const branchByPlaylist     = useStore(s => s.branchByPlaylist);
@@ -1249,6 +1209,9 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
   const openPeerManifest        = useStore(s => s.openPeerManifest);
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const reopenConflict          = useStore(s => s.reopenConflict);
+  const spotifyConnected        = useStore(s => s.spotifyConnected);
+  const spotifyPlaylists        = useStore(s => s.spotifyPlaylists);
+  const openSpotifyPlaylist     = useStore(s => s.openSpotifyPlaylist);
   const [query, setQuery]       = useState('');
 
   // Auto-fetch the manifest from the first trusted live peer so ghost cards
@@ -1354,6 +1317,26 @@ export function PlaylistsList({ onTab, onPlaylistDetail }: { onTab: (id: TabId) 
                 isDownloading={downloadingPlaylists.includes(manifest.id)}
                 progress={downloadProgress[manifest.id] ?? 0}
                 onRequestDownload={branches => downloadPlaylist(manifest.id, branches)}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Spotify — virtual playlists, only shown once connected */}
+        {spotifyConnected && (
+          <>
+            <SectionHeadPlain label="Spotify" trailing={String(spotifyPlaylists.length + 1)}/>
+            <SpotifyPlaylistCard
+              name="Liked Songs"
+              onPress={() => { openSpotifyPlaylist('liked'); onSpotifyPlaylistDetail(); }}
+            />
+            {spotifyPlaylists.map(p => (
+              <SpotifyPlaylistCard
+                key={p.id}
+                name={p.name}
+                trackCount={p.track_count}
+                imageUrl={p.image_url}
+                onPress={() => { openSpotifyPlaylist(`playlist:${p.id}`); onSpotifyPlaylistDetail(); }}
               />
             ))}
           </>

@@ -11,6 +11,8 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { useAccentsFromUrl, useGlowFade, withAlpha } from '../shared/artworkAccents';
 import { ALBUMS, trackRecordToTrack, playlistRecordToPlaylist } from './data';
 import type { Track, Playlist, TrackRecord, PlaylistRecord } from './data';
+import { useActiveSpotifyRows } from '../store/useActiveSpotifyRows';
+import type { SpotifyRow } from '../store/spotifySlice';
 import type { AppSettings, ShuffleMode } from './types';
 import { LoopMode, Density, DefaultView } from './types';
 
@@ -27,6 +29,7 @@ import SettingsModal from './components/SettingsModal';
 import PlaylistSettingsPanel from './components/PlaylistSettingsPanel';
 import EditorView from './components/EditorView';
 import LibraryView from './components/LibraryView';
+import SpotifyPlaylistView from './components/SpotifyPlaylistView';
 import ResizeHandle from './components/ResizeHandle';
 import WindowResizeEdges from './components/WindowResizeEdges';
 import NewPlaylistModal from './components/NewPlaylistModal';
@@ -160,17 +163,22 @@ function useSettings(defaults: AppSettings): [AppSettings, (key: keyof AppSettin
 export default function DesktopApp(): JSX.Element {
   const openPairingDisplay       = useStore(s => s.openPairingDisplay);
   const syncToast                = useStore(s => s.syncToast);
+  const spotifyToast              = useStore(s => s.spotifyToast);
   const refreshLivePeers         = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices      = useStore(s => s.refreshKnownDevices);
   const loadPlaylists            = useStore(s => s.loadPlaylists);
+  const loadLibrary              = useStore(s => s.loadLibrary);
   const setDownloadProgress      = useStore(s => s.setDownloadProgress);
   const artworkVersion           = useStore(s => s.artworkVersion);
   const syncVersion              = useStore(s => s.syncVersion);
+  const promotedSpotifySources   = useStore(s => s.promotedSpotifySources);
   const pendingConflictPlaylists = useStore(s => s.pendingConflictPlaylists);
   const reopenConflict           = useStore(s => s.reopenConflict);
   const isPlaying  = useStore(s => s.isPlaying);
   const loadedHash = useStore(s => s.loadedTrackHash);
   const durationMs = useStore(s => s.duration_ms);
+  const refreshSpotifyStatus = useStore(s => s.refreshSpotifyStatus);
+  const openSpotifyPlaylist  = useStore(s => s.openSpotifyPlaylist);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -269,6 +277,20 @@ export default function DesktopApp(): JSX.Element {
     () => (isShuffle && shuffledQueue ? shuffledQueue : activeQueue),
     [isShuffle, shuffledQueue, activeQueue],
   );
+
+  // Resolved local tracks for the currently-browsed Spotify virtual playlist, in
+  // playlist order — this is the "queue" a track played from SpotifyPlaylistView
+  // belongs to, kept separate from playQueue/activeQueue (which is about the
+  // real-playlist/library carousel, not the Spotify view).
+  const spotifySource = activePlaylistId?.startsWith('spotify:') ? activePlaylistId.slice('spotify:'.length) : null;
+  const spotifyRows = useActiveSpotifyRows(spotifySource);
+  const spotifyPlaybackQueue = useMemo(
+    () => spotifyRows
+      .filter((r): r is Extract<SpotifyRow, { kind: 'local' }> => r.kind === 'local')
+      .map((r, idx) => trackRecordToTrack(r.track, idx)),
+    [spotifyRows],
+  );
+
   const carouselAlbums = useMemo(
     () => playQueue.map(t => ({
       ...(ALBUMS[t.albumRef] ?? ALBUMS[0]),
@@ -277,8 +299,23 @@ export default function DesktopApp(): JSX.Element {
     [playQueue, artworkUrls],
   );
   const carouselIdx = Math.max(0, playQueue.findIndex(t => t.id === activeTrackId));
-  const activeTrackHash = playQueue.find(t => t.id === activeTrackId)?.hash ?? trackOrder.find(t => t.id === activeTrackId)?.hash;
-  const isActiveLoaded = !!loadedHash && activeTrackHash === loadedHash;
+  // The track the mini-player should display. Prefers the loaded/playing track,
+  // looked up in the full library by hash (so it resolves regardless of what
+  // playlist is currently browsed), over the browsed queue's spotlighted
+  // position — otherwise switching away from the playing playlist would make
+  // the mini-player "forget" what's playing, since `activeTrackId` no longer
+  // matches anything in the newly-viewed queue.
+  const nowPlayingTrack = (loadedHash && trackOrder.find(t => t.hash === loadedHash))
+    || playQueue.find(t => t.id === activeTrackId)
+    || null;
+  // The track the CAROUSEL/main player should display — always whatever's
+  // spotlighted in the browsed queue, regardless of what's actually playing.
+  // Distinct from `nowPlayingTrack` (mini-player only): browsing to a
+  // different track/playlist than what's playing should show that browsed
+  // track's own title/artist/duration, not silently substitute the playing
+  // track's info.
+  const browsedTrack = playQueue[carouselIdx] ?? null;
+  const isActiveLoaded = !!loadedHash && browsedTrack?.hash === loadedHash;
   const activeArtworkUrl = artworkUrls[playQueue[carouselIdx]?.hash ?? ''] ?? null;
   const artworkAccents = useAccentsFromUrl(activeArtworkUrl);
   const { slots: glowSlots, activeSlot: glowActive } = useGlowFade(artworkAccents);
@@ -289,6 +326,21 @@ export default function DesktopApp(): JSX.Element {
     loopMode, playQueue, activeQueue, loadedHash, manualQueue,
     abA, abB, durationMs, positionMs, activeTrackId,
     isShuffle, shuffleMode: settings.shuffleMode,
+    // The queue/context the CURRENTLY LOADED track actually belongs to — deliberately
+    // NOT synced every render like the fields above. `playQueue`/`activeQueue` track
+    // whatever's being VIEWED (they're derived from activePlaylistId, which changes
+    // just by navigating), so using them for skip/next/prev/auto-advance would let
+    // browsing to a different playlist (or the Spotify view) hijack playback to an
+    // unrelated track. These fields are only written at deliberate "start/continue
+    // playing this queue" moments (see snapshotPlayingQueue below) so navigation
+    // elsewhere never affects what's actually playing.
+    playingQueue: playQueue as Track[],
+    playingActiveQueue: activeQueue as Track[],
+    playingPlaylistId: null as string | null,
+    playingBranchName: 'main',
+    playingIsShuffle: false,
+    viewedPlaylistId: null as string | null,
+    viewedBranchName: 'main',
   });
   sr.current.loopMode    = loopMode;
   sr.current.playQueue   = playQueue;
@@ -302,6 +354,65 @@ export default function DesktopApp(): JSX.Element {
   sr.current.activeTrackId  = activeTrackId;
   sr.current.isShuffle      = isShuffle;
   sr.current.shuffleMode    = settings.shuffleMode;
+  // The `spotify:` sentinel isn't a real playlist context (its queue falls back
+  // to the library, same as browsing nothing) — mirrors `resolvePlayingContext` below.
+  sr.current.viewedPlaylistId = activePlaylistId && !activePlaylistId.startsWith('spotify:') ? activePlaylistId : null;
+  sr.current.viewedBranchName = activePlaylistId && !activePlaylistId.startsWith('spotify:') ? activeBranch : 'main';
+
+  // Records which queue/context a deliberate track-selection came from, so skip/
+  // next/prev/auto-advance keep operating on the queue that's actually playing
+  // regardless of what the user browses to afterward. `playlistId: null` means
+  // "library context" (mirrors the existing SavedPlaybackState convention) —
+  // used for the Spotify view too, since its queue isn't a real playlist.
+  const snapshotPlayingQueue = (queue: Track[], activeQ: Track[], playlistId: string | null, branchName: string, shuffled: boolean) => {
+    sr.current.playingQueue = queue;
+    sr.current.playingActiveQueue = activeQ;
+    sr.current.playingPlaylistId = playlistId;
+    sr.current.playingBranchName = branchName;
+    sr.current.playingIsShuffle = shuffled;
+    // Temporary "remove from upcoming" exclusions belong to this specific
+    // playing session, not to whatever's being browsed — reset them here
+    // (a fresh deliberate queue/track pick) rather than on mere navigation,
+    // so browsing away and back no longer un-does them.
+    setSessionExcluded(new Set());
+  };
+
+  // True when the queue the user is currently VIEWING is the same one that's
+  // actually playing — i.e. it's safe to let the Carousel/TrackList follow
+  // along with skip/prev/auto-advance. False while browsing elsewhere, so
+  // those don't jerk the carousel to an unrelated position in a different
+  // playlist just because playback advanced somewhere out of view.
+  const isViewingPlayingContext = () =>
+    sr.current.viewedPlaylistId === sr.current.playingPlaylistId &&
+    sr.current.viewedBranchName === sr.current.playingBranchName;
+
+  // The queue that's actually playing (falls back to the browsed `playQueue`
+  // only before anything's ever been snapshotted, e.g. very first launch) —
+  // used anywhere that should reflect real playback rather than whatever's
+  // merely being browsed (the "Up Next" queue panel, skip/prev source).
+  const nowPlayingQueue = sr.current.playingQueue.length > 0 ? sr.current.playingQueue : playQueue;
+
+  // Keeps `activeTrackId` meaningfully in sync with whatever queue is now
+  // being browsed. Without this, navigating to a new playlist leaves
+  // `activeTrackId` pointing at a stale positional id left over from the
+  // previous queue (ids are only unique within the array they were derived
+  // from — see trackRecordToTrack), which caused two bugs: the Carousel not
+  // jumping to the actually-playing track when you return to its playlist,
+  // and pressing Play right after navigating hijacking whatever's currently
+  // loaded instead of starting the newly-viewed track. Declared here — well
+  // before the cold-start restore effects further down — so that on cold
+  // start those effects' own setActiveTrackId calls run after this one in
+  // the same commit and correctly take precedence as the "last word".
+  useEffect(() => {
+    if (activeQueue.length === 0) return;
+    if (isViewingPlayingContext()) {
+      const playing = activeQueue.find(t => t.hash === loadedHash);
+      setActiveTrackId(playing ? playing.id : activeQueue[0].id);
+    } else {
+      setActiveTrackId(activeQueue[0].id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeQueue]);
 
   // Refs that hold the latest skip handlers so the audio event listener can
   // call them without stale closures.
@@ -403,6 +514,15 @@ export default function DesktopApp(): JSX.Element {
   }, []);
 
   useEffect(() => { reloadLibrary(); }, []);
+  useEffect(() => { refreshSpotifyStatus(); }, []);
+  // The above `reloadLibrary` only populates this component's own local
+  // `trackOrder` state — it never touches the store's `s.tracks`, which
+  // `useActiveSpotifyRows` reads to resolve a Spotify track's `matched_hash`
+  // to a local `TrackRecord`. Without this, `s.tracks` stays empty on
+  // startup and every already-linked Spotify row renders as if it were
+  // still unmatched, until some unrelated action (e.g. a single-track
+  // download) happens to call the store's `loadLibrary()` for the first time.
+  useEffect(() => { loadLibrary(); }, [loadLibrary]);
 
   // Restore playback state if audio is still playing and the track came from the library
   // (no playlist context). Playlist-context restore happens in the playlistTracks effect.
@@ -432,15 +552,20 @@ export default function DesktopApp(): JSX.Element {
     }
     if (r.isShuffle) {
       setIsShuffle(true);
+      let restoredQueue: Track[];
       if (r.shuffledHashes?.length) {
         const validSet = new Set(trackOrder.map(t => t.hash));
         const restored = r.shuffledHashes
           .filter(h => validSet.has(h))
           .map(h => trackOrder.find(t => t.hash === h)!);
-        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current));
+        restoredQueue = restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current);
       } else {
-        setShuffledQueue(buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current));
+        restoredQueue = buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current);
       }
+      setShuffledQueue(restoredQueue);
+      snapshotPlayingQueue(restoredQueue, trackOrder, null, 'main', true);
+    } else {
+      snapshotPlayingQueue(trackOrder, trackOrder, null, 'main', false);
     }
     pendingRestoreRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -479,6 +604,15 @@ export default function DesktopApp(): JSX.Element {
 
   useEffect(() => { reloadPlaylists(); }, []);
 
+  // When a Spotify virtual playlist is promoted into a real one, the new
+  // playlist is created entirely inside spotifySlice — nothing in this
+  // component's own action handlers triggers a reload for it, so without
+  // this it'd only show up in the sidebar after something else (e.g. a
+  // manual playlist edit) happened to call reloadPlaylists.
+  useEffect(() => {
+    if (promotedSpotifySources.length > 0) reloadPlaylists();
+  }, [promotedSpotifySources, reloadPlaylists]);
+
   // When a sync downloads a new playlist, refresh the local playlist list.
   useEffect(() => {
     if (syncVersion > 0) reloadPlaylists();
@@ -505,22 +639,56 @@ export default function DesktopApp(): JSX.Element {
   // (reset shuffle entirely) from a branch switch within the same playlist
   // (keep shuffle mode, rebuild the queue from the new branch's tracks).
   const prevPlaylistIdRef = useRef<string | null>(null);
+  // Bumped on every playlist/branch change so a slow or out-of-order fetch
+  // resolving after a newer switch can detect it's stale and no-op instead of
+  // clobbering state with tracks from a playlist that's no longer active.
+  const playlistTracksReqRef = useRef(0);
 
   useEffect(() => {
     const playlistChanged = prevPlaylistIdRef.current !== activePlaylistId;
     prevPlaylistIdRef.current = activePlaylistId;
 
     if (playlistChanged) {
-      setShuffledQueue(null);
-      setIsShuffle(false);
+      // Returning to view the playlist/library context that's actually
+      // playing should keep showing it in the order it's playing in
+      // (including shuffle) instead of resetting to unshuffled — restoring
+      // here, ahead of the fetch below resolving, avoids a flash of
+      // unshuffled order. It's re-keyed onto the freshly-fetched tracks
+      // once that fetch lands (see the `playlistChanged` branch there),
+      // since this uses the last snapshot's Track objects, not fresh ones.
+      if (isViewingPlayingContext() && sr.current.playingIsShuffle) {
+        setShuffledQueue(sr.current.playingQueue);
+        setIsShuffle(true);
+      } else {
+        setShuffledQueue(null);
+        setIsShuffle(false);
+      }
     }
 
-    if (!activePlaylistId) { setPlaylistTracks(null); setBranchMeta(null); return; }
+    // The `spotify:` sentinel exists only so the sidebar can highlight the active
+    // virtual-playlist row — it isn't a real playlist ID, so there's nothing to
+    // fetch here. Falling through to `playlist_get_tracks` would 404 and clear
+    // `playlistTracks` to `[]`, which (unlike `null`) does NOT fall back to the
+    // full library in `activeQueue`, silently emptying the playback queue/mini
+    // player while browsing a Spotify playlist.
+    if (!activePlaylistId || activePlaylistId.startsWith('spotify:')) { setPlaylistTracks(null); setBranchMeta(null); return; }
+
+    // Clear the outgoing playlist's tracks immediately rather than leaving them
+    // displayed (and playable) until the fetch below resolves — otherwise a
+    // click in that window can select/play a track that still belongs to the
+    // PREVIOUS playlist while activePlaylistId/sidebar/header already reflect
+    // the new one, which is exactly what produced the reported "clicking a
+    // track in the newly-selected playlist just pauses/skips within the old
+    // one" bug.
+    if (playlistChanged) setPlaylistTracks(null);
+
+    const reqId = ++playlistTracksReqRef.current;
     invoke<TrackRecord[]>('playlist_get_tracks', {
       playlistId: activePlaylistId,
       branchName: activeBranch,
     })
       .then(records => {
+        if (reqId !== playlistTracksReqRef.current) return; // superseded by a newer switch
         const newTracks = records.map(trackRecordToTrack);
         setPlaylistTracks(newTracks);
         // Seed A/B points from the committed tree (backend is authoritative per playlist)
@@ -540,19 +708,28 @@ export default function DesktopApp(): JSX.Element {
         if (!playlistChanged && newTracks.length > 0) {
           setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode, playCountsRef.current) : null);
         }
+        // Returning to the actively-playing (shuffled) playlist — re-key the
+        // provisional restore above (which used the last snapshot's Track
+        // objects) onto these freshly-fetched ones, preserving the exact same
+        // order, so downstream state (edits, artwork, etc.) works off current
+        // data instead of a stale snapshot.
+        if (playlistChanged && isViewingPlayingContext() && sr.current.playingIsShuffle) {
+          const byHash = new Map(newTracks.map(t => [t.hash, t] as const));
+          const reordered = sr.current.playingQueue
+            .map(t => byHash.get(t.hash))
+            .filter((t): t is Track => t !== undefined);
+          if (reordered.length > 0) setShuffledQueue(reordered);
+        }
       })
-      .catch(() => setPlaylistTracks([]));
+      .catch(() => { if (reqId === playlistTracksReqRef.current) setPlaylistTracks([]); });
 
     invoke<{ description: string | null }>('playlist_get_meta', {
       playlistId: activePlaylistId,
       branchName: activeBranch,
     })
-      .then(meta => setBranchMeta({ description: meta.description }))
-      .catch(() => setBranchMeta(null));
+      .then(meta => { if (reqId === playlistTracksReqRef.current) setBranchMeta({ description: meta.description }); })
+      .catch(() => { if (reqId === playlistTracksReqRef.current) setBranchMeta(null); });
   }, [activePlaylistId, activeBranch]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Clear session-excluded hashes whenever the active playlist or branch changes.
-  useEffect(() => { setSessionExcluded(new Set()); }, [activePlaylistId, activeBranch]);
 
   // Restore playback state if audio is still playing and the track came from a playlist.
   // Runs after playlistTracks loads; the playlist change effect may have reset isShuffle
@@ -584,15 +761,20 @@ export default function DesktopApp(): JSX.Element {
     }
     if (r.isShuffle) {
       setIsShuffle(true);
+      let restoredQueue: Track[];
       if (r.shuffledHashes?.length) {
         const validSet = new Set(playlistTracks.map(t => t.hash));
         const restored = r.shuffledHashes
           .filter(h => validSet.has(h))
           .map(h => playlistTracks.find(t => t.hash === h)!);
-        setShuffledQueue(restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current));
+        restoredQueue = restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current);
       } else {
-        setShuffledQueue(buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current));
+        restoredQueue = buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current);
       }
+      setShuffledQueue(restoredQueue);
+      snapshotPlayingQueue(restoredQueue, playlistTracks, activePlaylistId, activeBranch, true);
+    } else {
+      snapshotPlayingQueue(playlistTracks, playlistTracks, activePlaylistId, activeBranch, false);
     }
     pendingRestoreRef.current = null;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -686,7 +868,11 @@ export default function DesktopApp(): JSX.Element {
       | { Error: string };
 
     const loadTrack = (track: Track) => {
-      setActiveTrackId(track.id);
+      // Only follow along in the Carousel/TrackList if the user is currently
+      // looking at the queue that's actually playing — otherwise auto-advance
+      // would jump the carousel to an unrelated position in whatever playlist
+      // happens to be browsed.
+      if (isViewingPlayingContext()) setActiveTrackId(track.id);
       useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
       setPositionMs(0);
@@ -755,9 +941,14 @@ export default function DesktopApp(): JSX.Element {
           return;
         }
 
-        // loopMode 'off' — auto-advance
-        const { manualQueue: mq, playQueue: pq, activeQueue: aq,
-                isShuffle: shuffle, shuffleMode: sm, activeTrackId: atid } = sr.current;
+        // loopMode 'off' — auto-advance. Uses `playingQueue`/`playingActiveQueue`/
+        // `playingIsShuffle` (the queue/shuffle-state the ending track actually
+        // came from), NOT the live `playQueue`/`activeQueue`/`isShuffle` (whatever's
+        // currently being browsed) — otherwise a track ending while the user is
+        // looking at a different playlist/the Spotify view would advance into an
+        // unrelated queue, or wrap/reshuffle based on the wrong shuffle toggle.
+        const { manualQueue: mq, playingQueue: pq, playingActiveQueue: aq,
+                playingIsShuffle: shuffle, shuffleMode: sm, activeTrackId: atid } = sr.current;
 
         if (mq.length > 0) {
           const [next, ...rest] = mq;
@@ -776,7 +967,12 @@ export default function DesktopApp(): JSX.Element {
             const newQ = buildShuffledQueue(aq, sm, playCountsRef.current);
             // Avoid immediately repeating the just-finished track at position 0.
             if (newQ.length > 1 && newQ[0].hash === lh) [newQ[0], newQ[1]] = [newQ[1], newQ[0]];
-            setShuffledQueue(newQ);
+            // Canonical playing order always gets the reshuffle, regardless of
+            // what's browsed. Only mirror it into the browsed view's own state
+            // if that view is actually showing the playing context — otherwise
+            // this would hijack an unrelated playlist's carousel/track order.
+            sr.current.playingQueue = newQ;
+            if (isViewingPlayingContext()) setShuffledQueue(newQ);
             loadTrack(newQ[0]);
           } else {
             const first = pq[0];
@@ -832,12 +1028,17 @@ export default function DesktopApp(): JSX.Element {
   }, [activePlaylist?.id, activeBranch]);
 
   // ── Persist playback state for restart recovery ──────────────────────────
+  // Reads `sr.current.playingPlaylistId`/`playingBranchName` (the context the
+  // PLAYING track actually belongs to) rather than `activePlaylistId`/`activeBranch`
+  // (whatever's currently being BROWSED) — otherwise merely navigating to a
+  // different playlist/the Spotify view while something plays elsewhere would
+  // overwrite the saved context with the wrong values, corrupting cold-start restore.
   useEffect(() => {
     return useStore.subscribe(state => {
       if (state.loadedTrackHash) {
         localStorage.setItem('melomaniac.playback_state', JSON.stringify({
           hash: state.loadedTrackHash, durationMs: state.duration_ms,
-          playlistId: activePlaylistId, branchName: activeBranch,
+          playlistId: sr.current.playingPlaylistId, branchName: sr.current.playingBranchName,
           isShuffle, shuffleMode: settings.shuffleMode,
           shuffledHashes: isShuffle && shuffledQueue ? shuffledQueue.map(t => t.hash) : undefined,
           loopMode,
@@ -847,7 +1048,7 @@ export default function DesktopApp(): JSX.Element {
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlaylistId, activeBranch, isShuffle, settings.shuffleMode, shuffledQueue, loopMode]);
+  }, [isShuffle, settings.shuffleMode, shuffledQueue, loopMode]);
 
   // Persist playback position periodically and on unload so cold-start restore
   // can seek back to where the user left off (mirrors Spotify's behaviour).
@@ -953,10 +1154,18 @@ export default function DesktopApp(): JSX.Element {
     const applyMode = (mode: ShuffleMode, label: string) => {
       updateSetting('shuffleMode', mode);
       const newQ = buildShuffledQueue(activeQueue, mode, playCountsRef.current);
-      sr.current.playQueue = newQ;
       sr.current.isShuffle = true;
       setShuffledQueue(newQ);
       setIsShuffle(true);
+      // If this view is also the one actually playing, keep the playing
+      // snapshot in sync too — otherwise skip/prev/auto-advance would keep
+      // using the pre-toggle order until the next deliberate track pick,
+      // and navigating away and back would restore the stale order instead
+      // of this new shuffle.
+      if (isViewingPlayingContext()) {
+        sr.current.playingQueue = newQ;
+        sr.current.playingIsShuffle = true;
+      }
       toast(`Shuffle: ${label}`);
     };
 
@@ -973,10 +1182,13 @@ export default function DesktopApp(): JSX.Element {
     } else if (settings.shuffleMode === 'weighted') {
       applyMode('discovery', 'Discovery');
     } else {
-      sr.current.playQueue = activeQueue;
       sr.current.isShuffle = false;
       setShuffledQueue(null);
       setIsShuffle(false);
+      if (isViewingPlayingContext()) {
+        sr.current.playingQueue = activeQueue;
+        sr.current.playingIsShuffle = false;
+      }
       toast('Shuffle: Off');
     }
   };
@@ -1147,6 +1359,33 @@ export default function DesktopApp(): JSX.Element {
     setActiveTrackId(id);
   };
 
+  // Play a track from the currently-browsed Spotify virtual playlist. Unlike
+  // the old inline `playTrack` in SpotifyPlaylistView (which only called
+  // `track_play` + local row-highlight state), this pairs it with `setLoaded`/
+  // `setPlaying` like every other play path in the app — otherwise the
+  // mini-player never reflected Spotify-originated playback at all. It also
+  // snapshots the Spotify view's own resolved-local-tracks order as the
+  // playing queue, so skip next/prev advance through this playlist correctly
+  // even after navigating elsewhere.
+  const handleSpotifyPlayTrack = (hash: string) => {
+    const track = spotifyPlaybackQueue.find(t => t.hash === hash);
+    if (!track) return;
+    invoke('track_play', { hash }).catch(console.error);
+    useStore.getState().setLoaded(hash, track.duration_ms);
+    sr.current.durationMs = track.duration_ms;
+    snapshotPlayingQueue(spotifyPlaybackQueue, spotifyPlaybackQueue, null, 'main', false);
+    setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
+    useStore.getState().setPlaying(true);
+  };
+
+  // `playQueue`/`activeQueue` fall back to the full library while browsing the
+  // Spotify sentinel (see the playlistTracks-fetch effect), so that fallback is
+  // library context (`playlistId: null`), not the Spotify view itself.
+  const resolvePlayingContext = (): { playlistId: string | null; branchName: string } =>
+    activePlaylistId && !activePlaylistId.startsWith('spotify:')
+      ? { playlistId: activePlaylistId, branchName: activeBranch }
+      : { playlistId: null, branchName: 'main' };
+
   const handleTrackPlayPause = (id: number) => {
     const track = playQueue.find(t => t.id === id);
     if (!track?.hash) return;
@@ -1154,11 +1393,13 @@ export default function DesktopApp(): JSX.Element {
       // Already loaded — just toggle pause/resume
       useStore.getState().toggleAudio().catch(console.error);
     } else {
-      // Different track — load and play it
+      // Different track — load and play it, and record that THIS (the view
+      // this row belongs to) is now the queue that's actually playing.
       setActiveTrackId(id);
       invoke('track_play', { hash: track.hash }).catch(console.error);
       useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
+      { const ctx = resolvePlayingContext(); snapshotPlayingQueue(playQueue, activeQueue, ctx.playlistId, ctx.branchName, isShuffle); }
       useStore.getState().setPlaying(true);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
     }
@@ -1172,7 +1413,9 @@ export default function DesktopApp(): JSX.Element {
     if (manualQueue.length > 0) {
       const [next, ...rest] = manualQueue;
       setManualQueue(rest);
-      setActiveTrackId(next.id);
+      // Only follow along visually if the viewed queue is the one playing —
+      // see the rationale above `isViewingPlayingContext`.
+      if (isViewingPlayingContext()) setActiveTrackId(next.id);
       invoke('track_play', { hash: next.hash }).catch(console.error);
       useStore.getState().setLoaded(next.hash, next.duration_ms);
       sr.current.durationMs = next.duration_ms;
@@ -1180,13 +1423,18 @@ export default function DesktopApp(): JSX.Element {
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       return;
     }
-    const q = playQueue.filter(t => !sessionExcluded.has(t.hash));
+    // Advance within the queue that's actually PLAYING (nowPlayingQueue), not
+    // whatever's currently being browsed.
+    const q = nowPlayingQueue.filter(t => !sessionExcluded.has(t.hash));
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
     if (q.length === 0) return;
     const nextIdx = (idx + 1) % q.length;
     const next = q[nextIdx];
-    setActiveTrackId(next.id);
+    // Only move the Carousel/TrackList spotlight if we're looking at the queue
+    // that's actually advancing — otherwise this would jump the carousel to a
+    // coincidental position in whatever unrelated playlist is being browsed.
+    if (isViewingPlayingContext()) setActiveTrackId(next.id);
     invoke('track_play', { hash: next.hash }).catch(console.error);
     useStore.getState().setLoaded(next.hash, next.duration_ms);
     sr.current.durationMs = next.duration_ms;
@@ -1206,13 +1454,16 @@ export default function DesktopApp(): JSX.Element {
     if (loadedHash)
       invoke('track_record_skip', { hash: loadedHash, positionMs: livePositionMsRef.current }).catch(console.error);
     setLoopMode(LoopMode.Off); sr.current.loopMode = LoopMode.Off;
-    const q = playQueue;
+    // Same rationale as handleSkipNext — use the actually-playing queue.
+    const q = nowPlayingQueue;
     let idx = q.findIndex(t => t.hash === loadedHash);
     if (idx === -1) idx = q.findIndex(t => t.id === activeTrackId);
     if (q.length === 0) return;
     const prevIdx = (idx - 1 + q.length) % q.length;
     const prev = q[prevIdx];
-    setActiveTrackId(prev.id);
+    // Same rationale as handleSkipNext — don't jump the carousel unless we're
+    // actually looking at the queue that's playing.
+    if (isViewingPlayingContext()) setActiveTrackId(prev.id);
     invoke('track_play', { hash: prev.hash }).catch(console.error);
     useStore.getState().setLoaded(prev.hash, prev.duration_ms);
     sr.current.durationMs = prev.duration_ms;
@@ -1222,30 +1473,32 @@ export default function DesktopApp(): JSX.Element {
   skipPrevRef.current = handleSkipPrev;
 
   const handlePlayPause = () => {
-    // If audio is already loaded, toggle it — even if the current track isn't
-    // in the active queue (e.g. switched to a branch that doesn't have it).
-    if (loadedHash) {
-      const queueTrack = playQueue.find(t => t.id === activeTrackId);
-      if (!queueTrack || queueTrack.hash === loadedHash) {
-        useStore.getState().toggleAudio().catch(console.error);
-        return;
-      }
-      // A different track is selected in the queue — load it
-      invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
-      useStore.getState().setLoaded(queueTrack.hash, queueTrack.duration_ms);
-      sr.current.durationMs = queueTrack.duration_ms;
-      setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
-      useStore.getState().setPlaying(true);
+    // `activeTrackId` is kept meaningfully in sync with the viewed queue by
+    // the reconciliation effect above, so it always resolves to a real track
+    // in `playQueue` — either the one actually playing (if this view is the
+    // one that's playing) or the newly-viewed queue's first track otherwise.
+    const queueTrack = playQueue.find(t => t.id === activeTrackId);
+    if (loadedHash && (!queueTrack || queueTrack.hash === loadedHash)) {
+      // Already loaded and it's the same track (or nothing resolvable in the
+      // queue) — just toggle pause/resume.
+      useStore.getState().toggleAudio().catch(console.error);
       return;
     }
-    // Nothing loaded yet — load the selected track from the queue
-    const track = playQueue.find(t => t.id === activeTrackId);
-    if (!track?.hash) return;
-    invoke('track_play', { hash: track.hash }).catch(console.error);
-    useStore.getState().setLoaded(track.hash, track.duration_ms);
-    sr.current.durationMs = track.duration_ms;
+    if (!queueTrack?.hash) return;
+    invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
+    useStore.getState().setLoaded(queueTrack.hash, queueTrack.duration_ms);
+    sr.current.durationMs = queueTrack.duration_ms;
+    { const ctx = resolvePlayingContext(); snapshotPlayingQueue(playQueue, activeQueue, ctx.playlistId, ctx.branchName, isShuffle); }
     setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
     useStore.getState().setPlaying(true);
+  };
+
+  // Mini-player's play/pause always controls actual playback — unlike the
+  // big carousel's handlePlayPause, it must NOT be redirected to whatever's
+  // merely browsed, since the mini-player always displays (and should only
+  // ever act on) the track that's really loaded.
+  const handleMiniPlayPause = () => {
+    useStore.getState().toggleAudio().catch(console.error);
   };
 
   return (
@@ -1261,6 +1514,11 @@ export default function DesktopApp(): JSX.Element {
             playlists={playlistRecords.map(playlistRecordToPlaylist)}
             activePlaylistId={activePlaylistId}
             onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab(DefaultView.Tracks); setRailItem('playlists'); }}
+            onSelectSpotify={source => {
+              setActivePlaylistId(`spotify:${source}`);
+              setRailItem('playlists');
+              openSpotifyPlaylist(source);
+            }}
             activeRailItem={railItem}
             onRailChange={handleRailChange}
             expanded={leftExpanded}
@@ -1352,6 +1610,12 @@ export default function DesktopApp(): JSX.Element {
                 }}
                 onTrackDeleted={hash => setTrackOrder(prev => prev.filter(t => t.hash !== hash))}
               />
+            ) : activePlaylistId?.startsWith('spotify:') ? (
+              <SpotifyPlaylistView
+                source={activePlaylistId.slice('spotify:'.length)}
+                artworkUrls={artworkUrls}
+                onPlayTrack={handleSpotifyPlayTrack}
+              />
             ) : (
               <>
                 <PlaylistHeader
@@ -1415,14 +1679,14 @@ export default function DesktopApp(): JSX.Element {
                       </div>
                       <div style={{ position: 'relative', zIndex: 1 }}>
                         <PlayerControls
-                          track={playQueue.find(t => t.id === activeTrackId) ?? null}
+                          track={browsedTrack}
                           positionMsRef={livePositionMsRef}
                           durationMs={durationMs}
                           isPlaying={isPlaying} onPlayPause={handlePlayPause}
                           onSkipNext={handleSkipNext} onSkipPrev={handleSkipPrev}
-                          isFav={favorites.has(playQueue.find(t => t.id === activeTrackId)?.hash ?? '')}
+                          isFav={favorites.has(browsedTrack?.hash ?? '')}
                           onFav={() => {
-                            const hash = playQueue.find(t => t.id === activeTrackId)?.hash;
+                            const hash = browsedTrack?.hash;
                             if (!hash) return;
                             setFavorites(prev => {
                               const next = new Set(prev);
@@ -1560,7 +1824,7 @@ export default function DesktopApp(): JSX.Element {
         {/* Queue panel */}
         {showQueue && (
           <QueuePanel
-            playQueue={playQueue.filter(t => !sessionExcluded.has(t.hash))}
+            playQueue={nowPlayingQueue.filter(t => !sessionExcluded.has(t.hash))}
             manualQueue={manualQueue}
             loadedHash={loadedHash}
             artworkUrls={artworkUrls}
@@ -1574,7 +1838,7 @@ export default function DesktopApp(): JSX.Element {
         {/* Mini player */}
         {loadedHash && !miniPlayerCollapsed && (
           <MiniPlayer
-            track={playQueue.find(t => t.hash === loadedHash) ?? null}
+            track={nowPlayingTrack}
             artworkUrl={artworkUrls[loadedHash]}
             isPlaying={isPlaying}
             positionMsRef={livePositionMsRef}
@@ -1583,7 +1847,7 @@ export default function DesktopApp(): JSX.Element {
             abA={abA}
             abB={abB}
             volume={volume}
-            onPlayPause={handlePlayPause}
+            onPlayPause={handleMiniPlayPause}
             onSkipNext={handleSkipNext}
             onSkipPrev={handleSkipPrev}
             onLoopCycle={handleLoopCycle}
@@ -1861,6 +2125,32 @@ export default function DesktopApp(): JSX.Element {
             pointerEvents: 'none', zIndex: 100,
             animation: 'fadeIn 0.2s ease',
           }}>{meloToast}</div>
+        )}
+
+        {spotifyToast && (
+          <div style={{
+            position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)',
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'var(--bg-1)', border: '1px solid var(--border-2)',
+            borderRadius: 6, padding: '7px 14px',
+            fontSize: 11, color: 'var(--accent-light)',
+            fontFamily: "'JetBrains Mono', monospace",
+            boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+            zIndex: 100,
+            animation: 'fadeIn 0.2s ease',
+          }}>
+            <span style={{ pointerEvents: 'none' }}>{spotifyToast.message}</span>
+            {spotifyToast.action && (
+              <button
+                onClick={spotifyToast.action.onClick}
+                style={{
+                  background: 'none', border: '1px solid var(--border-2)', borderRadius: 4,
+                  padding: '2px 8px', color: 'var(--accent-light)', fontSize: 10.5,
+                  fontFamily: "'Outfit', sans-serif", cursor: 'pointer',
+                }}
+              >{spotifyToast.action.label}</button>
+            )}
+          </div>
         )}
       </div>
     </div>

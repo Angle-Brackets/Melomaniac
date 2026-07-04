@@ -94,4 +94,5 @@ export const Icons = {
   wave: (p: IconProps) => <Ic {...p}><path d="M2 12h2l2-7 3 14 2-10 2 7 2-4 3 5 2-3 2 1"/></Ic>,
   filter: (p: IconProps) => <Ic {...p}><path d="M4 5h16M7 12h10M10 19h4"/></Ic>,
   wifi: (p: IconProps) => <Ic {...p}><path d="M5 12.5a10 10 0 0114 0"/><path d="M8.5 16a5 5 0 017 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></Ic>,
+  info: (p: IconProps) => <Ic {...p}><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="0.2" fill="currentColor" stroke="currentColor" strokeWidth="1.8"/></Ic>,
 };

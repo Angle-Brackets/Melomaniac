@@ -317,12 +317,15 @@ pub fn run() {
             spotify::spotify_get_playlists,
             spotify::spotify_get_playlist_tracks,
             spotify::spotify_get_liked_tracks,
+            spotify::spotify_apply_track_metadata,
             #[cfg(debug_assertions)]
             spotify::spotify_debug_raw,
             matching::spotify_import_playlist_tracks,
             matching::spotify_get_imported_tracks,
             matching::spotify_link_track,
             matching::spotify_unlink_track,
+            matching::spotify_reject_track_match,
+            matching::spotify_undo_reject_track_match,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

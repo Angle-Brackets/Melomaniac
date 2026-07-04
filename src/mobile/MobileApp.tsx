@@ -11,6 +11,7 @@ import { getTrackArtwork, getPlaylistArtwork } from './artworkCache';
 import { NowPlaying } from './components/NowPlaying';
 import { Library, PlaylistsList } from './components/Library';
 import { PlaylistDetail } from './components/PlaylistDetail';
+import { SpotifyPlaylistDetail } from './components/SpotifyPlaylistDetail';
 import { Discover } from './components/Discover';
 import { Settings } from './components/Settings';
 import { DiffViewer } from '../components/DiffViewer';
@@ -51,9 +52,12 @@ export default function MobileApp() {
   const loadLibrary          = useStore(s => s.loadLibrary);
   const loadPlaylists        = useStore(s => s.loadPlaylists);
   const syncToast            = useStore(s => s.syncToast);
+  const spotifyToast         = useStore(s => s.spotifyToast);
   const setDownloadProgress  = useStore(s => s.setDownloadProgress);
   const refreshLivePeers     = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices  = useStore(s => s.refreshKnownDevices);
+  const refreshSpotifyStatus = useStore(s => s.refreshSpotifyStatus);
+  const activeSpotifySource  = useStore(s => s.activeSpotifySource);
 
   const restoreSession = (raw: string | null, ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
     try {
@@ -98,6 +102,7 @@ export default function MobileApp() {
     const theme = saved.theme ?? 'warm';
     if (theme === 'custom') { writeCustomHue(saved.customAccentHue ?? saved.accentHue ?? 28); applyTheme('custom'); }
     else { applyTheme(theme); }
+    refreshSpotifyStatus();
     // Load library then eagerly prefetch all track artwork into the cache.
     // By the time the user sees Library or NowPlaying the images are ready.
     loadLibrary().then(() => {
@@ -454,7 +459,7 @@ export default function MobileApp() {
         }}
       >
         {tab === 'library'   && <Library onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
-        {tab === 'playlists' && <PlaylistsList onTab={handleTab} onPlaylistDetail={handlePlaylistDetail}/>}
+        {tab === 'playlists' && <PlaylistsList onTab={handleTab} onPlaylistDetail={handlePlaylistDetail} onSpotifyPlaylistDetail={handlePlaylistDetail}/>}
         {tab === 'now'       && <NowPlaying onTab={handleTab}/>}
         {tab === 'discover'  && <Discover onTab={handleTab}/>}
         {tab === 'settings'  && <Settings onTab={handleTab}/>}
@@ -469,7 +474,10 @@ export default function MobileApp() {
           willChange: 'transform',
           boxShadow: detailActive ? '-12px 0 40px rgba(0,0,0,0.45)' : 'none',
         }}>
-          <PlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
+          {activeSpotifySource
+            ? <SpotifyPlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
+            : <PlaylistDetail onBack={handlePlaylistBack} onTab={handleTab}/>
+          }
         </div>
       )}
 
@@ -488,6 +496,33 @@ export default function MobileApp() {
           pointerEvents: 'none', zIndex: 200,
           whiteSpace: 'nowrap',
         }}>{syncToast}</div>
+      )}
+
+      {spotifyToast && (
+        <div style={{
+          position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom) + 80px)',
+          left: '50%', transform: 'translateX(-50%)',
+          display: 'flex', alignItems: 'center', gap: 12,
+          background: 'var(--bg-1)', border: '1px solid var(--border-2)',
+          borderRadius: 20, padding: '8px 10px 8px 18px',
+          fontSize: 13, color: 'var(--accent-light)',
+          fontFamily: 'system-ui, sans-serif', fontWeight: 500,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
+          zIndex: 200,
+          whiteSpace: 'nowrap',
+        }}>
+          <span style={{ pointerEvents: 'none' }}>{spotifyToast.message}</span>
+          {spotifyToast.action && (
+            <button
+              onClick={spotifyToast.action.onClick}
+              style={{
+                background: 'none', border: '1px solid var(--border-2)', borderRadius: 14,
+                padding: '4px 12px', color: 'var(--accent-light)', fontSize: 12.5,
+                fontWeight: 600, fontFamily: 'system-ui, sans-serif', cursor: 'pointer',
+              }}
+            >{spotifyToast.action.label}</button>
+          )}
+        </div>
       )}
     </div>
   );

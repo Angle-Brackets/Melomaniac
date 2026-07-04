@@ -6,11 +6,12 @@ import { listen } from '@tauri-apps/api/event';
 import type { Track, TrackRecord } from '../data';
 import { trackRecordToTrack } from '../data';
 import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
-import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart, FiDownloadCloud, FiSlash } from 'react-icons/fi';
+import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import BulkEditPanel from './BulkEditPanel';
 import DownloadModal from './DownloadModal';
+import { SpotifyProvenanceBadge, GetTrackMenuItem, RejectSpotifyMatchMenuItem } from './SpotifyTrackRow';
 import { useStore } from '../../store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -22,7 +23,7 @@ type ColKey    = 'title' | 'artist' | 'album' | 'source';
 
 // External (not-yet-downloaded) Spotify rows are synthesised as TrackRecord-shaped
 // so they can flow through the same sort/filter/render pipeline as real tracks.
-type Row = TrackRecord & { isExternal?: boolean; spotifyId?: string };
+type Row = TrackRecord & { isExternal?: boolean; spotifyId?: string; artworkUrl?: string | null };
 
 interface ColWidths { title: number; artist: number; album: number; source: number; }
 const DEFAULT_COLS: ColWidths = { title: 280, artist: 160, album: 160, source: 100 };
@@ -94,9 +95,10 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const [playingHash,       setPlayingHash]       = useState<string | null>(null);
 
   const importedTracks             = useStore(s => s.importedTracks);
+  const reviewTracks               = useStore(s => s.reviewTracks);
   const downloadingSpotifyIds      = useStore(s => s.downloadingSpotifyIds);
   const fetchImportedTracks        = useStore(s => s.fetchImportedTracks);
-  const unlinkSpotifyTrack         = useStore(s => s.unlinkTrack);
+  const rejectSpotifyMatch         = useStore(s => s.rejectMatch);
   const downloadAndLinkSpotifyTrack = useStore(s => s.downloadAndLinkExternalTrack);
 
   const lastClickRef = useRef<{ hash: string; idx: number } | null>(null);
@@ -104,9 +106,12 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const COL = buildCOL(colWidths);
 
   // Rows for imported-but-not-downloaded Spotify tracks — shown as dashed,
-  // non-selectable entries with only a "Get track" action.
+  // non-selectable entries with only a "Get track" action. Tracks currently
+  // awaiting a duration-mismatch review are excluded here since "Get track"
+  // would just kick off a second concurrent download — resolve those in the
+  // Spotify playlist view instead.
   const externalRows: Row[] = useMemo(() => importedTracks
-    .filter(t => t.matched_hash == null)
+    .filter(t => t.matched_hash == null && !reviewTracks[t.spotify_id])
     .map((t): Row => ({
       hash:         `spotify:${t.spotify_id}`,
       title:        t.title,
@@ -120,6 +125,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
       source_url:   null,
       isExternal:   true,
       spotifyId:    t.spotify_id,
+      artworkUrl:   t.artwork_url,
     })), [importedTracks]);
 
   // Local tracks the matcher (or the user) silently linked to a Spotify import —
@@ -453,7 +459,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
         {filtered.map((r, idx) => {
           const sel        = selected.has(r.hash);
-          const art        = artworkUrls[r.hash];
+          const art        = artworkUrls[r.hash] ?? r.artworkUrl ?? undefined;
           const isNew      = r.ingested_at > 0 && (nowSecs - r.ingested_at) < 7 * 86400;
           const isStray    = strayHashes.has(r.hash);
           const source     = sourceDomain(r.source_url);
@@ -519,15 +525,11 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
                   {favorites?.has(r.hash) && (
                     <FiHeart size={9} style={{ fill: 'currentColor', color: 'var(--accent)', flexShrink: 0 }} />
                   )}
-                  {!isExternal && linkedSpotifyId && <Badge label="SPOTIFY" />}
+                  {!isExternal && linkedSpotifyId && <SpotifyProvenanceBadge />}
                 </div>
                 {isNew   && <Badge label="NEW"   accent />}
                 {isStray && <Badge label="STRAY" />}
-                {isExternal && (
-                  isDownloadingThis
-                    ? <Badge label="FETCHING…" accent />
-                    : <Badge label="SPOTIFY" accent />
-                )}
+                {isExternal && <SpotifyProvenanceBadge downloading={isDownloadingThis} />}
               </div>
 
               {/* Artist */}
@@ -632,10 +634,11 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           onGetTrack={contextMenu.spotifyId
             ? () => { const id = contextMenu.spotifyId!; setContextMenu(null); downloadAndLinkSpotifyTrack(id); }
             : undefined}
-          onUnlinkSpotify={() => {
+          onRejectSpotify={() => {
             const spotifyId = linkedSpotifyByHash.get(contextMenu.hash);
+            const hash = contextMenu.hash;
             setContextMenu(null);
-            if (spotifyId) unlinkSpotifyTrack(spotifyId);
+            if (spotifyId) rejectSpotifyMatch(spotifyId, hash);
           }}
         />
       )}
@@ -742,10 +745,10 @@ interface ContextMenuProps {
   onOpenInEditor:  () => void;
   onDelete:        () => void;
   onGetTrack?:      () => void;
-  onUnlinkSpotify?: () => void;
+  onRejectSpotify?: () => void;
 }
 
-function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay, onAddToPlaylist, onBulkEdit, onOpenInEditor, onDelete, onGetTrack, onUnlinkSpotify }: ContextMenuProps) {
+function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay, onAddToPlaylist, onBulkEdit, onOpenInEditor, onDelete, onGetTrack, onRejectSpotify }: ContextMenuProps) {
   if (isExternal) {
     return (
       <div
@@ -757,7 +760,7 @@ function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay
         }}
         onClick={e => e.stopPropagation()}
       >
-        <MenuItem icon={<FiDownloadCloud size={11} />} label="Get track" onClick={() => onGetTrack?.()} />
+        <GetTrackMenuItem onClick={() => onGetTrack?.()} />
       </div>
     );
   }
@@ -776,9 +779,7 @@ function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay
       <MenuItem icon={<FiPlus size={11} />}   label="Add to Playlist" onClick={onAddToPlaylist} />
       <MenuItem icon={<FiTag size={11} />}    label="Bulk Edit"       onClick={onBulkEdit} />
       {singleSelected && <MenuItem icon={<FiEdit2 size={11} />} label="Open in Editor" onClick={onOpenInEditor} />}
-      {linkedSpotifyId && (
-        <MenuItem icon={<FiSlash size={11} />} label="Unlink Spotify match" onClick={() => onUnlinkSpotify?.()} />
-      )}
+      {linkedSpotifyId && <RejectSpotifyMatchMenuItem onClick={() => onRejectSpotify?.()} />}
       <div style={{ height: 1, background: 'var(--border-1)', margin: '2px 0' }} />
       <MenuItem icon={<FiTrash2 size={11} />} label="Delete"          onClick={onDelete} danger />
     </div>
