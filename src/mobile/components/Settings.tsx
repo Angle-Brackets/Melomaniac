@@ -113,6 +113,11 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
   const refreshLivePeers        = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices     = useStore(s => s.refreshKnownDevices);
   const openPeerManifest        = useStore(s => s.openPeerManifest);
+  const spotifyConnected        = useStore(s => s.spotifyConnected);
+  const spotifyAccount          = useStore(s => s.spotifyAccount);
+  const connectSpotify          = useStore(s => s.connectSpotify);
+  const disconnectSpotify       = useStore(s => s.disconnectSpotify);
+  const [spotifyConnecting, setSpotifyConnecting] = useState(false);
 
   const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
   const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
@@ -548,6 +553,28 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           ))}
           <Row title="Pair a device" chev isLast onClick={() => { openPairingDisplay().catch(console.error); }}>
             <span style={{ fontSize: 13, color: 'var(--text-2)' }}>QR</span>
+          </Row>
+        </SettingsGroup>
+
+        {/* Spotify */}
+        <SettingsGroup label="Spotify">
+          <Row
+            title={spotifyConnected ? (spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected') : 'Not connected'}
+            isLast
+          >
+            <span style={{ width: 7, height: 7, borderRadius: 4, background: spotifyConnected ? 'oklch(0.72 0.17 142)' : 'var(--border-2)', flexShrink: 0, marginRight: 4 }}/>
+            {spotifyConnected ? (
+              <button
+                onClick={() => disconnectSpotify().catch(console.error)}
+                style={{ fontSize: 13, color: 'var(--text-2)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >Disconnect</button>
+            ) : (
+              <button
+                onClick={() => { setSpotifyConnecting(true); connectSpotify().catch(console.error).finally(() => setSpotifyConnecting(false)); }}
+                disabled={spotifyConnecting}
+                style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, opacity: spotifyConnecting ? 0.6 : 1 }}
+              >{spotifyConnecting ? 'Connecting…' : 'Connect'}</button>
+            )}
           </Row>
         </SettingsGroup>
 

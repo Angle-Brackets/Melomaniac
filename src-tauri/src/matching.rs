@@ -55,9 +55,17 @@ fn duration_score(a_ms: i64, b_ms: i64) -> f32 {
 /// `MATCH_THRESHOLD`. ISRC equality (when both sides have one) short-circuits
 /// straight to a perfect-confidence match; today local ISRC is always NULL
 /// so this path is a no-op hook for a future fingerprinting pass.
-fn best_match(input: &MatchInput, library: &[TrackRecord]) -> Option<(String, f32)> {
+///
+/// `rejected` excludes hashes the user has previously flagged as a wrong
+/// match for this exact external track — checked even for the ISRC
+/// short-circuit, since a bad ISRC/fingerprint match is just as rejectable
+/// as a fuzzy one.
+fn best_match(input: &MatchInput, library: &[TrackRecord], rejected: &[String]) -> Option<(String, f32)> {
     if let Some(isrc) = input.isrc {
-        if let Some(hit) = library.iter().find(|t| t.isrc.as_deref() == Some(isrc)) {
+        if let Some(hit) = library
+            .iter()
+            .find(|t| t.isrc.as_deref() == Some(isrc) && !rejected.iter().any(|r| r == &t.hash))
+        {
             return Some((hit.hash.clone(), 1.0));
         }
     }
@@ -67,6 +75,9 @@ fn best_match(input: &MatchInput, library: &[TrackRecord]) -> Option<(String, f3
 
     let mut best: Option<(String, f32)> = None;
     for track in library {
+        if rejected.iter().any(|r| r == &track.hash) {
+            continue;
+        }
         if (track.duration_ms - input.duration_ms).unsigned_abs() as i64 > DURATION_GATE_MS {
             continue;
         }
@@ -84,7 +95,14 @@ fn best_match(input: &MatchInput, library: &[TrackRecord]) -> Option<(String, f3
     best
 }
 
-fn to_new_spotify_track(source: &str, t: SpotifyTrack) -> Option<NewSpotifyTrack> {
+/// Provider-prefixed key into `track_rejections` for a Spotify track.
+/// Prefixing (rather than relying on `spotify_tracks`' own primary key)
+/// keeps the rejections table reusable by a future non-Spotify provider.
+fn spotify_external_id(spotify_id: &str) -> String {
+    format!("spotify:{spotify_id}")
+}
+
+fn to_new_spotify_track(source: &str, position: i64, t: SpotifyTrack) -> Option<NewSpotifyTrack> {
     let spotify_id = t.id?;
     Some(NewSpotifyTrack {
         spotify_id,
@@ -93,7 +111,9 @@ fn to_new_spotify_track(source: &str, t: SpotifyTrack) -> Option<NewSpotifyTrack
         album: Some(t.album),
         duration_ms: t.duration_ms as i64,
         isrc: t.isrc,
+        artwork_url: t.artwork_url,
         source: source.to_string(),
+        position,
     })
 }
 
@@ -109,7 +129,8 @@ pub async fn spotify_import_playlist_tracks(
 ) -> Result<Vec<SpotifyTrackRecord>, String> {
     let new_tracks: Vec<NewSpotifyTrack> = tracks
         .into_iter()
-        .filter_map(|t| to_new_spotify_track(&source, t))
+        .enumerate()
+        .filter_map(|(i, t)| to_new_spotify_track(&source, i as i64, t))
         .collect();
 
     storage
@@ -131,7 +152,12 @@ pub async fn spotify_import_playlist_tracks(
             duration_ms: t.duration_ms,
             isrc: t.isrc.as_deref(),
         };
-        if let Some((hash, score)) = best_match(&input, &library) {
+        let rejected = storage
+            .db
+            .get_rejected_hashes(&spotify_external_id(&t.spotify_id))
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some((hash, score)) = best_match(&input, &library, &rejected) {
             storage
                 .db
                 .set_spotify_track_match(&t.spotify_id, Some(&hash), Some(score))
@@ -181,6 +207,50 @@ pub async fn spotify_unlink_track(
         .map_err(|e| e.to_string())
 }
 
+/// Like `spotify_unlink_track`, but also permanently blacklists `hash` for
+/// this Spotify track so the matcher can never re-suggest it — for when the
+/// link is actively wrong, not just undesired. Applies regardless of the
+/// confidence the matcher originally reported; even a 99%-confidence match
+/// can be completely wrong. Does not touch the local library track itself,
+/// since it may be a legitimately correct match for something else.
+#[tauri::command]
+pub async fn spotify_reject_track_match(
+    spotify_id: String,
+    hash: String,
+    storage: State<'_, StorageState>,
+) -> Result<(), String> {
+    storage
+        .db
+        .add_track_rejection(&spotify_external_id(&spotify_id), &hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    storage
+        .db
+        .set_spotify_track_match(&spotify_id, None, None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Reverses `spotify_reject_track_match` — re-links `hash` and lifts the
+/// blacklist entry, for the "Undo" action on the reject toast.
+#[tauri::command]
+pub async fn spotify_undo_reject_track_match(
+    spotify_id: String,
+    hash: String,
+    storage: State<'_, StorageState>,
+) -> Result<(), String> {
+    storage
+        .db
+        .remove_track_rejection(&spotify_external_id(&spotify_id), &hash)
+        .await
+        .map_err(|e| e.to_string())?;
+    storage
+        .db
+        .set_spotify_track_match(&spotify_id, Some(&hash), None)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,7 +275,7 @@ mod tests {
     fn exact_match() {
         let library = vec![track("h1", "Song Title", "Artist Name", 200_000, None)];
         let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_000, isrc: None };
-        let (hash, score) = best_match(&input, &library).expect("should match");
+        let (hash, score) = best_match(&input, &library, &[]).expect("should match");
         assert_eq!(hash, "h1");
         assert!(score >= MATCH_THRESHOLD);
     }
@@ -214,7 +284,7 @@ mod tests {
     fn fuzzy_match_with_junk_suffix() {
         let library = vec![track("h1", "Song Title (Remastered 2011)", "Artist Name", 200_000, None)];
         let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_100, isrc: None };
-        let (hash, score) = best_match(&input, &library).expect("should match");
+        let (hash, score) = best_match(&input, &library, &[]).expect("should match");
         assert_eq!(hash, "h1");
         assert!(score >= MATCH_THRESHOLD);
     }
@@ -223,14 +293,14 @@ mod tests {
     fn duration_gate_rejects_close_title_wrong_length() {
         let library = vec![track("h1", "Song Title", "Artist Name", 200_000, None)];
         let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 400_000, isrc: None };
-        assert!(best_match(&input, &library).is_none());
+        assert!(best_match(&input, &library, &[]).is_none());
     }
 
     #[test]
     fn no_match_for_unrelated_track() {
         let library = vec![track("h1", "Completely Different", "Other Band", 200_000, None)];
         let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_000, isrc: None };
-        assert!(best_match(&input, &library).is_none());
+        assert!(best_match(&input, &library, &[]).is_none());
     }
 
     #[test]
@@ -238,8 +308,35 @@ mod tests {
         // Title/artist deliberately mismatched — only the ISRC equality should win this.
         let library = vec![track("h1", "Totally Wrong Title", "Wrong Artist", 999_000, Some("US1234567890"))];
         let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_000, isrc: Some("US1234567890") };
-        let (hash, score) = best_match(&input, &library).expect("should match via ISRC");
+        let (hash, score) = best_match(&input, &library, &[]).expect("should match via ISRC");
         assert_eq!(hash, "h1");
         assert_eq!(score, 1.0);
+    }
+
+    #[test]
+    fn rejected_hash_is_excluded_from_fuzzy_match() {
+        let library = vec![track("h1", "Song Title", "Artist Name", 200_000, None)];
+        let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_000, isrc: None };
+        // Would match at score 1.0 absent the rejection.
+        assert!(best_match(&input, &library, &["h1".to_string()]).is_none());
+    }
+
+    #[test]
+    fn rejected_hash_is_excluded_even_via_isrc_short_circuit() {
+        // Even a "perfect" ISRC match must stay rejectable.
+        let library = vec![track("h1", "Song Title", "Artist Name", 200_000, Some("US1234567890"))];
+        let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_000, isrc: Some("US1234567890") };
+        assert!(best_match(&input, &library, &["h1".to_string()]).is_none());
+    }
+
+    #[test]
+    fn rejection_of_one_hash_does_not_block_a_different_candidate() {
+        let library = vec![
+            track("h1", "Song Title", "Artist Name", 200_000, None),
+            track("h2", "Song Title", "Artist Name", 200_050, None),
+        ];
+        let input = MatchInput { title: "Song Title", artist: "Artist Name", duration_ms: 200_000, isrc: None };
+        let (hash, _) = best_match(&input, &library, &["h1".to_string()]).expect("h2 should still match");
+        assert_eq!(hash, "h2");
     }
 }

@@ -422,10 +422,51 @@ function PeerPlaylistRow({ manifest, isLocal, isDownloading, progress, onDownloa
   );
 }
 
+// ── Spotify playlist row ──────────────────────────────────────────────────────
+// Virtual sidebar entry for a Spotify playlist (or Liked Songs) — dashed until
+// fully downloaded/promoted, at which point it also exists as a real playlist
+// in the tree above.
+function SpotifyPlaylistRow({ name, trackCount, active, onSelect }: {
+  name: string; trackCount?: number; active: boolean; onSelect: () => void;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={onSelect}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '5px 10px', margin: '3px 6px',
+        borderRadius: 5,
+        border: active ? '1px solid var(--accent)' : '1px dashed var(--border-2)',
+        background: active ? 'var(--bg-5)' : hov ? 'var(--bg-3)' : 'transparent',
+        cursor: 'pointer', transition: 'background 0.1s',
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 12, fontWeight: 500,
+          color: active ? 'var(--accent-light)' : 'var(--text-1)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {name}
+        </div>
+        {trackCount != null && (
+          <div style={{ fontSize: 9.5, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace", marginTop: 1 }}>
+            {trackCount} track{trackCount !== 1 ? 's' : ''}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── LibrarySidebar ────────────────────────────────────────────────────────────
 interface LibrarySidebarProps {
   playlists: Playlist[]; activePlaylistId: string | null;
   onSelectPlaylist: (id: string) => void;
+  onSelectSpotify: (source: string) => void;
   activeRailItem: string; onRailChange: (item: string) => void;
   expanded: boolean; onToggleExpanded: () => void;
   panelWidth?: number;
@@ -442,7 +483,7 @@ interface LibrarySidebarProps {
 }
 
 export default function LibrarySidebar({
-  playlists, activePlaylistId, onSelectPlaylist,
+  playlists, activePlaylistId, onSelectPlaylist, onSelectSpotify,
   activeRailItem, onRailChange, expanded, onToggleExpanded, panelWidth = 220,
   pinnedIds, onTogglePin, folders, folderAssignments, onAssignToFolder, onDeleteFolder,
   onOpenSettings, onAddToFolderClick, onNewPlaylist, hasUpdate,
@@ -463,6 +504,10 @@ export default function LibrarySidebar({
   const downloadProgress           = useStore(s => s.downloadProgress);
   const refreshSidebarPeerManifest = useStore(s => s.refreshSidebarPeerManifest);
   const downloadPlaylist           = useStore(s => s.downloadPlaylist);
+
+  const spotifyConnected           = useStore(s => s.spotifyConnected);
+  const spotifyPlaylists           = useStore(s => s.spotifyPlaylists);
+  const activeSpotifySource        = useStore(s => s.activeSpotifySource);
 
   // Auto-fetch the manifest from the first trusted live peer — same logic as mobile PlaylistsList.
   useEffect(() => {
@@ -640,6 +685,35 @@ export default function LibrarySidebar({
                       : ['main'];
                     downloadPlaylist(manifest.id, branches, sidebarPeerManifestPeer.public_key_b64);
                   }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Spotify — virtual playlists, only shown once connected */}
+          {spotifyConnected && (
+            <div>
+              <div className="h-px bg-mm-b0 mx-2.5 my-1" />
+              <div style={{
+                padding: '4px 10px 2px',
+                fontSize: 9, fontWeight: 700,
+                letterSpacing: '0.08em', textTransform: 'uppercase',
+                color: 'var(--text-3)',
+              }}>
+                Spotify
+              </div>
+              <SpotifyPlaylistRow
+                name="Liked Songs"
+                active={activeSpotifySource === 'liked'}
+                onSelect={() => onSelectSpotify('liked')}
+              />
+              {spotifyPlaylists.map(p => (
+                <SpotifyPlaylistRow
+                  key={p.id}
+                  name={p.name}
+                  trackCount={p.track_count}
+                  active={activeSpotifySource === `playlist:${p.id}`}
+                  onSelect={() => onSelectSpotify(`playlist:${p.id}`)}
                 />
               ))}
             </div>

@@ -32,6 +32,11 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
   const refreshLivePeers    = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
   const openPeerManifest    = useStore(s => s.openPeerManifest);
+  const spotifyConnected    = useStore(s => s.spotifyConnected);
+  const spotifyAccount      = useStore(s => s.spotifyAccount);
+  const connectSpotify      = useStore(s => s.connectSpotify);
+  const disconnectSpotify   = useStore(s => s.disconnectSpotify);
+  const [spotifyConnecting, setSpotifyConnecting] = useState(false);
 
   const liveKeys = new Set(livePeers.map(p => p.public_key_b64));
   const offlineDevices = knownDevices.filter(d => !liveKeys.has(d.public_key_b64));
@@ -61,15 +66,15 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
   return (
     // DaisyUI modal — backdrop click closes
     <dialog className={`modal modal-open ${closing ? 'mm-backdrop-exit' : 'mm-backdrop'}`} style={{ zIndex: 60 }}>
-      <div className={`modal-box bg-mm-1 border border-mm-b2 max-w-md p-0 overflow-hidden ${closing ? 'mm-modal-box-exit' : 'mm-modal-box'}`}>
+      <div className={`modal-box bg-mm-1 border border-mm-b2 max-w-md max-h-[85vh] p-0 overflow-hidden flex flex-col ${closing ? 'mm-modal-box-exit' : 'mm-modal-box'}`}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-mm-b1 bg-mm-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-mm-b1 bg-mm-0 shrink-0">
           <h3 className="font-bold text-sm text-mm-t0">Melomaniac Settings</h3>
           <button className="btn btn-ghost btn-xs btn-square" onClick={onClose}>✕</button>
         </div>
 
-        <div className="p-5 space-y-5">
+        <div className="p-5 space-y-5 overflow-y-auto styled-scroll">
 
           {/* ── Appearance ── */}
           <section>
@@ -317,6 +322,40 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               {onPairDevice && (
                 <button onClick={onPairDevice} className="btn btn-xs btn-primary">
                   Pair a device
+                </button>
+              )}
+            </div>
+          </section>
+
+          {/* ── Spotify ── */}
+          <section>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Spotify</p>
+            <div className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${spotifyConnected ? 'bg-green-400' : 'bg-mm-t3'}`} />
+                <span className="text-xs text-mm-t0 truncate">
+                  {spotifyConnected
+                    ? spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected'
+                    : 'Not connected'}
+                </span>
+              </div>
+              {spotifyConnected ? (
+                <button
+                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2 shrink-0"
+                  onClick={() => disconnectSpotify().catch(console.error)}
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="btn btn-xs btn-primary shrink-0"
+                  disabled={spotifyConnecting}
+                  onClick={() => {
+                    setSpotifyConnecting(true);
+                    connectSpotify().catch(console.error).finally(() => setSpotifyConnecting(false));
+                  }}
+                >
+                  {spotifyConnecting ? 'Connecting…' : 'Connect Spotify'}
                 </button>
               )}
             </div>

@@ -39,7 +39,7 @@ pub struct DownloadJob {
 struct ProgressPayload { id: String, pct: f32, status: String, title: Option<String> }
 
 #[derive(Clone, Serialize)]
-struct DonePayload { id: String, track_hash: String, title: String }
+struct DonePayload { id: String, track_hash: String, title: String, duration_ms: i64 }
 
 #[derive(Clone, Serialize)]
 struct ErrorPayload { id: String, error: String }
@@ -120,9 +120,9 @@ async fn run_download(
     mgr.cancels.lock().unwrap().remove(&id);
 
     match result {
-        Ok((hash, title)) => {
+        Ok((hash, title, duration_ms)) => {
             mgr.patch(&id, |j| { j.status = DownloadStatus::Done; j.progress = 1.0; j.title = Some(title.clone()); });
-            app.emit("download://done", DonePayload { id, track_hash: hash, title }).ok();
+            app.emit("download://done", DonePayload { id, track_hash: hash, title, duration_ms }).ok();
         }
         Err(e) => {
             mgr.patch(&id, |j| { j.status = DownloadStatus::Failed; j.error = Some(e.clone()); });
@@ -138,7 +138,7 @@ async fn do_download(
     mgr:     &Arc<DownloadManager>,
     storage: &Arc<StorageState>,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
-) -> Result<(String, String), String> {
+) -> Result<(String, String, i64), String> {
     let tmp_template = format!("/tmp/melomaniac_{}.%(ext)s", id);
 
     let (mut rx, _child) = app.shell()
@@ -260,7 +260,7 @@ async fn do_download(
     } else {
         url.to_string()                // nothing better; show the source URL
     };
-    Ok((record.hash, final_title))
+    Ok((record.hash, final_title, record.duration_ms))
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────

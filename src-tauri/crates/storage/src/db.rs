@@ -40,6 +40,7 @@ pub struct SpotifyTrackRecord {
     pub album:        Option<String>,
     pub duration_ms:  i64,
     pub isrc:         Option<String>,
+    pub artwork_url:  Option<String>,
     /// `"playlist:<id>"` or `"liked"`.
     pub source:       String,
     /// NULL = shows as an external row; set = silently linked to a local track.
@@ -47,6 +48,10 @@ pub struct SpotifyTrackRecord {
     /// NULL for manual links/unlinks, algorithmic score otherwise.
     pub confidence:   Option<f32>,
     pub imported_at:  i64,
+    /// Index within `source`'s track list at last import — preserves Spotify's
+    /// native order for on-screen browsing and for the initial commit when a
+    /// virtual playlist is auto-promoted to a real local playlist.
+    pub position:     i64,
 }
 
 /// Input shape for upserting a Spotify track. Mirrors `SpotifyTrackRecord`
@@ -58,7 +63,9 @@ pub struct NewSpotifyTrack {
     pub album:       Option<String>,
     pub duration_ms: i64,
     pub isrc:        Option<String>,
+    pub artwork_url: Option<String>,
     pub source:      String,
+    pub position:    i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -263,6 +270,23 @@ impl Database {
         Ok(())
     }
 
+    /// Direct title/artist/album correction, no hash change and no commit/DAG
+    /// involvement — for overwriting yt-dlp's guessed tags with known-accurate
+    /// metadata (e.g. from a Spotify match) right after a fresh download,
+    /// before the track has been added to any playlist.
+    pub async fn update_track_fields(
+        &self,
+        hash:   &str,
+        title:  &str,
+        artist: &str,
+        album:  Option<&str>,
+    ) -> Result<(), StorageError> {
+        sqlx::query("UPDATE tracks SET title = ?, artist = ?, album = ? WHERE hash = ?")
+            .bind(title).bind(artist).bind(album).bind(hash)
+            .execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Replace a track's hash and update its editable metadata fields atomically.
     pub async fn update_track_hash_and_metadata(
         &self,
@@ -335,28 +359,32 @@ impl Database {
         for t in tracks {
             sqlx::query(
                 "INSERT INTO spotify_tracks
-                 (spotify_id, title, artist, album, duration_ms, isrc, source, matched_hash, confidence, imported_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                 (spotify_id, title, artist, album, duration_ms, isrc, artwork_url, source, matched_hash, confidence, imported_at, position)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
                  ON CONFLICT(spotify_id) DO UPDATE SET
                    title       = excluded.title,
                    artist      = excluded.artist,
                    album       = excluded.album,
                    duration_ms = excluded.duration_ms,
                    isrc        = excluded.isrc,
-                   source      = excluded.source"
+                   artwork_url = excluded.artwork_url,
+                   source      = excluded.source,
+                   position    = excluded.position"
             )
             .bind(&t.spotify_id).bind(&t.title).bind(&t.artist)
             .bind(&t.album).bind(t.duration_ms).bind(&t.isrc)
-            .bind(&t.source).bind(now)
+            .bind(&t.artwork_url).bind(&t.source).bind(now).bind(t.position)
             .execute(&mut *tx).await?;
         }
         tx.commit().await?;
         Ok(())
     }
 
+    /// Ordered by `(source, position)` so a client-side filter by `source`
+    /// yields tracks already in that source's native (Spotify) order.
     pub async fn get_spotify_tracks(&self) -> Result<Vec<SpotifyTrackRecord>, StorageError> {
         Ok(sqlx::query_as::<_, SpotifyTrackRecord>(
-            "SELECT * FROM spotify_tracks ORDER BY artist, album, title"
+            "SELECT * FROM spotify_tracks ORDER BY source, position"
         )
         .fetch_all(&self.pool).await?)
     }
@@ -371,6 +399,44 @@ impl Database {
     ) -> Result<(), StorageError> {
         sqlx::query("UPDATE spotify_tracks SET matched_hash = ?, confidence = ? WHERE spotify_id = ?")
             .bind(hash).bind(confidence).bind(spotify_id)
+            .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ── Track rejections ─────────────────────────────────────────────────────
+    // Provider-agnostic "this match is wrong" blacklist, keyed by a
+    // provider-prefixed `external_id` (e.g. "spotify:<spotify_id>") rather
+    // than a spotify_tracks foreign key. See migration 0013 for rationale.
+
+    /// Records that `hash` must never again be suggested/linked for
+    /// `external_id`, regardless of match confidence.
+    pub async fn add_track_rejection(&self, external_id: &str, hash: &str) -> Result<(), StorageError> {
+        let now = unix_now();
+        sqlx::query(
+            "INSERT INTO track_rejections (external_id, hash, rejected_at) VALUES (?, ?, ?)
+             ON CONFLICT(external_id, hash) DO NOTHING"
+        )
+        .bind(external_id).bind(hash).bind(now)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Hashes previously rejected for `external_id` — the matcher excludes
+    /// these from consideration even if they'd otherwise score above threshold.
+    pub async fn get_rejected_hashes(&self, external_id: &str) -> Result<Vec<String>, StorageError> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT hash FROM track_rejections WHERE external_id = ?"
+        )
+        .bind(external_id).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|(h,)| h).collect())
+    }
+
+    /// Reverses `add_track_rejection` — for undoing an accidental reject
+    /// within the same session, so the pairing goes back to fully normal
+    /// (not just re-linked, but eligible for auto-suggestion again too).
+    pub async fn remove_track_rejection(&self, external_id: &str, hash: &str) -> Result<(), StorageError> {
+        sqlx::query("DELETE FROM track_rejections WHERE external_id = ? AND hash = ?")
+            .bind(external_id).bind(hash)
             .execute(&self.pool).await?;
         Ok(())
     }

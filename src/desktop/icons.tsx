@@ -29,6 +29,8 @@ export {
   FiX as IcoClose,
   FiArrowUp as IcoPush,
   FiList as IcoQueue,
+  FiInfo as IcoInfo,
+  FiDownloadCloud as IcoDownloadAll,
 } from 'react-icons/fi';
 import { FaWeightHanging } from 'react-icons/fa';
 import { FaMagnifyingGlass } from 'react-icons/fa6';

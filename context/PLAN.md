@@ -161,11 +161,34 @@ See `context/SPOTIFY.md` for full design + progress.
       duration, ISRC short-circuit hook) — imported tracks either silently
       link to an existing local track (>=90% confidence, user-overridable)
       or show up as external rows for the user to fetch manually
-- [ ] Surface external Spotify tracks in the Library UI (desktop + mobile) —
+- [x] Surface external Spotify tracks in the Library UI (desktop + mobile) —
       dashed styling, "Get track" (reuses existing yt-dlp `download_enqueue`,
-      no new download infra), "Unlink Spotify match"
-- [ ] Build Spotify Settings UI (connect/disconnect, playlist picker, trigger
-      import)
+      no new download infra), "Reject Spotify match"
+- [x] Spotify playlists as virtual sidebar/playlist-list entries (desktop +
+      mobile) — no modal, no selection step; clicking one browses its tracks
+      via the external-row rendering above, and a fully-downloaded/matched
+      playlist can be promoted (manual button, not automatic — lets a user
+      just bulk-download tracks without a matching playlist cluttering the
+      sidebar) into a real local playlist (own commit history, syncable like
+      any hand-built playlist)
+- [x] Post-download duration validation + provider-agnostic match rejection —
+      a mismatched-duration download (yt-dlp's top hit can be a cover/wrong
+      song) now blocks auto-link and surfaces a Keep/Discard review row
+      instead of silently linking. A wrong match (even at high confidence)
+      can be permanently rejected via a new `track_rejections(external_id,
+      hash)` table keyed by a provider-prefixed id, not a Spotify-specific
+      foreign key, so the same mechanism covers a future non-Spotify
+      provider without rework; the matcher excludes rejected hashes on every
+      re-import. See `context/SPOTIFY.md`.
+- [ ] (deferred) Ongoing Spotify → local sync — once a virtual playlist has
+      been promoted, later changes on the Spotify side (tracks added/removed/
+      reordered) aren't detected; revisiting an unpromoted virtual playlist
+      re-fetches and picks up newly-added tracks but not removals, and
+      promoted playlists aren't touched again at all. Needs a persisted
+      local-playlist ↔ Spotify-source link (today `promotedSpotifySources` is
+      session-only, so a restart after promotion re-shows the Spotify
+      playlist as virtual alongside the now-real promoted one) plus a diff/
+      commit step reusing the existing merge engine.
 - [ ] (deferred) Acoustic fingerprinting / MusicBrainz enrichment — Chromaprint
       fingerprinting + AcoustID lookup + MusicBrainz ISRC lookup for the
       *local* library, to feed the matcher's already-wired ISRC short-circuit
