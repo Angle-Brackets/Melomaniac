@@ -352,7 +352,11 @@ impl Database {
 
     /// Upsert imported Spotify tracks. Never touches `matched_hash`/`confidence`
     /// so re-importing a playlist can't clobber an existing manual link/unlink
-    /// decision made by the user.
+    /// decision made by the user. Conflict target is `(spotify_id, source)`,
+    /// not `spotify_id` alone — the same Spotify track can appear in several
+    /// playlists (or in a playlist and Liked Songs), and each occurrence needs
+    /// its own row so importing one playlist can't reassign a shared track's
+    /// `source` away from another playlist it's also in.
     pub async fn upsert_spotify_tracks(&self, tracks: &[NewSpotifyTrack]) -> Result<(), StorageError> {
         let now = unix_now();
         let mut tx = self.pool.begin().await?;
@@ -361,14 +365,13 @@ impl Database {
                 "INSERT INTO spotify_tracks
                  (spotify_id, title, artist, album, duration_ms, isrc, artwork_url, source, matched_hash, confidence, imported_at, position)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
-                 ON CONFLICT(spotify_id) DO UPDATE SET
+                 ON CONFLICT(spotify_id, source) DO UPDATE SET
                    title       = excluded.title,
                    artist      = excluded.artist,
                    album       = excluded.album,
                    duration_ms = excluded.duration_ms,
                    isrc        = excluded.isrc,
                    artwork_url = excluded.artwork_url,
-                   source      = excluded.source,
                    position    = excluded.position"
             )
             .bind(&t.spotify_id).bind(&t.title).bind(&t.artist)

@@ -423,11 +423,12 @@ function PeerPlaylistRow({ manifest, isLocal, isDownloading, progress, onDownloa
 }
 
 // ── Spotify playlist row ──────────────────────────────────────────────────────
-// Virtual sidebar entry for a Spotify playlist (or Liked Songs) — dashed until
-// fully downloaded/promoted, at which point it also exists as a real playlist
-// in the tree above.
-function SpotifyPlaylistRow({ name, trackCount, active, onSelect }: {
-  name: string; trackCount?: number; active: boolean; onSelect: () => void;
+// Virtual sidebar entry for a Spotify playlist (or Liked Songs) — dashed while
+// still virtual. Once promoted, it also exists as a real playlist in the tree
+// above, so it's styled solid here too — dashed would wrongly suggest it's
+// still ephemeral/unlinked.
+function SpotifyPlaylistRow({ name, trackCount, active, promoted, onSelect }: {
+  name: string; trackCount?: number; active: boolean; promoted: boolean; onSelect: () => void;
 }) {
   const [hov, setHov] = useState(false);
   return (
@@ -439,7 +440,7 @@ function SpotifyPlaylistRow({ name, trackCount, active, onSelect }: {
         display: 'flex', alignItems: 'center', gap: 6,
         padding: '5px 10px', margin: '3px 6px',
         borderRadius: 5,
-        border: active ? '1px solid var(--accent)' : '1px dashed var(--border-2)',
+        border: active ? '1px solid var(--accent)' : promoted ? '1px solid transparent' : '1px dashed var(--border-2)',
         background: active ? 'var(--bg-5)' : hov ? 'var(--bg-3)' : 'transparent',
         cursor: 'pointer', transition: 'background 0.1s',
       }}
@@ -453,7 +454,7 @@ function SpotifyPlaylistRow({ name, trackCount, active, onSelect }: {
           {name}
         </div>
         {trackCount != null && (
-          <div style={{ fontSize: 9.5, color: 'var(--text-3)', fontFamily: "'JetBrains Mono', monospace", marginTop: 1 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-2)', fontFamily: "'JetBrains Mono', monospace", marginTop: 1 }}>
             {trackCount} track{trackCount !== 1 ? 's' : ''}
           </div>
         )}
@@ -508,6 +509,18 @@ export default function LibrarySidebar({
   const spotifyConnected           = useStore(s => s.spotifyConnected);
   const spotifyPlaylists           = useStore(s => s.spotifyPlaylists);
   const activeSpotifySource        = useStore(s => s.activeSpotifySource);
+  const promotedSpotifySources     = useStore(s => s.promotedSpotifySources);
+  const importedSpotifyTracks      = useStore(s => s.importedTracks);
+
+  // Spotify's playlist API reports a raw track total that includes local
+  // files it can't hand us the audio for, so it overcounts vs. what we can
+  // actually import (see SpotifyPlaylistView's "X of Y linked"). Once a
+  // playlist's been opened at least once, `importedTracks` holds the true,
+  // already-filtered count for it — prefer that over the raw API count.
+  const spotifyTrackCount = (source: string, fallback?: number) => {
+    const real = importedSpotifyTracks.filter(t => t.source === source).length;
+    return real > 0 ? real : fallback;
+  };
 
   // Auto-fetch the manifest from the first trusted live peer — same logic as mobile PlaylistsList.
   useEffect(() => {
@@ -704,15 +717,18 @@ export default function LibrarySidebar({
               </div>
               <SpotifyPlaylistRow
                 name="Liked Songs"
+                trackCount={spotifyTrackCount('liked')}
                 active={activeSpotifySource === 'liked'}
+                promoted={promotedSpotifySources.includes('liked')}
                 onSelect={() => onSelectSpotify('liked')}
               />
               {spotifyPlaylists.map(p => (
                 <SpotifyPlaylistRow
                   key={p.id}
                   name={p.name}
-                  trackCount={p.track_count}
+                  trackCount={spotifyTrackCount(`playlist:${p.id}`, p.track_count)}
                   active={activeSpotifySource === `playlist:${p.id}`}
+                  promoted={promotedSpotifySources.includes(`playlist:${p.id}`)}
                   onSelect={() => onSelectSpotify(`playlist:${p.id}`)}
                 />
               ))}
