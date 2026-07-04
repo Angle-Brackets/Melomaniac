@@ -457,7 +457,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           </div>
         )}
 
-        {filtered.map((r, idx) => {
+        {!loading && filtered.map((r, idx) => {
           const sel        = selected.has(r.hash);
           const art        = artworkUrls[r.hash] ?? r.artworkUrl ?? undefined;
           const isNew      = r.ingested_at > 0 && (nowSecs - r.ingested_at) < 7 * 86400;
