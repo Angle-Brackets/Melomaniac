@@ -205,7 +205,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
         )}
 
         <div style={{ padding: '8px 0' }}>
-          {rows.map(row => {
+          {!activeSpotifyLoading && rows.map(row => {
             if (row.kind === 'local') {
               return (
                 <SpotifyLocalRow

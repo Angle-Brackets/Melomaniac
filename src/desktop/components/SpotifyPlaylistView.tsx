@@ -156,7 +156,7 @@ export default function SpotifyPlaylistView({ source, artworkUrls, onPlayTrack }
             No tracks in this playlist
           </div>
         )}
-        {rows.map(row => {
+        {!loading && rows.map(row => {
           const hash        = row.kind === 'local' ? row.track.hash : undefined;
           const spotifyId    = row.kind === 'local' ? row.spotifyId  : row.record.spotify_id;
           const isDownloading = downloadingSpotifyIds.includes(spotifyId);
