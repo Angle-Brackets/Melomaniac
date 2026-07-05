@@ -269,7 +269,7 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
             style={{ flex: 1, minWidth: 0 }}
             textStyle={{ fontSize: 14, color: playing ? 'var(--accent)' : 'var(--text-0)', fontWeight: 500 }}
           />
-          {!inSelectMode && spotifyLinked && <MMBadge label="SPOTIFY"/>}
+          {!inSelectMode && spotifyLinked && <MMBadge/>}
           {!inSelectMode && (
             <button
               onClick={e => { e.stopPropagation(); onFavorite?.(); }}

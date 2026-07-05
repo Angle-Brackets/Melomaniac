@@ -3,21 +3,24 @@
 // out once both needed the same "matched vs external" rendering instead of
 // growing a second inline copy.
 
-import { FiDownloadCloud, FiSlash, FiPlay, FiAlertTriangle, FiCheck, FiTrash2 } from 'react-icons/fi';
+import { FiDownloadCloud, FiSlash, FiPlay, FiAlertTriangle, FiCheck, FiTrash2, FiLoader } from 'react-icons/fi';
+import { FaSpotify } from 'react-icons/fa';
 import ScrollText from './ScrollText';
 import type { SpotifyRow } from '../../store/spotifySlice';
 
 // ── Provenance badge ──────────────────────────────────────────────────────────
+// An icon rather than a text pill — a "SPOTIFY" label on every row got noisy
+// fast once a playlist itself already establishes the provenance (see
+// `showBadge` below); this only needs to read at a glance.
 
 export function SpotifyProvenanceBadge({ downloading }: { downloading?: boolean }) {
   return (
-    <span style={{
-      fontSize: 9, fontWeight: 700, letterSpacing: '0.07em', flexShrink: 0,
-      padding: '1px 5px', borderRadius: 3,
-      background: 'var(--accent-dim)', color: 'var(--accent-light)',
-      border: '1px solid var(--accent)',
-      fontFamily: "'JetBrains Mono', monospace",
-    }}>{downloading ? 'FETCHING…' : 'SPOTIFY'}</span>
+    <span
+      title={downloading ? 'Fetching from Spotify…' : 'From Spotify'}
+      style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: downloading ? 'var(--text-3)' : '#1DB954' }}
+    >
+      {downloading ? <FiLoader size={11} style={{ animation: 'spin 1s linear infinite' }} /> : <FaSpotify size={12} />}
+    </span>
   );
 }
 
@@ -75,6 +78,7 @@ interface SpotifyTrackRowProps {
   artworkUrl?:   string;
   isPlaying?:    boolean;
   isDownloading?: boolean;
+  showBadge?:    boolean;
   onPlay:        (hash: string) => void;
   onGetTrack:    (spotifyId: string) => void;
   onReject:      (spotifyId: string, hash: string) => void;
@@ -82,7 +86,7 @@ interface SpotifyTrackRowProps {
   onDiscardReview: (spotifyId: string) => void;
 }
 
-export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownloading, onPlay, onGetTrack, onReject, onKeepReview, onDiscardReview }: SpotifyTrackRowProps) {
+export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownloading, showBadge = true, onPlay, onGetTrack, onReject, onKeepReview, onDiscardReview }: SpotifyTrackRowProps) {
   if (row.kind === 'review') {
     return (
       <div style={{
@@ -131,6 +135,7 @@ export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownload
         padding: '0 14px', height: 40,
         cursor: isExternal ? 'default' : 'pointer',
         border: isExternal ? '1px dashed var(--border-2)' : undefined,
+        borderBottom: isExternal ? undefined : '1px solid var(--border-0)',
         borderLeft: isPlaying ? '2px solid var(--accent-light)' : '2px solid transparent',
         opacity: isExternal ? 0.85 : 1,
       }}
@@ -151,7 +156,7 @@ export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownload
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <ScrollText text={title} style={{ flex: '0 1 auto', minWidth: 0 }} textStyle={{ fontSize: 12, color: isPlaying ? 'var(--accent-light)' : 'var(--text-1)' }} />
-          <SpotifyProvenanceBadge downloading={isDownloading} />
+          {showBadge && <SpotifyProvenanceBadge downloading={isDownloading} />}
         </div>
         <span style={{ fontSize: 10.5, color: 'var(--text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {artist}{album ? ` · ${album}` : ''}

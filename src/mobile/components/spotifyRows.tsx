@@ -4,6 +4,8 @@
 // growing a second inline copy.
 
 import { useRef } from 'react';
+import { FaSpotify } from 'react-icons/fa';
+import { FiLoader } from 'react-icons/fi';
 import type { SpotifyTrackRecord } from '../../store/types';
 import type { SpotifyReviewTrack } from '../../store/spotifySlice';
 import { Icons } from '../icons';
@@ -16,18 +18,14 @@ function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-// Small tag mirroring the desktop Library's `Badge` — used for the SPOTIFY
-// provenance marker on both linked local rows and external (not-yet-fetched) rows.
-export function MMBadge({ label, accent }: { label: string; accent?: boolean }) {
+// Spotify provenance marker — an icon rather than a text pill, since a
+// "SPOTIFY" label on every single row got noisy fast once a whole playlist
+// view already establishes the provenance (see `showBadge` on ExternalTrackRow).
+export function MMBadge({ downloading }: { downloading?: boolean }) {
   return (
-    <span style={{
-      fontSize: 8.5, fontWeight: 700, letterSpacing: '0.06em', flexShrink: 0,
-      padding: '1px 5px', borderRadius: 3,
-      background: accent ? 'var(--accent-dim)' : 'var(--bg-4)',
-      color:      accent ? 'var(--accent-light, var(--accent))' : 'var(--text-3)',
-      border:     `1px solid ${accent ? 'var(--accent)' : 'var(--border-2)'}`,
-      fontFamily: "'JetBrains Mono', monospace",
-    }}>{label}</span>
+    <span style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: downloading ? 'var(--text-3)' : '#1DB954' }}>
+      {downloading ? <FiLoader size={13} style={{ animation: 'mmSpin 1s linear infinite' }} /> : <FaSpotify size={14} />}
+    </span>
   );
 }
 
@@ -35,8 +33,8 @@ export function MMBadge({ label, accent }: { label: string; accent?: boolean }) 
 // Imported-but-not-downloaded Spotify track. Dashed border distinguishes it
 // from real library rows; not selectable/playable. Long-press opens the
 // "Get track" action sheet (same gesture TrackRow uses for Add-to-Playlist).
-export function ExternalTrackRow({ track, downloading, onLongPress }: {
-  track: SpotifyTrackRecord; downloading: boolean; onLongPress: () => void;
+export function ExternalTrackRow({ track, downloading, showBadge = true, onLongPress }: {
+  track: SpotifyTrackRecord; downloading: boolean; showBadge?: boolean; onLongPress: () => void;
 }) {
   const subtext = [track.artist, track.album].filter(Boolean).join(' | ');
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -63,7 +61,7 @@ export function ExternalTrackRow({ track, downloading, onLongPress }: {
             style={{ flex: 1, minWidth: 0 }}
             textStyle={{ fontSize: 14, color: 'var(--text-0)', fontWeight: 500 }}
           />
-          <MMBadge label={downloading ? 'FETCHING…' : 'SPOTIFY'} accent/>
+          {showBadge && <MMBadge downloading={downloading}/>}
         </div>
         <MarqueeText
           text={subtext}

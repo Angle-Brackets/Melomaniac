@@ -168,6 +168,7 @@ export default function SpotifyPlaylistView({ source, artworkUrls, onPlayTrack }
               artworkUrl={hash ? artworkUrls[hash] : spotifyArtworkUrl}
               isPlaying={!!hash && loadedHash === hash}
               isDownloading={isDownloading}
+              showBadge={false}
               onPlay={onPlayTrack}
               onGetTrack={id => downloadAndLink(id)}
               onReject={(id, h) => rejectMatch(id, h)}
