@@ -237,14 +237,17 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
             <div className="flex items-center justify-between py-2 border-t border-mm-b0">
               <div className="min-w-0">
                 <span className="text-xs text-mm-t1">Spotify</span>
-                <p className="font-mono text-[10px] text-mm-t2 mt-0.5 truncate">
-                  {spotifyConnected
-                    ? [
-                        spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected',
-                        spotifyAccount?.product && (spotifyAccount.product === 'premium' ? 'Premium' : 'Basic'),
-                      ].filter(Boolean).join(' - ')
-                    : 'Connect with Spotify to migrate playlists'}
-                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${spotifyConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+                  <p className="font-mono text-[10px] text-mm-t2 truncate">
+                    {spotifyConnected
+                      ? [
+                          spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected',
+                          spotifyAccount?.product && (spotifyAccount.product === 'premium' ? 'Premium' : 'Basic'),
+                        ].filter(Boolean).join(' - ')
+                      : 'Connect with Spotify to migrate playlists'}
+                  </p>
+                </div>
               </div>
               {spotifyConnected ? (
                 <button

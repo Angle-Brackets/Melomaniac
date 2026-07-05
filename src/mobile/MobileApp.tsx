@@ -150,6 +150,21 @@ export default function MobileApp() {
     });
   }, []);
 
+  // Mirror the loaded track's favorited state onto the iOS lock-screen heart
+  // button (no-op on other platforms). Covers both track swaps and in-app
+  // favorite toggles of the currently-playing track.
+  useEffect(() => {
+    let lastSent: boolean | null = null;
+    return useStore.subscribe(state => {
+      const track = state.loadedTrackHash ? state.tracks.find(t => t.hash === state.loadedTrackHash) : null;
+      const favorited = track?.favorited ?? false;
+      if (favorited !== lastSent) {
+        lastSent = favorited;
+        invoke('audio_set_like_state', { isActive: favorited }).catch(console.error);
+      }
+    });
+  }, []);
+
   // Persist full playback session so track/position/shuffle/repeat survive restarts
   useEffect(() => {
     return useStore.subscribe(state => {
@@ -226,6 +241,7 @@ export default function MobileApp() {
     type AudioPayload =
       | 'TrackEnded' | 'RemotePlay' | 'RemotePause'
       | 'RemoteNextTrack' | 'RemotePreviousTrack' | 'RemoteTogglePlayPause'
+      | 'RemoteLike'
       | { PositionChanged: number }
       | { DurationKnown: number }
       | { RemoteSeek: number }
@@ -323,6 +339,7 @@ export default function MobileApp() {
           const s = useStore.getState();
           const hash = s.currentHash();
           if (hash) invoke('track_play', { hash }).catch(console.error);
+          hasRecordedPlay = false; // reset so each loop iteration counts
           s.setPlaying(true);
           return;
         }
@@ -345,6 +362,11 @@ export default function MobileApp() {
       if (payload === 'RemotePause') {
         invoke('audio_pause').catch(console.error);
         useStore.getState().setPlaying(false);
+        return;
+      }
+      if (payload === 'RemoteLike') {
+        const hash = useStore.getState().loadedTrackHash;
+        if (hash) useStore.getState().toggleFavorite(hash);
         return;
       }
       if (payload === 'RemoteTogglePlayPause') {
