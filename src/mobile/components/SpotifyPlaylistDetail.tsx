@@ -41,6 +41,7 @@ function SpotifyLocalRow({ track, playing, onPlay, onLongPress }: {
         cursor: 'pointer',
         background: playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
         borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
+        borderBottom: '1px solid var(--border-0)',
       }}>
       <MMArt src={artworkUrl ?? undefined} size={42} radius={7}/>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -51,7 +52,6 @@ function SpotifyLocalRow({ track, playing, onPlay, onLongPress }: {
             style={{ flex: 1, minWidth: 0 }}
             textStyle={{ fontSize: 14, color: playing ? 'var(--accent)' : 'var(--text-0)', fontWeight: 500 }}
           />
-          <MMBadge label="SPOTIFY"/>
         </div>
         <MarqueeText
           text={subtext}
@@ -149,7 +149,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
           <div style={{ flex: 1, minWidth: 0, paddingBottom: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-0)', letterSpacing: -0.3, lineHeight: 1.15 }}>{name}</h1>
-              <MMBadge label="SPOTIFY"/>
+              <MMBadge/>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4, fontFamily: 'JetBrains Mono, monospace' }}>
               {promoted
@@ -232,6 +232,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
                 key={row.record.spotify_id}
                 track={row.record}
                 downloading={downloadingSpotifyIds.includes(row.record.spotify_id)}
+                showBadge={false}
                 onLongPress={() => setExternalSheet({ spotifyId: row.record.spotify_id, label: row.record.title })}
               />
             );
