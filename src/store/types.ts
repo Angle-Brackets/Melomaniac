@@ -165,6 +165,7 @@ export type SpotifyAccount = {
   id:           string
   display_name: string | null
   email:        string | null
+  product:      string | null   // "premium" | "free" | "open"
 }
 
 // Mirrors the Rust SpotifyPlaylist (spotify_get_playlists).

@@ -556,26 +556,33 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           </Row>
         </SettingsGroup>
 
-        {/* Spotify */}
-        <SettingsGroup label="Spotify">
-          <Row
-            title={spotifyConnected ? (spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected') : 'Not connected'}
-            isLast
-          >
-            <span style={{ width: 7, height: 7, borderRadius: 4, background: spotifyConnected ? 'oklch(0.72 0.17 142)' : 'var(--border-2)', flexShrink: 0, marginRight: 4 }}/>
+        {/* Integrations */}
+        <SettingsGroup label="Integrations">
+          <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, color: 'var(--text-0)' }}>Spotify</div>
+              <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+                {spotifyConnected
+                  ? [
+                      spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected',
+                      spotifyAccount?.product && (spotifyAccount.product === 'premium' ? 'Premium' : 'Basic'),
+                    ].filter(Boolean).join(' - ')
+                  : 'Connect with Spotify to migrate playlists'}
+              </div>
+            </div>
             {spotifyConnected ? (
               <button
                 onClick={() => disconnectSpotify().catch(console.error)}
-                style={{ fontSize: 13, color: 'var(--text-2)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                style={{ padding: '6px 12px', borderRadius: 99, background: 'var(--bg-4)', border: '0.5px solid var(--border-2)', color: 'var(--text-2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0, marginLeft: 12 }}
               >Disconnect</button>
             ) : (
               <button
                 onClick={() => { setSpotifyConnecting(true); connectSpotify().catch(console.error).finally(() => setSpotifyConnecting(false)); }}
                 disabled={spotifyConnecting}
-                style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, opacity: spotifyConnecting ? 0.6 : 1 }}
+                style={{ padding: '6px 12px', borderRadius: 99, background: 'oklch(0.65 0.15 50)', color: 'var(--bg-0)', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0, marginLeft: 12, opacity: spotifyConnecting ? 0.6 : 1 }}
               >{spotifyConnecting ? 'Connecting…' : 'Connect'}</button>
             )}
-          </Row>
+          </div>
         </SettingsGroup>
 
         {/* About */}
