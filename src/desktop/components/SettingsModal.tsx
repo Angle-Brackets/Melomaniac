@@ -233,6 +233,39 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                 className="toggle toggle-primary toggle-sm"
               />
             </div>
+
+            <div className="flex items-center justify-between py-2 border-t border-mm-b0">
+              <div className="min-w-0">
+                <span className="text-xs text-mm-t1">Spotify</span>
+                <p className="font-mono text-[10px] text-mm-t2 mt-0.5 truncate">
+                  {spotifyConnected
+                    ? [
+                        spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected',
+                        spotifyAccount?.product && (spotifyAccount.product === 'premium' ? 'Premium' : 'Basic'),
+                      ].filter(Boolean).join(' - ')
+                    : 'Connect with Spotify to migrate playlists'}
+                </p>
+              </div>
+              {spotifyConnected ? (
+                <button
+                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2 shrink-0"
+                  onClick={() => disconnectSpotify().catch(console.error)}
+                >
+                  Disconnect
+                </button>
+              ) : (
+                <button
+                  className="btn btn-xs btn-primary shrink-0"
+                  disabled={spotifyConnecting}
+                  onClick={() => {
+                    setSpotifyConnecting(true);
+                    connectSpotify().catch(console.error).finally(() => setSpotifyConnecting(false));
+                  }}
+                >
+                  {spotifyConnecting ? 'Connecting…' : 'Connect'}
+                </button>
+              )}
+            </div>
           </section>
 
           {/* ── Sync ── */}
@@ -322,40 +355,6 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               {onPairDevice && (
                 <button onClick={onPairDevice} className="btn btn-xs btn-primary">
                   Pair a device
-                </button>
-              )}
-            </div>
-          </section>
-
-          {/* ── Spotify ── */}
-          <section>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-mm-t2 mb-3">Spotify</p>
-            <div className="flex items-center justify-between py-1.5 px-2 rounded bg-mm-2">
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${spotifyConnected ? 'bg-green-400' : 'bg-mm-t3'}`} />
-                <span className="text-xs text-mm-t0 truncate">
-                  {spotifyConnected
-                    ? spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected'
-                    : 'Not connected'}
-                </span>
-              </div>
-              {spotifyConnected ? (
-                <button
-                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2 shrink-0"
-                  onClick={() => disconnectSpotify().catch(console.error)}
-                >
-                  Disconnect
-                </button>
-              ) : (
-                <button
-                  className="btn btn-xs btn-primary shrink-0"
-                  disabled={spotifyConnecting}
-                  onClick={() => {
-                    setSpotifyConnecting(true);
-                    connectSpotify().catch(console.error).finally(() => setSpotifyConnecting(false));
-                  }}
-                >
-                  {spotifyConnecting ? 'Connecting…' : 'Connect Spotify'}
                 </button>
               )}
             </div>

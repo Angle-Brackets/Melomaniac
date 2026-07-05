@@ -275,6 +275,9 @@ pub struct SpotifyAccount {
     pub id: String,
     pub display_name: Option<String>,
     pub email: Option<String>,
+    /// Spotify's subscription tier for this account ("premium", "free", "open"), used
+    /// only to show a Premium/Free badge in Settings.
+    pub product: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -282,6 +285,7 @@ struct MeResponse {
     id: String,
     display_name: Option<String>,
     email: Option<String>,
+    product: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -528,6 +532,7 @@ pub async fn spotify_get_account(
         id: me.id,
         display_name: me.display_name,
         email: me.email,
+        product: me.product,
     })
 }
 
