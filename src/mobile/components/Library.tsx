@@ -772,7 +772,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                     ? <ExternalTrackRow
                         track={item.track}
                         downloading={downloadingSpotifyIds.includes(item.track.spotify_id)}
-                        onLongPress={() => setExternalSheet({ spotifyId: item.track.spotify_id, label: item.track.title })}
+                        onPress={() => setExternalSheet({ spotifyId: item.track.spotify_id, label: item.track.title })}
                       />
                     : <TrackRow
                         track={item.track} idx={item.idx} playing={item.playing}
