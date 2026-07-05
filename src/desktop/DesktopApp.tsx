@@ -1000,18 +1000,39 @@ export default function DesktopApp(): JSX.Element {
   }, []);
 
   // ── Artwork prefetch — loads a window around the current carousel position ──
-  // Tracks which hashes have been fetched/in-flight so we never duplicate requests.
+  // Tracks which (hash, artwork_hash) pairs have been fetched/in-flight so we
+  // never duplicate requests. Keying on the pair rather than just the track
+  // hash matters for freshly-downloaded Spotify tracks: the metadata-apply
+  // step can overwrite artwork_hash shortly after the track first appears in
+  // the queue (with a null/placeholder hash), and keying on hash alone would
+  // treat that as "already fetched" and never pick up the real artwork.
   const fetchedHashesRef = useRef(new Set<string>());
+  // `track_get_artwork` takes only the track hash (Rust looks up the CURRENT
+  // artwork_hash from the DB), so two in-flight requests for the same track
+  // hash aren't correlated by payload — the response can't tell which
+  // dispatch it belongs to. A freshly-downloaded Spotify track can trigger
+  // an early request (queue update right after the file lands, before
+  // metadata/artwork apply) and a later one (after apply completes); if the
+  // early one's IPC round-trip happens to resolve after the later one, it
+  // would silently overwrite the correct artwork with the stale version.
+  // This ref records, per track hash, the artwork_hash that was current at
+  // the moment each request was dispatched — a response is only applied if
+  // that's still the latest dispatched value by the time it resolves.
+  const latestArtworkHashRef = useRef(new Map<string, string>());
   useEffect(() => {
-    // When artworkVersion bumps (sync downloaded new artwork), clear the guard
-    // so all tracks get re-fetched with fresh data URLs.
+    // When artworkVersion bumps (sync downloaded new artwork under the same
+    // hash), clear the guard so all tracks get re-fetched with fresh data URLs.
     if (artworkVersion > 0) fetchedHashesRef.current.clear();
     for (const track of playQueue) {
       if (!track?.artwork_hash) continue;
-      if (fetchedHashesRef.current.has(track.hash)) continue;
-      fetchedHashesRef.current.add(track.hash);
+      const key = `${track.hash}:${track.artwork_hash}`;
+      if (fetchedHashesRef.current.has(key)) continue;
+      fetchedHashesRef.current.add(key);
+      const expectedArtworkHash = track.artwork_hash;
+      latestArtworkHashRef.current.set(track.hash, expectedArtworkHash);
       invoke<string>('track_get_artwork', { hash: track.hash })
         .then(dataUrl => {
+          if (latestArtworkHashRef.current.get(track.hash) !== expectedArtworkHash) return;
           setArtworkUrls(prev => ({ ...prev, [track.hash]: dataUrl }));
         })
         .catch(console.error);

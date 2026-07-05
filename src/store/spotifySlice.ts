@@ -67,6 +67,7 @@ export type SpotifySlice = {
   closeSpotifyPlaylist:         () => void
 
   fetchImportedTracks:         () => Promise<void>
+  demoteMatchedHashes:          (hashes: string[]) => void
   importPlaylist:               (source: string, tracks: SpotifyTrack[]) => Promise<void>
   linkTrack:                    (spotifyId: string, hash: string) => Promise<void>
   unlinkTrack:                   (spotifyId: string) => Promise<void>
@@ -139,6 +140,22 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   fetchImportedTracks: async () => {
     const tracks = await invoke<SpotifyTrackRecord[]>('spotify_get_imported_tracks')
     set({ importedTracks: tracks })
+  },
+
+  // Mirrors what the backend's remove_track already does when a linked local
+  // track is deleted (clears matched_hash/confidence for any spotify_tracks
+  // row pointing at it) — applied locally so a bulk delete doesn't need a
+  // full spotify_get_imported_tracks refetch just to reflect a couple of
+  // rows flipping back to "external". Hashes that don't match any imported
+  // track (a purely-local deletion) are simply no-ops here.
+  demoteMatchedHashes: (hashes) => {
+    if (hashes.length === 0) return
+    const hashSet = new Set(hashes)
+    set(s => ({
+      importedTracks: s.importedTracks.map(t =>
+        t.matched_hash && hashSet.has(t.matched_hash) ? { ...t, matched_hash: null, confidence: null } : t
+      ),
+    }))
   },
 
   importPlaylist: async (source, tracks) => {
@@ -224,6 +241,12 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
         artworkUrl: track.artwork_url,
       })
 
+      // The desktop artwork cache prefetches per-hash and never revisits a hash
+      // once fetched — without this, a row that already got its (blank/wrong)
+      // artwork fetched right as the file finished downloading, before this
+      // metadata call overwrote it with Spotify's art, would stay blank until
+      // the next app restart.
+      get().bumpArtworkVersion()
       await get().loadLibrary()
 
       const mismatch = Math.abs(done.duration_ms - track.duration_ms) > REVIEW_DURATION_TOLERANCE_MS
