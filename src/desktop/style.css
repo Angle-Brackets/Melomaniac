@@ -244,6 +244,10 @@
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+@keyframes downloadBob {
+  0%, 100% { transform: translateY(-2px); opacity: 0.55; }
+  50%      { transform: translateY(2px);  opacity: 1;    }
+}
 @keyframes mm-marquee {
   from { transform: translateX(0); }
   to   { transform: translateX(var(--mm-dist, -200px)); }

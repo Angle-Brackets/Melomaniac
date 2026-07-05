@@ -6,7 +6,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { Track, TrackRecord } from '../data';
 import { trackRecordToTrack } from '../data';
 import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
-import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart } from 'react-icons/fi';
+import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart, FiDownloadCloud } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import BulkEditPanel from './BulkEditPanel';
@@ -18,7 +18,7 @@ import { useStore } from '../../store';
 
 type SortField = 'title' | 'artist' | 'album' | 'duration_ms' | 'ingested_at';
 type SortDir   = 'asc' | 'desc';
-type Filter    = 'all' | 'new' | 'stray' | 'local' | 'downloaded';
+type Filter    = 'all' | 'new' | 'stray' | 'local' | 'downloaded' | 'spotify';
 type ColKey    = 'title' | 'artist' | 'album' | 'source';
 
 // External (not-yet-downloaded) Spotify rows are synthesised as TrackRecord-shaped
@@ -98,6 +98,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const reviewTracks               = useStore(s => s.reviewTracks);
   const downloadingSpotifyIds      = useStore(s => s.downloadingSpotifyIds);
   const fetchImportedTracks        = useStore(s => s.fetchImportedTracks);
+  const demoteMatchedHashes        = useStore(s => s.demoteMatchedHashes);
   const rejectSpotifyMatch         = useStore(s => s.rejectMatch);
   const downloadAndLinkSpotifyTrack = useStore(s => s.downloadAndLinkExternalTrack);
 
@@ -217,9 +218,13 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   // ── Sort + filter ─────────────────────────────────────────────────────────
 
   const filtered = useMemo(() => {
-    // External rows only show up under the "All" filter — the other chips
-    // (NEW/STRAY/Local/Downloaded) describe properties real library rows have.
-    let rows: Row[] = filter === 'all' ? [...records, ...externalRows] : records;
+    // External rows show up under "All" (mixed with real tracks) and under
+    // "Spotify" (external rows only) — the other chips (New/Stray/Local/
+    // Downloaded) describe properties only real library rows have.
+    let rows: Row[] =
+      filter === 'all'     ? [...records, ...externalRows] :
+      filter === 'spotify'  ? externalRows :
+      records;
     if (filter === 'new')        rows = rows.filter(r => r.ingested_at > 0 && (nowSecs - r.ingested_at) < 7 * 86400);
     if (filter === 'stray')      rows = rows.filter(r => strayHashes.has(r.hash));
     if (filter === 'local')      rows = rows.filter(r => !r.source_url);
@@ -318,6 +323,11 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
     for (const hash of selected) await invoke('library_remove_track', { hash });
     setRecords(r => r.filter(t => !selected.has(t.hash)));
     onTracksChanged(records.filter(t => !selected.has(t.hash)).map(trackRecordToTrack));
+    // The backend clears spotify_tracks.matched_hash for any deleted track,
+    // demoting it back to an external row. Mirror that locally instead of
+    // refetching every imported track — hashes with no Spotify match are
+    // simply ignored by demoteMatchedHashes.
+    demoteMatchedHashes(Array.from(selected));
     setSelected(new Set());
   };
 
@@ -325,10 +335,11 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
   const FILTER_CHIPS: { key: Filter; label: string }[] = [
     { key: 'all',        label: 'All' },
-    { key: 'new',        label: 'NEW' },
-    { key: 'stray',      label: 'STRAY' },
+    { key: 'new',        label: 'New' },
+    { key: 'stray',      label: 'Stray' },
     { key: 'local',      label: 'Local' },
     { key: 'downloaded', label: 'Downloaded' },
+    { key: 'spotify',    label: 'Spotify' },
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -535,8 +546,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
                   )}
                   {!isExternal && linkedSpotifyId && <SpotifyProvenanceBadge />}
                 </div>
-                {isNew   && <Badge label="NEW"   accent />}
-                {isStray && <Badge label="STRAY" />}
+                {isNew   && <Badge label="New"   accent />}
+                {isStray && <Badge label="Stray" />}
                 {isExternal && <SpotifyProvenanceBadge downloading={isDownloadingThis} />}
               </div>
 
@@ -560,10 +571,30 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
               {/* Source */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
                 {isExternal
-                  ? <span style={{ ...cellStyle, fontSize: 10, color: 'var(--accent-light)' }}>Spotify</span>
-                  : source !== 'Local'
-                    ? <><IcoDownload size={9} style={{ color: sel ? 'var(--text-0)' : 'var(--accent)', flexShrink: 0 }} /><span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>{source}</span></>
-                    : <span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>Local</span>
+                  ? (
+                    <button
+                      onClick={e => { e.stopPropagation(); if (r.spotifyId) downloadAndLinkSpotifyTrack(r.spotifyId).then(load); }}
+                      disabled={isDownloadingThis}
+                      title={isDownloadingThis ? 'Fetching from Spotify…' : 'Download and link this track'}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        background: 'none', border: 'none', padding: 0,
+                        color: 'var(--accent-light)', fontSize: 10, cursor: isDownloadingThis ? 'default' : 'pointer',
+                        fontFamily: "'Outfit', sans-serif", whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <FiDownloadCloud size={10} style={isDownloadingThis ? { animation: 'downloadBob 1s ease-in-out infinite' } : undefined} />Spotify
+                    </button>
+                  )
+                  // A track downloaded via the Spotify flow has a `ytsearch1:` pseudo-URL as
+                  // its source_url, not a real domain — sourceDomain() on that yields ''
+                  // rather than throwing, so linkedSpotifyId is checked first here instead of
+                  // falling through to the blank-looking domain branch below.
+                  : linkedSpotifyId
+                    ? <span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--accent-light)' }}>Spotify</span>
+                    : source !== 'Local'
+                      ? <><IcoDownload size={9} style={{ color: sel ? 'var(--text-0)' : 'var(--accent)', flexShrink: 0 }} /><span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>{source}</span></>
+                      : <span style={{ ...cellStyle, fontSize: 10, color: sel ? 'var(--text-0)' : 'var(--text-2)' }}>Local</span>
                 }
               </div>
             </div>
@@ -640,7 +671,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           onOpenInEditor={() => { setContextMenu(null); onOpenInEditor(contextMenu.hash); }}
           onDelete={() => { setContextMenu(null); deleteSelected(); }}
           onGetTrack={contextMenu.spotifyId
-            ? () => { const id = contextMenu.spotifyId!; setContextMenu(null); downloadAndLinkSpotifyTrack(id); }
+            ? () => { const id = contextMenu.spotifyId!; setContextMenu(null); downloadAndLinkSpotifyTrack(id).then(load); }
             : undefined}
           onRejectSpotify={() => {
             const spotifyId = linkedSpotifyByHash.get(contextMenu.hash);
