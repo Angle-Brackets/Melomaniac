@@ -561,7 +561,8 @@ export function Settings({ onTab }: { onTab: (id: TabId) => void }) {
           <div style={{ display: 'flex', alignItems: 'center', padding: '12px 14px' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 14, color: 'var(--text-0)' }}>Spotify</div>
-              <div style={{ fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-2)', marginTop: 2 }}>
+                <span style={{ width: 7, height: 7, borderRadius: 4, background: spotifyConnected ? 'oklch(0.72 0.17 142)' : '#f87171', flexShrink: 0 }}/>
                 {spotifyConnected
                   ? [
                       spotifyAccount?.display_name ?? spotifyAccount?.email ?? 'Connected',
