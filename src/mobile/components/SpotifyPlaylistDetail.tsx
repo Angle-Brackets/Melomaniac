@@ -4,6 +4,7 @@ import { useStore } from '../../store';
 import { useActiveSpotifyRows } from '../../store/useActiveSpotifyRows';
 import type { SpotifyRow } from '../../store/spotifySlice';
 import type { TrackRecord } from '../../store/types';
+import { platform } from '../../shared/platform';
 import { useTrackArtwork } from '../hooks/useTrackArtwork';
 import { Icons } from '../icons';
 import { MMArt, MMTabBar, MMSheet, MMLoader, MarqueeText } from './common';
@@ -159,20 +160,30 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
                 : `${linkedCount} of ${rows.length} linked`}
             </div>
             {!promoted && externalCount > 0 && (
-              <button
-                onClick={() => { if (activeSpotifySource) downloadAllTracks(activeSpotifySource).catch(console.error); }}
-                disabled={anyDownloading}
-                style={{
+              platform === 'ios' ? (
+                <div style={{
                   display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
-                  padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-2)',
-                  background: 'var(--bg-3)', color: 'var(--accent-light)',
-                  fontSize: 12.5, fontWeight: 600, cursor: anyDownloading ? 'default' : 'pointer',
-                  opacity: anyDownloading ? 0.6 : 1,
-                }}
-              >
-                <Icons.download size={14}/>
-                {anyDownloading ? 'Downloading…' : `Download All (${externalCount})`}
-              </button>
+                  fontSize: 11.5, color: 'var(--text-2)', lineHeight: 1.4,
+                }}>
+                  <span style={{ flexShrink: 0 }}><Icons.info size={13} stroke="var(--text-2)"/></span>
+                  Downloading isn't available on iOS — download on desktop, then sync to get these tracks here.
+                </div>
+              ) : (
+                <button
+                  onClick={() => { if (activeSpotifySource) downloadAllTracks(activeSpotifySource).catch(console.error); }}
+                  disabled={anyDownloading}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
+                    padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border-2)',
+                    background: 'var(--bg-3)', color: 'var(--accent-light)',
+                    fontSize: 12.5, fontWeight: 600, cursor: anyDownloading ? 'default' : 'pointer',
+                    opacity: anyDownloading ? 0.6 : 1,
+                  }}
+                >
+                  <Icons.download size={14}/>
+                  {anyDownloading ? 'Downloading…' : `Download All (${externalCount})`}
+                </button>
+              )
             )}
             {!promoted && fullyLinked && (
               <button
@@ -233,7 +244,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
                 track={row.record}
                 downloading={downloadingSpotifyIds.includes(row.record.spotify_id)}
                 showBadge={false}
-                onLongPress={() => setExternalSheet({ spotifyId: row.record.spotify_id, label: row.record.title })}
+                onPress={() => setExternalSheet({ spotifyId: row.record.spotify_id, label: row.record.title })}
               />
             );
           })}

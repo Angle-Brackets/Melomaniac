@@ -3,11 +3,11 @@
 // out once both needed the same "matched vs external" rendering instead of
 // growing a second inline copy.
 
-import { useRef } from 'react';
 import { FaSpotify } from 'react-icons/fa';
 import { FiLoader } from 'react-icons/fi';
 import type { SpotifyTrackRecord } from '../../store/types';
 import type { SpotifyReviewTrack } from '../../store/spotifySlice';
+import { platform } from '../../shared/platform';
 import { Icons } from '../icons';
 import { MMArt, MarqueeText } from './common';
 
@@ -31,26 +31,21 @@ export function MMBadge({ downloading }: { downloading?: boolean }) {
 
 // ── ExternalTrackRow ──────────────────────────────────────────────────────────
 // Imported-but-not-downloaded Spotify track. Dashed border distinguishes it
-// from real library rows; not selectable/playable. Long-press opens the
-// "Get track" action sheet (same gesture TrackRow uses for Add-to-Playlist).
-export function ExternalTrackRow({ track, downloading, showBadge = true, onLongPress }: {
-  track: SpotifyTrackRecord; downloading: boolean; showBadge?: boolean; onLongPress: () => void;
+// from real library rows; not selectable/playable. Tap opens the "Get track"
+// action sheet.
+export function ExternalTrackRow({ track, downloading, showBadge = true, onPress }: {
+  track: SpotifyTrackRecord; downloading: boolean; showBadge?: boolean; onPress: () => void;
 }) {
   const subtext = [track.artist, track.album].filter(Boolean).join(' | ');
-  const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startLp = () => {
-    lpTimer.current = setTimeout(() => { lpTimer.current = null; onLongPress(); }, 500);
-  };
-  const cancelLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   return (
     <div
-      onPointerDown={e => { (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId); startLp(); }}
-      onPointerUp={cancelLp}
-      onPointerCancel={cancelLp}
-      onPointerMove={e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
+      onClick={onPress}
       style={{
-        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', margin: '0 10px',
-        borderRadius: 10, border: '1px dashed var(--border-2)', opacity: 0.85,
+        // padding is 11px shorter than a plain row's 16px to offset this row's
+        // extra margin + border so artwork/text/duration line up with
+        // SpotifyLocalRow's (no margin, no border) in the same list.
+        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 5px', margin: '0 10px',
+        borderRadius: 10, border: '1px dashed var(--border-2)', opacity: 0.85, cursor: 'pointer',
       }}>
       <MMArt src={track.artwork_url ?? undefined} size={42} radius={7}/>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -85,7 +80,7 @@ export function ReviewTrackRow({ review, onKeep, onDiscard }: {
 }) {
   return (
     <div style={{
-      minHeight: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px', margin: '0 10px',
+      minHeight: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 5px', margin: '0 10px',
       borderRadius: 10, border: '1px dashed var(--warn, #c9a227)',
     }}>
       <Icons.alert size={20} stroke="var(--warn, #c9a227)"/>
@@ -109,10 +104,33 @@ export function ReviewTrackRow({ review, onKeep, onDiscard }: {
   );
 }
 
-// Long-press action sheet for an external Spotify row — a single "Get track" action.
+// Action sheet for an external Spotify row — a single "Get track" action.
+// Downloading shells out to a bundled yt-dlp sidecar binary, which iOS's app
+// sandbox can't run and which tauri.ios.conf.json deliberately doesn't bundle
+// (externalBin: []) — so on iOS this explains the limitation instead of
+// offering a button that would just fail.
 export function GetTrackSheet({ label, downloading, onGetTrack, onClose }: {
   label: string; downloading: boolean; onGetTrack: () => void; onClose: () => void;
 }) {
+  if (platform === 'ios') {
+    return (
+      <div style={{ padding: '4px 0 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <span style={{ fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.5 }}>
+          Downloading isn't available on iOS. Download "{label}" on a desktop device, then sync to bring it here.
+        </span>
+        <button
+          onClick={onClose}
+          style={{
+            alignSelf: 'flex-end', padding: '6px 12px', borderRadius: 6,
+            background: 'var(--bg-4)', border: '1px solid var(--border-2)',
+            color: 'var(--text-1)', fontSize: 12.5,
+          }}
+        >
+          Got it
+        </button>
+      </div>
+    );
+  }
   return (
     <button
       onClick={() => { onGetTrack(); onClose(); }}
