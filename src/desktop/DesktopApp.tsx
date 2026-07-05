@@ -180,6 +180,7 @@ export default function DesktopApp(): JSX.Element {
   const refreshSpotifyStatus = useStore(s => s.refreshSpotifyStatus);
   const fetchImportedTracks  = useStore(s => s.fetchImportedTracks);
   const openSpotifyPlaylist  = useStore(s => s.openSpotifyPlaylist);
+  const closeSpotifyPlaylist = useStore(s => s.closeSpotifyPlaylist);
   const [settings, updateSetting] = useSettings(SETTING_DEFAULTS);
 
   const [leftExpanded, setLeftExpanded] = useState(true);
@@ -1519,7 +1520,7 @@ export default function DesktopApp(): JSX.Element {
           <LibrarySidebar
             playlists={playlistRecords.map(playlistRecordToPlaylist)}
             activePlaylistId={activePlaylistId}
-            onSelectPlaylist={id => { setActivePlaylistId(id); setActiveTab(DefaultView.Tracks); setRailItem('playlists'); }}
+            onSelectPlaylist={id => { closeSpotifyPlaylist(); setActivePlaylistId(id); setActiveTab(DefaultView.Tracks); setRailItem('playlists'); }}
             onSelectSpotify={source => {
               setActivePlaylistId(`spotify:${source}`);
               setRailItem('playlists');

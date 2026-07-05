@@ -599,10 +599,16 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   // reasoning as desktop: Favorites/Recently Added describe properties real
   // library rows have. Tracks awaiting a duration-mismatch review are
   // excluded (resolve those from the Spotify playlist detail view instead of
-  // re-triggering a second concurrent download here).
+  // re-triggering a second concurrent download here). Since `spotify_tracks`
+  // is now keyed by (spotify_id, source), the same song shared across
+  // playlists (or a playlist and Liked Songs) has one row per playlist it's
+  // in — dedupe by spotify_id so the flat Library list shows it once.
   const externalDisplayed = useMemo(() => {
     if (filter !== 'all') return [];
-    let list = importedTracks.filter(t => t.matched_hash == null && !reviewTracks[t.spotify_id]);
+    const seen = new Set<string>();
+    let list = importedTracks
+      .filter(t => t.matched_hash == null && !reviewTracks[t.spotify_id])
+      .filter(t => (seen.has(t.spotify_id) ? false : (seen.add(t.spotify_id), true)));
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter(t =>
@@ -612,7 +618,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       );
     }
     return list;
-  }, [importedTracks, filter, query]);
+  }, [importedTracks, filter, query, reviewTracks]);
 
   const displayed = useMemo<TrackRecord[]>(() => {
     let list = tracks;
