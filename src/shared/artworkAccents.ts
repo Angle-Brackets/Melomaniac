@@ -74,6 +74,12 @@ export async function extractAccents(src: string): Promise<[string, string]> {
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('no 2d context');
+    // Bilinear smoothing invents blended in-between pixels along hard edges
+    // (e.g. black bg → white pixel-art text) that don't exist in the source —
+    // those fabricated grays can carry a slight color fringe from JPEG chroma
+    // subsampling, which is exactly the kind of noise the saturation/hue
+    // bucketing below is trying to read as real color content.
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, 0, 0, W, H);
     const data = ctx.getImageData(0, 0, W, H).data;
     const buckets = new Map<number, { r: number; g: number; b: number; weight: number }>();

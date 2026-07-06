@@ -91,6 +91,19 @@ export default function MobileApp() {
           if (saved.positionMs > 0) {
             positionMsRef.current = saved.positionMs;
             invoke('audio_seek', { positionMs: saved.positionMs }).catch(console.error);
+            // The session-persist subscriber only re-writes SESSION_KEY on
+            // Zustand state changes, which the positionMsRef update above
+            // isn't — without this, a force-quit within the next 10s (before
+            // the periodic patch below fires) would persist positionMs as 0,
+            // the value it was at the moment setLoaded() ran this session in.
+            try {
+              const raw = localStorage.getItem(SESSION_KEY);
+              if (raw) {
+                const s = JSON.parse(raw) as SessionState;
+                s.positionMs = saved.positionMs;
+                localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+              }
+            } catch {}
           }
         })
         .catch(console.error);
@@ -128,7 +141,16 @@ export default function MobileApp() {
       const targetId = (saved && playlists.find(p => p.id === saved)) ? saved : playlists[0].id;
       const pl = playlists.find(p => p.id === targetId)!;
       setCurrentPlaylist(targetId);
-      const branchName = useStore.getState().currentBranchName;
+      // Prefer the branch the saved session was actually PLAYING on over
+      // currentBranchName (which only tracks the last-BROWSED branch in
+      // PlaylistDetail and can disagree with it) — otherwise this fetches
+      // the wrong branch's tracks and restoreSession's hash/branch checks
+      // silently fail, dropping back to the first playlist's first track.
+      let savedSession: SessionState | null = null;
+      try { savedSession = savedSessionRaw ? JSON.parse(savedSessionRaw) as SessionState : null; } catch {}
+      const branchName = savedSession && savedSession.playlistId === targetId
+        ? savedSession.branchName
+        : useStore.getState().currentBranchName;
       const validBranch = pl.branches.find(b => b.name === branchName)?.name ?? pl.branches.find(b => b.name === 'main')?.name ?? pl.branches[0]?.name ?? 'main';
       setPlayingBranch(validBranch);
       invoke<PlaylistTrackRecord[]>('playlist_get_tracks', { playlistId: targetId, branchName: validBranch })
