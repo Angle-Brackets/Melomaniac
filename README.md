@@ -53,6 +53,15 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 - **Metadata editor** — read/write MP3/FLAC/OGG tags via `lofty`; bulk edit; artwork library
 - Listening statistics — play counts, skip counts, per-track history
 
+### Spotify Import
+- **Connect your Spotify account** (OAuth 2.0 PKCE, no client secret) — works identically on desktop and iOS
+- Browse your Spotify playlists and Liked Songs as virtual entries in the sidebar (desktop) / playlist list (mobile) — no import modal, no selection step
+- **Automatic fuzzy matching** against your local library (title, artist, duration) silently links high-confidence matches
+- Unmatched tracks get a one-click **"Get track"** button that reuses the existing yt-dlp pipeline — no separate download flow
+- **Download quality guard** — a downloaded track whose duration doesn't match Spotify's gets flagged for review (Keep anyway / Discard and retry) instead of silently linking a wrong song
+- **Reject match** — permanently blacklist a wrong match so it never gets re-suggested; synced across your devices
+- **Promote** a fully-matched playlist into a real, syncable local playlist with its own commit history, whenever you're ready
+
 ### Playlist Versioning
 - Every change creates a **commit** (author, timestamp, parent hash)
 - **Branches** — multiple named branches per playlist; create, switch, delete inline
@@ -114,7 +123,8 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 │   ├─ playbackSlice  currentTrack, isPlaying, volume, AB loop         │
 │   ├─ playlistSlice  active playlist, branches, commit history        │
 │   ├─ queueSlice     queue, shuffle (Random/Smart/Weighted/Discovery)  │
-│   └─ syncSlice      livePeers, knownDevices, conflicts, progress     │
+│   ├─ syncSlice      livePeers, knownDevices, conflicts, progress     │
+│   └─ spotifySlice   virtual playlists, match state, download review  │
 └──────────────┬───────────────────────────────┬───────────────────────┘
                │  invoke() / listen()          │
                │  @tauri-apps/api/core         │
@@ -128,6 +138,8 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 │  sync.rs       sync_get_peers · sync_with_peer · sync_playlist       │
 │                sync_generate_qr_payload · sync_accept_qr_pairing …   │
 │  editor.rs     editor_read_tags · editor_write_tags · …              │
+│  spotify.rs    spotify_connect · spotify_get_playlists ·             │
+│                spotify_get_playlist_tracks · …                       │
 │  stats.rs      get_system_stats · open_url_in_app                    │
 │  downloader.rs download_enqueue · download_queue                     │
 └──────────┬──────────────────────┬──────────────────┬─────────────────┘
@@ -188,6 +200,7 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 | `melomaniac-audio` | `AudioBridge` trait + platform implementations (rodio desktop, AVFoundation iOS) |
 | `melomaniac-storage` | SQLite database, BLAKE3 CAS blob store, playlist DAG, indexer |
 | `melomaniac-sync` | mDNS-SD discovery, Axum HTTP sync server/client, 3-way merge engine |
+| `melomaniac-oauth` | `OAuthBridge` trait + platform implementations (system browser desktop, `ASWebAuthenticationSession` iOS) — both catch the redirect via a shared loopback TCP listener |
 
 ### Storage Layout
 
@@ -267,6 +280,7 @@ src/
     playlistSlice.ts
     queueSlice.ts
     syncSlice.ts
+    spotifySlice.ts
     types.ts                 Shared store types
   shared/
     themes.ts                Named themes + oklch custom hue system
@@ -279,6 +293,8 @@ src-tauri/
     storage/                 melomaniac-storage crate
     sync/                    melomaniac-sync crate
       ios/                   MelomaniacSync Swift package (NWBrowser/NWListener FFI)
+    oauth/                   melomaniac-oauth crate
+      ios/                   MelomaniacOAuth Swift package (ASWebAuthenticationSession FFI)
   capabilities/
     default.json             Desktop capabilities
     mobile.json              iOS capabilities
