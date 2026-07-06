@@ -1,0 +1,10 @@
+[package]
+name = "melomaniac-oauth"
+version = "0.0.1"
+edition = "2024"
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+open = "5"
+
+[target.'cfg(target_os = "macos")'.build-dependencies]
+swift-rs = { version = "1", features = ["build"] }

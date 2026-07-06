@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/audio", "crates/storage", "crates/sync"]
+members = [".", "crates/audio", "crates/storage", "crates/sync", "crates/oauth"]
 resolver = "2"
 
 [package]
@@ -20,6 +20,7 @@ tauri-build = { version = "2.5.6", features = [] }
 melomaniac-audio   = { path = "crates/audio" }
 melomaniac-storage = { path = "crates/storage" }
 melomaniac-sync    = { path = "crates/sync" }
+melomaniac-oauth   = { path = "crates/oauth" }
 tauri = { version = "2.11.0", features = [] }
 tauri-plugin-shell           = "2.3.5"
 tauri-plugin-dialog          = "2"

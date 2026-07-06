@@ -206,9 +206,33 @@ pub fn run() {
                 app.manage(sync::SyncState { bridge: sync_bridge });
             }
 
+            let oauth_bridge: Arc<dyn melomaniac_oauth::OAuthBridge> = {
+                #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+                {
+                    Arc::new(melomaniac_oauth::desktop::DesktopOAuthBridge::new())
+                        as Arc<dyn melomaniac_oauth::OAuthBridge>
+                }
+
+                #[cfg(target_os = "ios")]
+                {
+                    Arc::new(melomaniac_oauth::ios::IosOAuthBridge::new())
+                        as Arc<dyn melomaniac_oauth::OAuthBridge>
+                }
+
+                #[cfg(not(any(
+                    target_os = "macos",
+                    target_os = "windows",
+                    target_os = "linux",
+                    target_os = "ios"
+                )))]
+                {
+                    panic!("OAuth bridge not implemented for this platform");
+                }
+            };
+
             app.manage(Arc::new(DownloadManager::new()));
             app.manage(discord::DiscordState::new());
-            app.manage(spotify::SpotifyState::new());
+            app.manage(spotify::SpotifyState::new(oauth_bridge));
             app.manage(stats::SystemState(std::sync::Mutex::new(
                 sysinfo::System::new(),
             )));
