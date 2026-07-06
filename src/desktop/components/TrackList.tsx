@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ALBUMS } from '../data';
 import type { Track } from '../data';
@@ -264,8 +265,11 @@ export default function TrackList({
         </div>
       </div>
 
-      {/* Context menu portal */}
-      {menuTrackId !== null && (() => {
+      {/* Context menu portal — rendered into document.body (not just CSS `fixed`)
+          because an ancestor in DesktopApp's BigPicture layout applies a CSS
+          transform, which makes `position: fixed` descendants position
+          relative to that ancestor instead of the viewport. */}
+      {menuTrackId !== null && createPortal((() => {
         const t = tracks.find(tr => tr.id === menuTrackId);
         if (!t) return null;
         return (
@@ -319,7 +323,7 @@ export default function TrackList({
             )}
           </ul>
         );
-      })()}
+      })(), document.body)}
 
       {/* Bottom action bar */}
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-mm-b0 bg-mm-1 shrink-0">
