@@ -156,7 +156,11 @@
 See `context/SPOTIFY.md` for full design + progress.
 - [x] Implement Spotify authentication flow (desktop PKCE + loopback listener)
 - [x] Spotify Web API client (account, playlists, liked tracks)
-- [ ] iOS auth bridge (`ASWebAuthenticationSession`)
+- [x] iOS auth bridge — provider-agnostic `OAuthBridge` trait
+      (`melomaniac-oauth` crate); `ASWebAuthenticationSession` presents the
+      sheet, but the redirect is caught by a real loopback TCP listener
+      (shared with desktop), since Spotify's 2025 redirect URI rules reject
+      custom URL schemes
 - [x] Persisted `spotify_tracks` table + fuzzy matching engine (title/artist/
       duration, ISRC short-circuit hook) — imported tracks either silently
       link to an existing local track (>=90% confidence, user-overridable)
