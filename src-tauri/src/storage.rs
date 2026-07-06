@@ -591,6 +591,81 @@ pub async fn playlist_remove_track(
     write_commit(&storage, &playlist_id, &branch_name, &json, Some(message)).await
 }
 
+/// A playlist that references one or more of the tracks a cascading-delete
+/// preview was asked about, with how many of its branches are affected.
+#[derive(Debug, Serialize)]
+pub struct PlaylistImpact {
+    pub playlist_id:   String,
+    pub playlist_name: String,
+    pub branch_count:  usize,
+}
+
+/// Preview which playlists (and how many of their branches) contain any of
+/// the given track hashes — used to size the "also remove from N playlists"
+/// choice before a library deletion, without committing anything.
+#[tauri::command]
+pub async fn playlists_containing_tracks(
+    hashes:  Vec<String>,
+    storage: State<'_, StorageState>,
+) -> Result<Vec<PlaylistImpact>, String> {
+    let hash_set: std::collections::HashSet<&str> = hashes.iter().map(String::as_str).collect();
+    let playlists = storage.db.get_all_playlists().await.map_err(|e| e.to_string())?;
+
+    let mut impacts = Vec::new();
+    for playlist in &playlists {
+        let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+        let mut branch_count = 0;
+        for branch in &branches {
+            let tree = load_tree(&storage, &playlist.id, &branch.name).await?;
+            if tree.tracks.iter().any(|t| hash_set.contains(t.hash.as_str())) {
+                branch_count += 1;
+            }
+        }
+        if branch_count > 0 {
+            impacts.push(PlaylistImpact {
+                playlist_id:   playlist.id.clone(),
+                playlist_name: playlist.name.clone(),
+                branch_count,
+            });
+        }
+    }
+    Ok(impacts)
+}
+
+/// Remove tracks from the library. If `cascade` is true, first strips them
+/// from every branch of every playlist that references them — one auto-commit
+/// per affected branch — before deleting the library rows.
+#[tauri::command]
+pub async fn library_remove_tracks_cascade(
+    hashes:  Vec<String>,
+    cascade: bool,
+    storage: State<'_, StorageState>,
+) -> Result<(), String> {
+    if cascade {
+        let hash_set: std::collections::HashSet<&str> = hashes.iter().map(String::as_str).collect();
+        let playlists = storage.db.get_all_playlists().await.map_err(|e| e.to_string())?;
+        for playlist in &playlists {
+            let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+            for branch in &branches {
+                let mut tree = load_tree(&storage, &playlist.id, &branch.name).await?;
+                let before = tree.tracks.len();
+                tree.tracks.retain(|t| !hash_set.contains(t.hash.as_str()));
+                if tree.tracks.len() != before {
+                    let json = tree.to_json().map_err(|e| e.to_string())?;
+                    write_commit(
+                        &storage, &playlist.id, &branch.name, &json,
+                        Some("Removed track(s) deleted from library".into()),
+                    ).await?;
+                }
+            }
+        }
+    }
+    for hash in &hashes {
+        storage.db.remove_track(hash).await.map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Replace the track order with a new ordered list of hashes and auto-commit.
 #[tauri::command]
 pub async fn playlist_reorder_tracks(

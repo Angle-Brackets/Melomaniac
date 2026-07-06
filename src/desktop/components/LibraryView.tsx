@@ -9,6 +9,7 @@ import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
 import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart, FiDownloadCloud } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
+import DeleteTracksModal from './DeleteTracksModal';
 import BulkEditPanel from './BulkEditPanel';
 import DownloadModal from './DownloadModal';
 import { SpotifyProvenanceBadge, GetTrackMenuItem, RejectSpotifyMatchMenuItem } from './SpotifyTrackRow';
@@ -320,16 +321,21 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
-  const deleteSelected = async () => {
-    for (const hash of selected) await invoke('library_remove_track', { hash });
-    setRecords(r => r.filter(t => !selected.has(t.hash)));
-    onTracksChanged(records.filter(t => !selected.has(t.hash)).map(trackRecordToTrack));
+  const [deleteModalHashes, setDeleteModalHashes] = useState<string[] | null>(null);
+
+  const confirmDelete = async (cascade: boolean) => {
+    const hashes  = deleteModalHashes ?? [];
+    const hashSet = new Set(hashes);
+    await invoke('library_remove_tracks_cascade', { hashes, cascade });
+    setRecords(r => r.filter(t => !hashSet.has(t.hash)));
+    onTracksChanged(records.filter(t => !hashSet.has(t.hash)).map(trackRecordToTrack));
     // The backend clears spotify_tracks.matched_hash for any deleted track,
     // demoting it back to an external row. Mirror that locally instead of
     // refetching every imported track — hashes with no Spotify match are
     // simply ignored by demoteMatchedHashes.
-    demoteMatchedHashes(Array.from(selected));
+    demoteMatchedHashes(hashes);
     setSelected(new Set());
+    setDeleteModalHashes(null);
   };
 
   // ── Filter chips ──────────────────────────────────────────────────────────
@@ -619,7 +625,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           {selected.size === 1 && (
             <ActionBtn icon={<FiEdit2 size={11} />} label="Open in Editor" onClick={() => onOpenInEditor([...selected][0])} />
           )}
-          <DeleteBulkBtn count={selected.size} onDelete={deleteSelected} />
+          <DeleteBulkBtn count={selected.size} onDelete={() => setDeleteModalHashes([...selected])} />
           <button
             onClick={() => setSelected(new Set())}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: '2px 4px', borderRadius: 3 }}
@@ -670,7 +676,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           onAddToPlaylist={() => { setContextMenu(null); setShowAddToPlaylist(true); }}
           onBulkEdit={() => { setContextMenu(null); setShowBulkEdit(true); }}
           onOpenInEditor={() => { setContextMenu(null); onOpenInEditor(contextMenu.hash); }}
-          onDelete={() => { setContextMenu(null); deleteSelected(); }}
+          onDelete={() => { setContextMenu(null); setDeleteModalHashes([...selected]); }}
           onGetTrack={contextMenu.spotifyId
             ? () => { const id = contextMenu.spotifyId!; setContextMenu(null); downloadAndLinkSpotifyTrack(id).then(load); }
             : undefined}
@@ -705,6 +711,13 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           selected={records.filter(r => selected.has(r.hash))}
           onDone={() => { setShowBulkEdit(false); setSelected(new Set()); load(); }}
           onCancel={() => setShowBulkEdit(false)}
+        />
+      )}
+      {deleteModalHashes && (
+        <DeleteTracksModal
+          hashes={deleteModalHashes}
+          onCancel={() => setDeleteModalHashes(null)}
+          onConfirm={confirmDelete}
         />
       )}
     </div>
@@ -872,23 +885,21 @@ function ActionBtn({ icon, label, onClick }: { icon: React.ReactNode; label: str
 }
 
 function DeleteBulkBtn({ count, onDelete }: { count: number; onDelete: () => void }) {
-  const [armed, setArmed] = useState(false);
-  useEffect(() => { if (!armed) return; const t = setTimeout(() => setArmed(false), 2500); return () => clearTimeout(t); }, [armed]);
   return (
     <button
-      onClick={() => armed ? onDelete() : setArmed(true)}
+      onClick={onDelete}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
         padding: '5px 12px', borderRadius: 5, fontSize: 11, cursor: 'pointer',
         fontFamily: "'Outfit', sans-serif",
-        background: armed ? '#7f1d1d' : 'var(--bg-4)',
-        border:     `1px solid ${armed ? '#f87171' : 'var(--border-2)'}`,
-        color:      armed ? '#fca5a5' : 'var(--text-2)',
+        background: 'var(--bg-4)',
+        border:     '1px solid var(--border-2)',
+        color:      'var(--text-2)',
         transition: 'all 0.15s',
       }}
     >
       <FiTrash2 size={11} />
-      {armed ? `Confirm delete ${count}` : `Delete ${count}`}
+      {`Delete ${count}`}
     </button>
   );
 }

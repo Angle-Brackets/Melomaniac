@@ -301,6 +301,8 @@ pub fn run() {
             storage::playlist_get_artwork,
             storage::playlist_delete,
             storage::library_remove_tracks,
+            storage::playlists_containing_tracks,
+            storage::library_remove_tracks_cascade,
             storage::branch_delete,
             storage::branch_rename,
             storage::branch_revert_to,
