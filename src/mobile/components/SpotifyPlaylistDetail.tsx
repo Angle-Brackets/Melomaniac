@@ -99,7 +99,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
   const promoted    = activeSpotifySource != null && promotedSpotifySources.includes(activeSpotifySource);
   const fullyLinked = rows.length > 0 && linkedCount === rows.length;
   const externalCount = rows.filter(r => r.kind === 'external').length;
-  const anyDownloading = rows.some(r => r.kind === 'external' && downloadingSpotifyIds.includes(r.record.spotify_id));
+  const anyDownloading = rows.some(r => r.kind === 'external' && downloadingSpotifyIds.includes(r.record.provider_track_id));
 
   const handleBack = () => { closeSpotifyPlaylist(); onBack(); };
 
@@ -240,11 +240,11 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
             }
             return (
               <ExternalTrackRow
-                key={row.record.spotify_id}
+                key={row.record.provider_track_id}
                 track={row.record}
-                downloading={downloadingSpotifyIds.includes(row.record.spotify_id)}
+                downloading={downloadingSpotifyIds.includes(row.record.provider_track_id)}
                 showBadge={false}
-                onPress={() => setExternalSheet({ spotifyId: row.record.spotify_id, label: row.record.title })}
+                onPress={() => setExternalSheet({ spotifyId: row.record.provider_track_id, label: row.record.title })}
               />
             );
           })}

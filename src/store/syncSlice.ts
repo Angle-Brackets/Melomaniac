@@ -138,6 +138,17 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
               get().bumpArtworkVersion()
             }
           }
+
+          // Reconcile external-track (Spotify, ...) match state at the same
+          // cadence — cheap (one small table dump) and independent of whether
+          // any playlist branch actually changed.
+          const matchesChanged = await invoke<number>('sync_external_match_state', {
+            publicKeyB64: peer.public_key_b64,
+          }).catch(() => 0)
+          if (matchesChanged > 0) {
+            await get().fetchImportedTracks()
+            get().showSpotifyToast(`Synced ${matchesChanged} Spotify link${matchesChanged !== 1 ? 's' : ''} from ${peer.display_name}`)
+          }
           return
         }
 
@@ -311,7 +322,7 @@ export const createSyncSlice: StateCreator<StoreState, [], [], SyncSlice> = (set
     const peerName = peer?.display_name ?? 'device'
     try {
       const report = await invoke<SyncReport>('sync_with_peer', { publicKeyB64 })
-      await Promise.all([get().loadPlaylists(), get().loadLibrary()])
+      await Promise.all([get().loadPlaylists(), get().loadLibrary(), get().fetchImportedTracks()])
       if (report.conflicts.length > 0) {
         // The aggregate report has conflicts from multiple playlists merged together.
         // Each one is stored as a pending merge in Rust keyed by playlist_id.

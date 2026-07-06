@@ -1,8 +1,8 @@
 use crate::identity::{TrustList, unix_now};
 use crate::merge::diff_trees;
 use crate::{
-    KnownDevice, NodeIdentity, PeerInfo, PendingMerge, PlaylistManifest, QrPayload, SyncBridge,
-    SyncError, SyncReport, TrackSyncRecord,
+    ExternalMatchState, KnownDevice, NodeIdentity, PeerInfo, PendingMerge, PlaylistManifest,
+    QrPayload, SyncBridge, SyncError, SyncReport, TrackSyncRecord,
     http_server::{ServerState, build_router},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
@@ -260,6 +260,20 @@ impl SyncClient {
             .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
 
         resp.json::<Vec<TrackSyncRecord>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
+    }
+
+    async fn get_external_matches(&self) -> Result<ExternalMatchState, SyncError> {
+        let resp = self
+            .http
+            .get(self.url(super::routes::EXTERNAL_MATCHES))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+        resp.json::<ExternalMatchState>()
             .await
             .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))
     }
@@ -978,6 +992,10 @@ impl SyncBridge for IosSyncBridge {
         _public_key_b64: &str,
         _playlist_ids: &[String],
     ) -> Result<u32, SyncError> {
+        Ok(0)
+    }
+
+    fn sync_external_match_state(&self, _public_key_b64: &str) -> Result<u32, SyncError> {
         Ok(0)
     }
 

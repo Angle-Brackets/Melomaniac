@@ -590,8 +590,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   // Local tracks the matcher (or the user) silently linked to a Spotify import —
   // keyed by local hash so TrackRow can show a small provenance badge.
   const linkedSpotifyByHash = useMemo(() => {
-    const map = new Map<string, string>(); // hash -> spotify_id
-    for (const t of importedTracks) if (t.matched_hash) map.set(t.matched_hash, t.spotify_id);
+    const map = new Map<string, string>(); // hash -> provider_track_id
+    for (const t of importedTracks) if (t.matched_hash) map.set(t.matched_hash, t.provider_track_id);
     return map;
   }, [importedTracks]);
 
@@ -599,16 +599,16 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   // reasoning as desktop: Favorites/Recently Added describe properties real
   // library rows have. Tracks awaiting a duration-mismatch review are
   // excluded (resolve those from the Spotify playlist detail view instead of
-  // re-triggering a second concurrent download here). Since `spotify_tracks`
-  // is now keyed by (spotify_id, source), the same song shared across
-  // playlists (or a playlist and Liked Songs) has one row per playlist it's
-  // in — dedupe by spotify_id so the flat Library list shows it once.
+  // re-triggering a second concurrent download here). Since `external_tracks`
+  // is keyed by (provider, provider_track_id, source), the same song shared
+  // across playlists (or a playlist and Liked Songs) has one row per playlist
+  // it's in — dedupe by provider_track_id so the flat Library list shows it once.
   const externalDisplayed = useMemo(() => {
     if (filter !== 'all') return [];
     const seen = new Set<string>();
     let list = importedTracks
-      .filter(t => t.matched_hash == null && !reviewTracks[t.spotify_id])
-      .filter(t => (seen.has(t.spotify_id) ? false : (seen.add(t.spotify_id), true)));
+      .filter(t => t.matched_hash == null && !reviewTracks[t.provider_track_id])
+      .filter(t => (seen.has(t.provider_track_id) ? false : (seen.add(t.provider_track_id), true)));
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter(t =>
@@ -771,8 +771,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                     : item.kind === 'external-track'
                     ? <ExternalTrackRow
                         track={item.track}
-                        downloading={downloadingSpotifyIds.includes(item.track.spotify_id)}
-                        onPress={() => setExternalSheet({ spotifyId: item.track.spotify_id, label: item.track.title })}
+                        downloading={downloadingSpotifyIds.includes(item.track.provider_track_id)}
+                        onPress={() => setExternalSheet({ spotifyId: item.track.provider_track_id, label: item.track.title })}
                       />
                     : <TrackRow
                         track={item.track} idx={item.idx} playing={item.playing}

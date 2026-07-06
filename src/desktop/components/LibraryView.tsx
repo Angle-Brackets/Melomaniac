@@ -110,17 +110,18 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   // non-selectable entries with only a "Get track" action. Tracks currently
   // awaiting a duration-mismatch review are excluded here since "Get track"
   // would just kick off a second concurrent download — resolve those in the
-  // Spotify playlist view instead. Since `spotify_tracks` is now keyed by
-  // (spotify_id, source), the same song shared across playlists (or a
-  // playlist and Liked Songs) has one row per playlist it's in — dedupe by
-  // spotify_id here so the flat Library view shows it once, not per source.
+  // Spotify playlist view instead. Since `external_tracks` is keyed by
+  // (provider, provider_track_id, source), the same song shared across
+  // playlists (or a playlist and Liked Songs) has one row per playlist it's
+  // in — dedupe by provider_track_id here so the flat Library view shows it
+  // once, not per source.
   const externalRows: Row[] = useMemo(() => {
     const seen = new Set<string>();
     return importedTracks
-      .filter(t => t.matched_hash == null && !reviewTracks[t.spotify_id])
-      .filter(t => (seen.has(t.spotify_id) ? false : (seen.add(t.spotify_id), true)))
+      .filter(t => t.matched_hash == null && !reviewTracks[t.provider_track_id])
+      .filter(t => (seen.has(t.provider_track_id) ? false : (seen.add(t.provider_track_id), true)))
       .map((t): Row => ({
-        hash:         `spotify:${t.spotify_id}`,
+        hash:         `spotify:${t.provider_track_id}`,
         title:        t.title,
         artist:       t.artist,
         album:        t.album,
@@ -131,7 +132,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
         ingested_at:  0,
         source_url:   null,
         isExternal:   true,
-        spotifyId:    t.spotify_id,
+        spotifyId:    t.provider_track_id,
         artworkUrl:   t.artwork_url,
       }));
   }, [importedTracks, reviewTracks]);
@@ -139,8 +140,8 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   // Local tracks the matcher (or the user) silently linked to a Spotify import —
   // keyed by local hash so rows can show a small provenance badge.
   const linkedSpotifyByHash = useMemo(() => {
-    const map = new Map<string, string>(); // hash -> spotify_id
-    for (const t of importedTracks) if (t.matched_hash) map.set(t.matched_hash, t.spotify_id);
+    const map = new Map<string, string>(); // hash -> provider_track_id
+    for (const t of importedTracks) if (t.matched_hash) map.set(t.matched_hash, t.provider_track_id);
     return map;
   }, [importedTracks]);
 

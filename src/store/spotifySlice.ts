@@ -77,6 +77,7 @@ export type SpotifySlice = {
   downloadAllTracks:            (source: string) => Promise<void>
   resolveReviewTrack:           (spotifyId: string, action: 'keep' | 'discard') => Promise<void>
   promotePlaylist:              (source: string) => Promise<void>
+  showSpotifyToast:             (message: string, action?: SpotifyToast['action']) => void
 }
 
 export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> = (set, get) => {
@@ -99,6 +100,7 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   promotedSpotifySources: [],
   reviewTracks: {},
   spotifyToast: null,
+  showSpotifyToast,
 
   refreshSpotifyStatus: async () => {
     const connected = await invoke<boolean>('spotify_is_connected')
@@ -138,14 +140,14 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   closeSpotifyPlaylist: () => set({ activeSpotifySource: null }),
 
   fetchImportedTracks: async () => {
-    const tracks = await invoke<SpotifyTrackRecord[]>('spotify_get_imported_tracks')
+    const tracks = await invoke<SpotifyTrackRecord[]>('get_imported_external_tracks')
     set({ importedTracks: tracks })
   },
 
   // Mirrors what the backend's remove_track already does when a linked local
-  // track is deleted (clears matched_hash/confidence for any spotify_tracks
+  // track is deleted (clears matched_hash/confidence for any external_tracks
   // row pointing at it) — applied locally so a bulk delete doesn't need a
-  // full spotify_get_imported_tracks refetch just to reflect a couple of
+  // full get_imported_external_tracks refetch just to reflect a couple of
   // rows flipping back to "external". Hashes that don't match any imported
   // track (a purely-local deletion) are simply no-ops here.
   demoteMatchedHashes: (hashes) => {
@@ -159,17 +161,19 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   },
 
   importPlaylist: async (source, tracks) => {
-    const result = await invoke<SpotifyTrackRecord[]>('spotify_import_playlist_tracks', { source, tracks })
+    const result = await invoke<SpotifyTrackRecord[]>('import_external_playlist_tracks', { provider: 'spotify', source, tracks })
     set({ importedTracks: result })
   },
 
   linkTrack: async (spotifyId, hash) => {
-    await invoke('spotify_link_track', { spotifyId, hash })
+    const source = get().importedTracks.find(t => t.provider_track_id === spotifyId)?.source ?? ''
+    await invoke('link_external_track', { provider: 'spotify', providerTrackId: spotifyId, source, hash })
     await get().fetchImportedTracks()
   },
 
   unlinkTrack: async (spotifyId) => {
-    await invoke('spotify_unlink_track', { spotifyId })
+    const source = get().importedTracks.find(t => t.provider_track_id === spotifyId)?.source ?? ''
+    await invoke('unlink_external_track', { provider: 'spotify', providerTrackId: spotifyId, source })
     await get().fetchImportedTracks()
   },
 
@@ -181,8 +185,9 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   // Shows an "Undo" toast since this reverses less easily than a plain
   // unlink — a mistaken click shouldn't force a duplicate re-download.
   rejectMatch: async (spotifyId, hash) => {
-    const title = get().importedTracks.find(t => t.spotify_id === spotifyId)?.title ?? 'track'
-    await invoke('spotify_reject_track_match', { spotifyId, hash })
+    const track = get().importedTracks.find(t => t.provider_track_id === spotifyId)
+    const title = track?.title ?? 'track'
+    await invoke('reject_external_track_match', { provider: 'spotify', providerTrackId: spotifyId, source: track?.source ?? '', hash })
     await get().fetchImportedTracks()
     showSpotifyToast(`Rejected match for "${title}"`, {
       label: 'Undo',
@@ -191,7 +196,8 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   },
 
   undoRejectMatch: async (spotifyId, hash) => {
-    await invoke('spotify_undo_reject_track_match', { spotifyId, hash })
+    const source = get().importedTracks.find(t => t.provider_track_id === spotifyId)?.source ?? ''
+    await invoke('undo_reject_external_track_match', { provider: 'spotify', providerTrackId: spotifyId, source, hash })
     await get().fetchImportedTracks()
     set({ spotifyToast: null })
   },
@@ -200,7 +206,7 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   // enqueue a ytsearch1 pseudo-URL, wait for that specific job to finish, then
   // link the resulting local hash. No new download infrastructure needed.
   downloadAndLinkExternalTrack: async (spotifyId) => {
-    const track = get().importedTracks.find(t => t.spotify_id === spotifyId)
+    const track = get().importedTracks.find(t => t.provider_track_id === spotifyId)
     if (!track) return
 
     set(s => ({ downloadingSpotifyIds: [...s.downloadingSpotifyIds, spotifyId] }))
@@ -277,8 +283,8 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   downloadAllTracks: async (source) => {
     const reviewIds = new Set(Object.keys(get().reviewTracks))
     const ids = get().importedTracks
-      .filter(t => t.source === source && !t.matched_hash && !reviewIds.has(t.spotify_id))
-      .map(t => t.spotify_id)
+      .filter(t => t.source === source && !t.matched_hash && !reviewIds.has(t.provider_track_id))
+      .map(t => t.provider_track_id)
       .filter(id => !get().downloadingSpotifyIds.includes(id))
     await Promise.all(ids.map(id => get().downloadAndLinkExternalTrack(id)))
   },

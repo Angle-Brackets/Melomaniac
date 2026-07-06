@@ -5,7 +5,7 @@
 
 use tauri::State;
 
-use melomaniac_storage::{NewSpotifyTrack, SpotifyTrackRecord, TrackRecord};
+use melomaniac_storage::{ExternalTrackRecord, NewExternalTrack, TrackRecord};
 
 use crate::spotify::SpotifyTrack;
 use crate::storage::StorageState;
@@ -95,17 +95,18 @@ fn best_match(input: &MatchInput, library: &[TrackRecord], rejected: &[String]) 
     best
 }
 
-/// Provider-prefixed key into `track_rejections` for a Spotify track.
-/// Prefixing (rather than relying on `spotify_tracks`' own primary key)
-/// keeps the rejections table reusable by a future non-Spotify provider.
-fn spotify_external_id(spotify_id: &str) -> String {
-    format!("spotify:{spotify_id}")
+/// Provider-prefixed key into `track_rejections` for an external track.
+/// Prefixing (rather than relying on `external_tracks`' own primary key)
+/// keeps the rejections table reusable across providers.
+fn external_id_for(provider: &str, provider_track_id: &str) -> String {
+    format!("{provider}:{provider_track_id}")
 }
 
-fn to_new_spotify_track(source: &str, position: i64, t: SpotifyTrack) -> Option<NewSpotifyTrack> {
-    let spotify_id = t.id?;
-    Some(NewSpotifyTrack {
-        spotify_id,
+fn to_new_external_track(provider: &str, source: &str, position: i64, t: SpotifyTrack) -> Option<NewExternalTrack> {
+    let provider_track_id = t.id?;
+    Some(NewExternalTrack {
+        provider: provider.to_string(),
+        provider_track_id,
         title: t.title,
         artist: t.artist,
         album: Some(t.album),
@@ -117,32 +118,33 @@ fn to_new_spotify_track(source: &str, position: i64, t: SpotifyTrack) -> Option<
     })
 }
 
-/// Import (upsert) a batch of Spotify tracks, then run the fuzzy matcher over
+/// Import (upsert) a batch of external tracks, then run the fuzzy matcher over
 /// only the rows that don't already have a link (preserving any existing
 /// manual link/unlink decision). Returns the full, up-to-date imported-track
 /// list — global across all sources, matching the flat-library UI model.
 #[tauri::command]
-pub async fn spotify_import_playlist_tracks(
+pub async fn import_external_playlist_tracks(
+    provider: String,
     source: String,
     tracks: Vec<SpotifyTrack>,
     storage: State<'_, StorageState>,
-) -> Result<Vec<SpotifyTrackRecord>, String> {
-    let new_tracks: Vec<NewSpotifyTrack> = tracks
+) -> Result<Vec<ExternalTrackRecord>, String> {
+    let new_tracks: Vec<NewExternalTrack> = tracks
         .into_iter()
         .enumerate()
-        .filter_map(|(i, t)| to_new_spotify_track(&source, i as i64, t))
+        .filter_map(|(i, t)| to_new_external_track(&provider, &source, i as i64, t))
         .collect();
 
     storage
         .db
-        .upsert_spotify_tracks(&new_tracks)
+        .upsert_external_tracks(&new_tracks)
         .await
         .map_err(|e| e.to_string())?;
 
     let library = storage.db.get_all_tracks().await.map_err(|e| e.to_string())?;
-    let imported = storage.db.get_spotify_tracks().await.map_err(|e| e.to_string())?;
+    let imported = storage.db.get_external_tracks().await.map_err(|e| e.to_string())?;
 
-    let unmatched: Vec<&SpotifyTrackRecord> =
+    let unmatched: Vec<&ExternalTrackRecord> =
         imported.iter().filter(|t| t.matched_hash.is_none()).collect();
 
     for t in unmatched {
@@ -154,99 +156,107 @@ pub async fn spotify_import_playlist_tracks(
         };
         let rejected = storage
             .db
-            .get_rejected_hashes(&spotify_external_id(&t.spotify_id))
+            .get_rejected_hashes(&external_id_for(&t.provider, &t.provider_track_id))
             .await
             .map_err(|e| e.to_string())?;
         if let Some((hash, score)) = best_match(&input, &library, &rejected) {
             storage
                 .db
-                .set_spotify_track_match(&t.spotify_id, Some(&hash), Some(score))
+                .set_external_track_match(&t.provider, &t.provider_track_id, &t.source, Some(&hash), Some(score))
                 .await
                 .map_err(|e| e.to_string())?;
         }
     }
 
-    storage.db.get_spotify_tracks().await.map_err(|e| e.to_string())
+    storage.db.get_external_tracks().await.map_err(|e| e.to_string())
 }
 
-/// Returns imported Spotify tracks as currently persisted — called on
+/// Returns imported external tracks as currently persisted — called on
 /// Library mount so external rows survive restarts without re-importing.
 #[tauri::command]
-pub async fn spotify_get_imported_tracks(
+pub async fn get_imported_external_tracks(
     storage: State<'_, StorageState>,
-) -> Result<Vec<SpotifyTrackRecord>, String> {
-    storage.db.get_spotify_tracks().await.map_err(|e| e.to_string())
+) -> Result<Vec<ExternalTrackRecord>, String> {
+    storage.db.get_external_tracks().await.map_err(|e| e.to_string())
 }
 
-/// Manually link a Spotify track to a local track hash — used both by the
+/// Manually link an external track to a local track hash — used both by the
 /// user picking a match the matcher missed, and (via `confidence: None`) to
 /// distinguish user-confirmed links from algorithmic ones.
 #[tauri::command]
-pub async fn spotify_link_track(
-    spotify_id: String,
+pub async fn link_external_track(
+    provider: String,
+    provider_track_id: String,
+    source: String,
     hash: String,
     storage: State<'_, StorageState>,
 ) -> Result<(), String> {
     storage
         .db
-        .set_spotify_track_match(&spotify_id, Some(&hash), None)
+        .set_external_track_match(&provider, &provider_track_id, &source, Some(&hash), None)
         .await
         .map_err(|e| e.to_string())
 }
 
 /// Undo a link (auto or manual), demoting the track back to an external row.
 #[tauri::command]
-pub async fn spotify_unlink_track(
-    spotify_id: String,
+pub async fn unlink_external_track(
+    provider: String,
+    provider_track_id: String,
+    source: String,
     storage: State<'_, StorageState>,
 ) -> Result<(), String> {
     storage
         .db
-        .set_spotify_track_match(&spotify_id, None, None)
+        .set_external_track_match(&provider, &provider_track_id, &source, None, None)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// Like `spotify_unlink_track`, but also permanently blacklists `hash` for
-/// this Spotify track so the matcher can never re-suggest it — for when the
+/// Like `unlink_external_track`, but also permanently blacklists `hash` for
+/// this external track so the matcher can never re-suggest it — for when the
 /// link is actively wrong, not just undesired. Applies regardless of the
 /// confidence the matcher originally reported; even a 99%-confidence match
 /// can be completely wrong. Does not touch the local library track itself,
 /// since it may be a legitimately correct match for something else.
 #[tauri::command]
-pub async fn spotify_reject_track_match(
-    spotify_id: String,
+pub async fn reject_external_track_match(
+    provider: String,
+    provider_track_id: String,
+    source: String,
     hash: String,
     storage: State<'_, StorageState>,
 ) -> Result<(), String> {
     storage
         .db
-        .add_track_rejection(&spotify_external_id(&spotify_id), &hash)
+        .add_track_rejection(&external_id_for(&provider, &provider_track_id), &hash)
         .await
         .map_err(|e| e.to_string())?;
     storage
         .db
-        .set_spotify_track_match(&spotify_id, None, None)
+        .set_external_track_match(&provider, &provider_track_id, &source, None, None)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// Reverses `spotify_reject_track_match` — re-links `hash` and lifts the
+/// Reverses `reject_external_track_match` — re-links `hash` and lifts the
 /// blacklist entry, for the "Undo" action on the reject toast.
 #[tauri::command]
-pub async fn spotify_undo_reject_track_match(
-    spotify_id: String,
+pub async fn undo_reject_external_track_match(
+    provider: String,
+    provider_track_id: String,
+    source: String,
     hash: String,
     storage: State<'_, StorageState>,
 ) -> Result<(), String> {
     storage
         .db
-        .remove_track_rejection(&spotify_external_id(&spotify_id), &hash)
+        .remove_track_rejection(&external_id_for(&provider, &provider_track_id), &hash)
         .await
         .map_err(|e| e.to_string())?;
     storage
         .db
-        .set_spotify_track_match(&spotify_id, Some(&hash), None)
+        .set_external_track_match(&provider, &provider_track_id, &source, Some(&hash), None)
         .await
         .map_err(|e| e.to_string())
 }

@@ -10,6 +10,7 @@ pub mod routes {
     pub const MANIFEST:        &str = "/manifest";
     pub const HASHES:          &str = "/hashes";
     pub const TRACKS:          &str = "/tracks";
+    pub const EXTERNAL_MATCHES: &str = "/external_matches";
     pub const PAIR:            &str = "/pair";
     pub const BLOB:            &str = "/blob/:hash";
     pub const COMMITS:         &str = "/commits/:playlist_id/:branch_name";
@@ -124,6 +125,41 @@ pub struct TrackSyncRecord {
     pub artwork_hash: Option<String>,
     pub duration_ms:  i64,
     pub mime_type:    Option<String>,
+}
+
+// ── ExternalMatchState ───────────────────────────────────────────────────────
+
+/// Slim `external_tracks` row exchanged over `/external_matches` so a peer
+/// can reconcile which local audio a given external-provider track (Spotify,
+/// etc.) is linked to. Omits display-only fields (`title`, `artist`, ...)
+/// since this is only ever used to *merge match state*, not to populate a
+/// peer's playlist UI.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExternalMatchRecord {
+    pub provider:          String,
+    pub provider_track_id: String,
+    pub source:            String,
+    pub matched_hash:      Option<String>,
+    pub confidence:        Option<f32>,
+    pub updated_at:        i64,
+}
+
+/// Slim `track_rejections` row exchanged over `/external_matches`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RejectionRecord {
+    pub external_id: String,
+    pub hash:        String,
+    pub active:      bool,
+    pub updated_at:  i64,
+}
+
+/// Response body for `GET /external_matches` — a full dump of one device's
+/// external-track match state (see `merge_external_match_state`'s precedence
+/// rule for how a receiving peer reconciles this against its own copy).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExternalMatchState {
+    pub tracks:      Vec<ExternalMatchRecord>,
+    pub rejections:  Vec<RejectionRecord>,
 }
 
 // ── BranchInfo ────────────────────────────────────────────────────────────────
@@ -376,6 +412,17 @@ pub trait SyncBridge: Send + Sync {
         public_key_b64: &str,
         playlist_ids: &[String],
     ) -> Result<u32, SyncError>;
+
+    /// Pull a specific peer's external-track match state (`external_tracks` +
+    /// `track_rejections`) over `/external_matches`, merge it into the local
+    /// tables using the precedence rule (`Database::merge_external_match_state`),
+    /// and opportunistically pull the audio blob for any row whose *winning*
+    /// `matched_hash` isn't yet in local CAS. Returns the number of local rows
+    /// changed by the merge.
+    ///
+    /// Called by the auto-sync fast path alongside `refresh_peer_metadata`, and
+    /// by a manual "sync now".
+    fn sync_external_match_state(&self, public_key_b64: &str) -> Result<u32, SyncError>;
 
     /// Returns this node's display fingerprint (e.g. `"AB12·CD34·EF56"`).
     fn fingerprint(&self) -> String;

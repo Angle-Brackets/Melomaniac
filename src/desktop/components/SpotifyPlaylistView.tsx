@@ -42,7 +42,7 @@ export default function SpotifyPlaylistView({ source, artworkUrls, onPlayTrack }
   const promoted       = promotedSpotifySources.includes(source);
   const fullyLinked    = rows.length > 0 && linkedCount === rows.length;
   const externalRows   = rows.filter((r): r is Extract<SpotifyRow, { kind: 'external' }> => r.kind === 'external');
-  const anyDownloading = externalRows.some(r => downloadingSpotifyIds.includes(r.record.spotify_id));
+  const anyDownloading = externalRows.some(r => downloadingSpotifyIds.includes(r.record.provider_track_id));
 
   const handlePromote = async () => {
     setPromoting(true);
@@ -158,7 +158,7 @@ export default function SpotifyPlaylistView({ source, artworkUrls, onPlayTrack }
         )}
         {!loading && rows.map(row => {
           const hash        = row.kind === 'local' ? row.track.hash : undefined;
-          const spotifyId    = row.kind === 'local' ? row.spotifyId  : row.record.spotify_id;
+          const spotifyId    = row.kind === 'local' ? row.spotifyId  : row.record.provider_track_id;
           const isDownloading = downloadingSpotifyIds.includes(spotifyId);
           const spotifyArtworkUrl = row.kind === 'local' ? undefined : row.record.artwork_url ?? undefined;
           return (
