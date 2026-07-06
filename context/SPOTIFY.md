@@ -21,9 +21,12 @@ Scope decisions (confirmed with user):
 
 ## Auth model — PKCE, no client secret
 
-Desktop app is a native/public client, so it uses OAuth 2.0 **Authorization
-Code + PKCE**, matching Spotify's guidance for apps that can't safely hold a
-client secret.
+The app is a native/public client on every platform, so it uses OAuth 2.0
+**Authorization Code + PKCE**, matching Spotify's guidance for apps that
+can't safely hold a client secret. The platform-specific half of the flow
+(presenting the login UI and catching the redirect) lives behind a shared
+`OAuthBridge` trait (`melomaniac-oauth` crate) — `spotify.rs` itself is
+100% provider logic and doesn't know or care which platform it's running on.
 
 - `CLIENT_ID = "a3249b8aca7a4a499a99574751f5a9a6"`
 - Desktop redirect URI: `http://127.0.0.1:17342/callback` (fixed port —
@@ -32,22 +35,44 @@ client secret.
   mechanism as desktop, different fixed port). A custom URL scheme
   (`melomaniac://oauth-callback`) was tried first, but Spotify's 2025
   redirect URI security requirements no longer accept custom schemes —
-  only HTTPS or a loopback address. `ASWebAuthenticationSession` still
-  presents the login sheet on iOS, but the actual redirect is caught by a
-  real on-device TCP listener (`melomaniac-oauth` crate's `loopback`
-  module), not by the session's scheme-interception mechanism.
+  only HTTPS or a loopback address.
 - Scopes (Phase 1): `playlist-read-private playlist-read-collaborative user-library-read`
 
-### Desktop flow
+### `melomaniac-oauth` crate (`src-tauri/crates/oauth/`)
+
+- `OAuthBridge` trait (`src/lib.rs`) — `redirect_uri() -> &str` +
+  `authenticate(auth_url) -> Result<String, String>` (blocks until the
+  provider redirects back, returns the raw callback query string). Same
+  platform-bridge-behind-a-trait pattern as `AudioBridge`/`SyncBridge`.
+- `loopback.rs` — shared by both platforms: binds a one-shot
+  `TcpListener`, hand-parses the `GET /callback?...` request line, replies
+  with a minimal "you can close this window" HTML page. 120s timeout at
+  the call site in each bridge.
+- `desktop.rs` (`DesktopOAuthBridge`) — opens the system browser via the
+  `open` crate, then blocks on the loopback listener on port 17342.
+- `ios.rs` (`IosOAuthBridge`) — presents an `ASWebAuthenticationSession`
+  sheet via Swift FFI (`crates/oauth/ios/`, `MelomaniacOAuth` Swift
+  package) purely as UI chrome; the actual redirect is still caught by the
+  same loopback listener on port 17343, since Spotify won't accept the
+  session's own custom-scheme callback mechanism as a redirect URI. The
+  session's completion handler only matters for detecting a manual
+  cancel/dismiss — whichever of "loopback received a request" or "user
+  cancelled the sheet" fires first wins the race (`ios.rs`'s `PENDING`
+  channel). `melo_oauth_dismiss` closes the sheet once the loopback side
+  has an answer, so it doesn't linger open on a page that already served
+  its purpose.
+
+### `spotify.rs` flow (both platforms, identical)
 1. `spotify_connect` generates a PKCE `code_verifier` (64 random URL-safe
    bytes) + `code_challenge` (SHA-256, base64 URL-safe no-pad) and a random
    CSRF `state`.
-2. Opens the system browser to `accounts.spotify.com/authorize` via
-   `app.shell().open(...)` (existing `tauri_plugin_shell` dependency — no new
-   crate needed).
-3. Binds a one-shot `tokio::net::TcpListener` on `127.0.0.1:17342`, hand-parses
-   the raw HTTP GET request line for `/callback?code=...&state=...`, replies
-   with a minimal "you can close this window" HTML page, 120s timeout.
+2. Builds the `accounts.spotify.com/authorize` URL using
+   `state.bridge.redirect_uri()` for the redirect param, then calls
+   `state.bridge.authenticate(&auth_url)` (via `spawn_blocking`, since both
+   bridge implementations block synchronously) — this is the only point
+   where platform divergence happens.
+3. Parses the returned query string for `code`/`state`/`error`; verifies
+   `state` matches (CSRF check) before proceeding.
 4. Exchanges the code for tokens at `accounts.spotify.com/api/token` via
    `reqwest`'s `.form(&params)` (confirmed not feature-gated in reqwest 0.12 —
    only `.json()` needs the `json` feature).
@@ -59,22 +84,18 @@ client secret.
    with a 30s expiry buffer; `get_valid_access_token` transparently refreshes
    via the stored refresh token when needed.
 
-### iOS flow
-Not implemented yet. Will need `ASWebAuthenticationSession` via Swift FFI,
-extending the existing extern "C" callback pattern in
-`crates/sync/src/ios.rs` / `crates/sync/ios/` (Swift package). `spotify_connect`
-on iOS currently returns a stub error.
-
 ---
 
 ## Rust implementation — `src-tauri/src/spotify.rs`
 
-New file, ~500 lines. Structure:
+Provider logic only — no platform-specific code (that all lives in
+`melomaniac-oauth`, see above). Structure:
 
-- `SpotifyState { cached: Mutex<Option<CachedAccessToken>> }` — managed via
-  `app.manage(spotify::SpotifyState::new())` in `lib.rs`.
+- `SpotifyState { bridge: Arc<dyn OAuthBridge>, cached: Mutex<Option<CachedAccessToken>> }`
+  — managed via `app.manage(spotify::SpotifyState::new(bridge))` in `lib.rs`,
+  where `lib.rs` picks `DesktopOAuthBridge` or `IosOAuthBridge` via cfg-gating
+  (the only place the platform split happens).
 - PKCE helpers: `random_url_safe(len)`, `code_challenge(verifier)`.
-- `wait_for_callback(expected_state)` — the hand-rolled loopback listener.
 - `exchange_code` / `refresh_access_token` — token endpoint calls.
 - Keyring helpers: `save_refresh_token`, `load_refresh_token`,
   `clear_refresh_token`.
@@ -91,7 +112,7 @@ New file, ~500 lines. Structure:
 
 | Command | Args | Returns | Notes |
 |---|---|---|---|
-| `spotify_connect` | — | `Result<(), String>` | Desktop: real PKCE+loopback flow. iOS: stub error. |
+| `spotify_connect` | — | `Result<(), String>` | Identical PKCE+loopback flow on desktop and iOS via `OAuthBridge`. |
 | `spotify_disconnect` | — | `Result<(), String>` | Clears in-memory cache + keyring entry. |
 | `spotify_is_connected` | — | `bool` | Checks for a stored refresh token. |
 | `spotify_get_account` | — | `Result<SpotifyAccount, String>` | `GET /v1/me`. |
@@ -217,9 +238,21 @@ command):
       touch the local library track itself — it may be legitimately correct
       for something else.
 
-**Not started:**
-- [ ] iOS `ASWebAuthenticationSession` bridge (`spotify_connect` is
-      stub-only on iOS)
+**Done (continued) — iOS auth + cross-device sync:**
+- [x] iOS OAuth bridge — `spotify_connect` now works identically on iOS and
+      desktop via the shared `OAuthBridge` trait (`melomaniac-oauth` crate).
+      `ASWebAuthenticationSession` presents the login sheet, but the redirect
+      itself is caught by a real on-device loopback TCP listener
+      (`http://127.0.0.1:17343/callback`), not the session's own scheme
+      interception — Spotify's 2025 redirect URI rules reject custom URL
+      schemes outright. See the "Auth model" section above for the full
+      bridge breakdown.
+- [x] Cross-device sync of external-track match state — `spotify_tracks`
+      generalized to the provider-generic `external_tracks` table, synced via
+      a new `/external_matches` peer endpoint with a provenance-first
+      precedence rule (manual link/unlink/reject always beats an auto-match).
+      Runs in both the auto-sync fast path and manual "Sync Now". See
+      `PLAN.md`'s Spotify Integration section for the full writeup.
 
 **Deferred / open questions:**
 - Live Spotify streaming playback (`librespot` integration, per the older
@@ -231,6 +264,3 @@ command):
   re-sync it at all. Needs a persisted local-playlist ↔ Spotify-source link;
   see `PLAN.md`'s Spotify Integration backlog.
 - YouTube Music integration — second provider, after Spotify path is proven.
-- `tauri_plugin_shell::Shell::open` is deprecated in favor of
-  `tauri-plugin-opener` upstream; left as-is for now (still functional, just
-  a warning) since pulling in a new plugin wasn't in scope for this pass.
