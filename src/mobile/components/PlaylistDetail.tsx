@@ -1427,6 +1427,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     };
 
     const finish = () => {
+      cancelHold();
       if (!isDraggingRef.current) return;
       isDraggingRef.current = false;
       const from = draggingIdxRef.current, to = dropTargetIdxRef.current;
@@ -1458,14 +1459,50 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
       }
     };
 
+    // HOLD_MS: activating a drag the instant a touch lands in the handle zone
+    // hijacks any swipe-to-delete gesture that happens to start there too —
+    // the trailing edge of the row is exactly where a leftward swipe naturally
+    // begins. Requiring a brief stationary hold first (canceled by movement)
+    // lets a quick swipe pass through untouched while a deliberate hold still
+    // enters reorder mode.
+    const HOLD_MS = 160;
+    const HOLD_TOLERANCE = 8;
+    let holdTimer: ReturnType<typeof setTimeout> | null = null;
+    let holdStart: { x: number; y: number } | null = null;
+    const cancelHold = () => {
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+      holdStart = null;
+    };
+    const inHandleZone = (clientX: number, clientY: number): boolean => {
+      if (!trackListRef.current) return false;
+      const trackRect = trackListRef.current.getBoundingClientRect();
+      return clientX >= trackRect.right - HANDLE_PX && clientY >= trackRect.top && clientY <= trackRect.bottom;
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1) return;
-      if (activate(e.touches[0].clientX, e.touches[0].clientY)) e.preventDefault();
+      const { clientX, clientY } = e.touches[0];
+      if (!inHandleZone(clientX, clientY)) return;
+      e.preventDefault();
+      cancelHold();
+      holdStart = { x: clientX, y: clientY };
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        if (holdStart) activate(holdStart.x, holdStart.y);
+      }, HOLD_MS);
     };
     const onTouchMove = (e: TouchEvent) => {
-      if (!isDraggingRef.current || e.touches.length !== 1) return;
-      e.preventDefault();
-      move(e.touches[0].clientY);
+      if (isDraggingRef.current) {
+        if (e.touches.length !== 1) return;
+        e.preventDefault();
+        move(e.touches[0].clientY);
+        return;
+      }
+      if (holdStart && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - holdStart.x;
+        const dy = e.touches[0].clientY - holdStart.y;
+        if (Math.abs(dx) > HOLD_TOLERANCE || Math.abs(dy) > HOLD_TOLERANCE) cancelHold();
+      }
     };
     const onMouseDown = (e: MouseEvent) => {
       if (!activate(e.clientX, e.clientY)) return;
@@ -1486,6 +1523,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     el.addEventListener('touchcancel', finish);
     el.addEventListener('mousedown',   onMouseDown);
     return () => {
+      cancelHold();
       el.removeEventListener('touchstart',  onTouchStart);
       el.removeEventListener('touchmove',   onTouchMove);
       el.removeEventListener('touchend',    finish);
