@@ -5,6 +5,7 @@ import { homeDir } from '@tauri-apps/api/path';
 import type { Track } from '../data';
 import ResizeHandle from './ResizeHandle';
 import ArtworkModal from './ArtworkModal';
+import DeleteTracksModal from './DeleteTracksModal';
 import { IcoEditor, IcoDownload, IcoClose, IcoMusicLib } from '../icons';
 import { FiSave, FiRotateCcw, FiPlusSquare, FiFolder, FiSearch, FiEdit2 } from 'react-icons/fi';
 
@@ -473,7 +474,7 @@ export default function EditorView({
   // ── Library tab search + badges + delete
   const [libSearch,       setLibSearch]       = useState('');
   const [strayHashes,     setStrayHashes]     = useState<Set<string>>(new Set());
-  const [pendingDelete,   setPendingDelete]   = useState<string | null>(null);
+  const [deleteModalHash, setDeleteModalHash] = useState<string | null>(null);
   const nowSecs = Date.now() / 1000;
 
   useEffect(() => {
@@ -670,6 +671,13 @@ export default function EditorView({
       setSaveMsg({ ok: false, text: String(e) });
       setTimeout(() => setSaveMsg(null), 3000);
     }
+  };
+
+  const confirmDeleteTrack = async (cascade: boolean) => {
+    if (!deleteModalHash) return;
+    await invoke('library_remove_tracks_cascade', { hashes: [deleteModalHash], cascade });
+    onTrackDeleted?.(deleteModalHash);
+    setDeleteModalHash(null);
   };
 
   // ── Derived ───────────────────────────────────────────────────────────────
@@ -1059,23 +1067,16 @@ export default function EditorView({
                       {fmtDuration(t.duration_ms)}
                     </span>
                     <button
-                      title={pendingDelete === t.hash ? 'Click again to confirm delete' : 'Remove from library'}
-                      onClick={async e => {
+                      title="Remove from library"
+                      onClick={e => {
                         e.stopPropagation();
-                        if (pendingDelete === t.hash) {
-                          await invoke('library_remove_track', { hash: t.hash });
-                          onTrackDeleted?.(t.hash);
-                          setPendingDelete(null);
-                        } else {
-                          setPendingDelete(t.hash);
-                          setTimeout(() => setPendingDelete(p => p === t.hash ? null : p), 2500);
-                        }
+                        setDeleteModalHash(t.hash);
                       }}
                       style={{
                         background: 'none', border: 'none', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: pendingDelete === t.hash ? '#f87171' : 'var(--text-3)',
-                        opacity: pendingDelete === t.hash ? 1 : 0,
+                        color: 'var(--text-3)',
+                        opacity: 0,
                         fontSize: 13, padding: 0, width: 20, height: 20, borderRadius: 3,
                         transition: 'color 0.15s, opacity 0.15s',
                       }}
@@ -1262,6 +1263,15 @@ export default function EditorView({
           if (hashes.length > 0) onArtworkUpdated?.(hashes, newUrl);
         }}
         onClose={() => setArtworkModalOpen(false)}
+      />
+    )}
+
+    {/* ── Delete track modal ────────────────────────────────────────────── */}
+    {deleteModalHash && (
+      <DeleteTracksModal
+        hashes={[deleteModalHash]}
+        onCancel={() => setDeleteModalHash(null)}
+        onConfirm={confirmDeleteTrack}
       />
     )}
     </>
