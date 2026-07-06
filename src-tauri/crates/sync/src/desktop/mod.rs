@@ -1,5 +1,5 @@
 use crate::{
-    KnownDevice, NodeIdentity, PeerInfo, PendingMerge,
+    ExternalMatchState, KnownDevice, NodeIdentity, PeerInfo, PendingMerge,
     PlaylistManifest, QrPayload, SyncBridge, SyncError, SyncReport, TrackSyncRecord,
     identity::{TrustList, unix_now},
     merge::diff_trees,
@@ -8,7 +8,7 @@ use crate::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use ed25519_dalek::VerifyingKey;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use melomaniac_storage::{CasStore, CommitRecord, Database, TrackRecord, TreeBlob};
+use melomaniac_storage::{CasStore, CommitRecord, Database, ExternalMatchPeer, RejectionPeer, TrackRecord, TreeBlob};
 use rand::RngCore;
 use std::{
     collections::HashMap,
@@ -394,6 +394,20 @@ impl SyncClient {
             .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))?;
 
         resp.json::<Vec<TrackSyncRecord>>()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))
+    }
+
+    async fn get_external_matches(&self) -> Result<ExternalMatchState, SyncError> {
+        let resp = self
+            .http
+            .get(self.url(super::routes::EXTERNAL_MATCHES))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))?;
+
+        resp.json::<ExternalMatchState>()
             .await
             .map_err(|e| SyncError::BlobTransferFailed(describe_reqwest_error(&e)))
     }
@@ -1087,6 +1101,98 @@ impl SyncBridge for DesktopSyncBridge {
             }
 
             Ok(artwork_downloaded)
+        })
+    }
+
+    fn sync_external_match_state(&self, public_key_b64: &str) -> Result<u32, SyncError> {
+        let peers = Arc::clone(&self.peers);
+        let identity = Arc::clone(&self.identity);
+        let db = Arc::clone(&self.db);
+        let cas = Arc::clone(&self.cas);
+        let pk = public_key_b64.to_string();
+
+        block(async move {
+            let peer = {
+                let map = peers.read().await;
+                map.get(&pk).cloned()
+            };
+            let peer = peer.ok_or(SyncError::PeerUnreachable(pk))?;
+            let client = SyncClient::new(identity, peer.addr);
+
+            let peer_state = client.get_external_matches().await?;
+
+            let peer_tracks: Vec<ExternalMatchPeer> = peer_state
+                .tracks
+                .into_iter()
+                .map(|t| ExternalMatchPeer {
+                    provider:          t.provider,
+                    provider_track_id: t.provider_track_id,
+                    source:            t.source,
+                    matched_hash:      t.matched_hash,
+                    confidence:        t.confidence,
+                    updated_at:        t.updated_at,
+                })
+                .collect();
+            let peer_rejections: Vec<RejectionPeer> = peer_state
+                .rejections
+                .into_iter()
+                .map(|r| RejectionPeer {
+                    external_id: r.external_id,
+                    hash:        r.hash,
+                    active:      r.active,
+                    updated_at:  r.updated_at,
+                })
+                .collect();
+
+            let changed = db
+                .merge_external_match_state(&peer_tracks, &peer_rejections)
+                .await
+                .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?;
+
+            // Opportunistically pull the winning audio blob for any linked
+            // external track this device doesn't have locally yet.
+            let local_hashes: std::collections::HashSet<String> =
+                cas.list_all_hashes().into_iter().collect();
+            let missing: Vec<String> = db
+                .get_external_tracks()
+                .await
+                .map_err(|e| SyncError::BlobTransferFailed(e.to_string()))?
+                .into_iter()
+                .filter_map(|t| t.matched_hash)
+                .filter(|h| !local_hashes.contains(h))
+                .collect();
+
+            if !missing.is_empty() {
+                let fetched = client.get_tracks(&missing).await.unwrap_or_default();
+                for r in fetched {
+                    if let Ok(bytes) = client.get_blob(&r.hash).await {
+                        cas.write_blob(&bytes).await.ok();
+                    }
+                    if let Some(ref art) = r.artwork_hash {
+                        if !local_hashes.contains(art) {
+                            if let Ok(bytes) = client.get_blob(art).await {
+                                cas.write_blob(&bytes).await.ok();
+                            }
+                        }
+                    }
+                    let record = TrackRecord {
+                        hash:         r.hash,
+                        title:        r.title,
+                        artist:       r.artist,
+                        album:        r.album,
+                        artwork_hash: r.artwork_hash,
+                        duration_ms:  r.duration_ms,
+                        favorited:    false,
+                        mime_type:    r.mime_type,
+                        ingested_at:  0,
+                        source_url:   None,
+                        isrc:         None,
+                    };
+                    db.upsert_track_from_sync(&record).await.ok();
+                }
+            }
+
+            Ok(changed)
         })
     }
 

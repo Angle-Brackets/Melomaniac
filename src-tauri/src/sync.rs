@@ -194,6 +194,21 @@ pub async fn sync_refresh_metadata(
 }
 
 #[tauri::command]
+pub async fn sync_external_match_state(
+    public_key_b64: String,
+    state: State<'_, SyncState>,
+) -> Result<u32, String> {
+    let bridge = Arc::clone(&state.bridge);
+    tokio::task::spawn_blocking(move || {
+        bridge
+            .sync_external_match_state(&public_key_b64)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn sync_fetch_peer_manifest(
     public_key_b64: String,
     state: State<'_, SyncState>,
@@ -219,6 +234,7 @@ pub async fn sync_with_peer(
 ) -> Result<SyncReport, String> {
     eprintln!("[sync] sync_with_peer: {}…", &public_key_b64[..8.min(public_key_b64.len())]);
     let bridge = Arc::clone(&state.bridge);
+    let pk_for_matches = public_key_b64.clone();
     let report = tokio::task::spawn_blocking(move || {
         bridge.sync_with_peer(&public_key_b64).map_err(|e| e.to_string())
     })
@@ -226,6 +242,12 @@ pub async fn sync_with_peer(
     .map_err(|e| e.to_string())??;
 
     eprintln!("[sync] sync_with_peer ok: blobs={} conflicts={}", report.blobs_fetched, report.conflicts.len());
+
+    // Best-effort — a manual "sync now" should also reconcile external-track
+    // match state (see `sync_external_match_state`), not just playlists/tracks.
+    let match_bridge = Arc::clone(&state.bridge);
+    let _ = tokio::task::spawn_blocking(move || match_bridge.sync_external_match_state(&pk_for_matches))
+        .await;
 
     let db  = Arc::clone(&storage.db);
     let cas = Arc::clone(&storage.cas);

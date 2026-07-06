@@ -124,7 +124,7 @@ export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownload
   const artist     = isExternal ? row.record.artist      : row.track.artist;
   const album      = isExternal ? row.record.album       : row.track.album;
   const duration   = isExternal ? row.record.duration_ms : row.track.duration_ms;
-  const spotifyId  = isExternal ? row.record.spotify_id  : row.spotifyId;
+  const spotifyId  = isExternal ? row.record.provider_track_id  : row.spotifyId;
   const hash       = isExternal ? undefined              : row.track.hash;
 
   return (

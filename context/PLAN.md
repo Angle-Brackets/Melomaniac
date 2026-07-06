@@ -180,6 +180,27 @@ See `context/SPOTIFY.md` for full design + progress.
       foreign key, so the same mechanism covers a future non-Spotify
       provider without rework; the matcher excludes rejected hashes on every
       re-import. See `context/SPOTIFY.md`.
+- [x] Cross-device sync of external-track match state — before a virtual
+      playlist is promoted, two devices browsing/downloading it independently
+      could link the same Spotify track to two different local audio files
+      (or leave it matched on one device, unmatched on the other) with no
+      reconciliation. `spotify_tracks` renamed to the provider-generic
+      `external_tracks` (keyed by `(provider, provider_track_id, source)`,
+      generalized past Spotify at the data layer only — no second provider's
+      UI exists yet), synced over a new `/external_matches` peer endpoint
+      using a provenance-first precedence rule (a manual link/unlink/reject
+      always beats an auto-match regardless of timestamp; same-provenance
+      conflicts use newest `updated_at`). `track_rejections` gained a
+      soft-delete `active` flag so "undo reject" also syncs. Runs alongside
+      `sync_refresh_metadata` in the auto-sync fast path and inside manual
+      "sync now".
+- [ ] (deferred) Orphaned local-track cleanup after a match-state merge — when
+      the precedence rule above flips `matched_hash` away from a hash this
+      device downloaded itself, the old local `tracks` row is deliberately
+      left alone (it might be favorited or used in a hand-built playlist
+      independently of the Spotify link) rather than auto-deleted. A
+      lightweight Library-side "this may be a duplicate of a linked track"
+      hint the user can act on manually would close this gap; not built yet.
 - [ ] (deferred) Ongoing Spotify → local sync — once a virtual playlist has
       been promoted, later changes on the Spotify side (tracks added/removed/
       reordered) aren't detected; revisiting an unpromoted virtual playlist

@@ -1,5 +1,6 @@
 use crate::{
-    KnownDevice, NodeIdentity, PeerInfo, PlaylistManifest, TrackSyncRecord,
+    ExternalMatchRecord, ExternalMatchState, KnownDevice, NodeIdentity, PeerInfo, PlaylistManifest,
+    RejectionRecord, TrackSyncRecord,
     identity::{TrustList, unix_now},
     sync_port,
 };
@@ -216,6 +217,38 @@ pub(crate) async fn handle_tracks(
     axum::Json(records).into_response()
 }
 
+pub(crate) async fn handle_external_matches(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(status) = check_auth(&headers, &state.trust_list).await {
+        return (status, axum::Json(serde_json::Value::Null)).into_response();
+    }
+
+    let (tracks, rejections) = match state.db.get_external_match_state().await {
+        Ok(state) => state,
+        Err(_) => return axum::Json(ExternalMatchState { tracks: vec![], rejections: vec![] }).into_response(),
+    };
+
+    let tracks = tracks.into_iter().map(|t| ExternalMatchRecord {
+        provider: t.provider,
+        provider_track_id: t.provider_track_id,
+        source: t.source,
+        matched_hash: t.matched_hash,
+        confidence: t.confidence,
+        updated_at: t.updated_at,
+    }).collect();
+
+    let rejections = rejections.into_iter().map(|r| RejectionRecord {
+        external_id: r.external_id,
+        hash: r.hash,
+        active: r.active,
+        updated_at: r.updated_at,
+    }).collect();
+
+    axum::Json(ExternalMatchState { tracks, rejections }).into_response()
+}
+
 pub(crate) async fn handle_blob(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -331,6 +364,7 @@ pub(crate) fn build_router(state: ServerState) -> axum::extract::connect_info::I
         .route(r::MANIFEST, get(handle_manifest))
         .route(r::HASHES,  get(handle_hashes))
         .route(r::TRACKS,  post(handle_tracks))
+        .route(r::EXTERNAL_MATCHES, get(handle_external_matches))
         .route(r::BLOB,    get(handle_blob))
         .route(r::COMMITS, get(handle_commits))
         .route(r::PAIR,    post(handle_pair))

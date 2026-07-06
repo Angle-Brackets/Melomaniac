@@ -143,10 +143,11 @@ export type SpotifyTrack = {
   artwork_url: string | null
 }
 
-// Mirrors the Rust SpotifyTrackRecord. matched_hash null = external row (not
+// Mirrors the Rust ExternalTrackRecord. matched_hash null = external row (not
 // yet in the local library); set = silently linked to an existing TrackRecord.
 export type SpotifyTrackRecord = {
-  spotify_id:   string
+  provider:           string  // e.g. "spotify"
+  provider_track_id:  string
   title:        string
   artist:       string
   album:        string | null

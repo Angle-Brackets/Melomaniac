@@ -29,43 +29,91 @@ pub struct TrackRecord {
     pub isrc:         Option<String>,
 }
 
-/// A Spotify track imported via playlist/liked-songs sync, persisted so it
-/// survives restarts and shows up in the Library as an external row until
-/// downloaded or silently linked to an existing local track.
+/// An external-provider track (currently only Spotify) imported via
+/// playlist/liked-songs sync, persisted so it survives restarts and shows up
+/// in the Library as an external row until downloaded or silently linked to
+/// an existing local track.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
-pub struct SpotifyTrackRecord {
-    pub spotify_id:   String,
-    pub title:        String,
-    pub artist:       String,
-    pub album:        Option<String>,
-    pub duration_ms:  i64,
-    pub isrc:         Option<String>,
-    pub artwork_url:  Option<String>,
+pub struct ExternalTrackRecord {
+    /// e.g. `"spotify"`. Part of the primary key alongside `provider_track_id`
+    /// and `source`, so a future second provider (YT Music, SoundCloud, ...)
+    /// can't collide with Spotify's native IDs.
+    pub provider:          String,
+    pub provider_track_id: String,
+    pub title:             String,
+    pub artist:            String,
+    pub album:             Option<String>,
+    pub duration_ms:       i64,
+    pub isrc:              Option<String>,
+    pub artwork_url:       Option<String>,
     /// `"playlist:<id>"` or `"liked"`.
-    pub source:       String,
+    pub source:            String,
     /// NULL = shows as an external row; set = silently linked to a local track.
-    pub matched_hash: Option<String>,
+    pub matched_hash:      Option<String>,
     /// NULL for manual links/unlinks, algorithmic score otherwise.
-    pub confidence:   Option<f32>,
-    pub imported_at:  i64,
-    /// Index within `source`'s track list at last import — preserves Spotify's
-    /// native order for on-screen browsing and for the initial commit when a
-    /// virtual playlist is auto-promoted to a real local playlist.
-    pub position:     i64,
+    pub confidence:        Option<f32>,
+    pub imported_at:       i64,
+    /// Index within `source`'s track list at last import — preserves the
+    /// provider's native order for on-screen browsing and for the initial
+    /// commit when a virtual playlist is auto-promoted to a real local playlist.
+    pub position:          i64,
+    /// Unix seconds of the last `matched_hash`/`confidence` change — the
+    /// cross-device sync precedence rule's tiebreaker (see `merge_external_match_state`).
+    pub updated_at:        i64,
 }
 
-/// Input shape for upserting a Spotify track. Mirrors `SpotifyTrackRecord`
-/// minus the match-state fields, which `upsert_spotify_tracks` never touches.
-pub struct NewSpotifyTrack {
-    pub spotify_id:  String,
-    pub title:       String,
-    pub artist:      String,
-    pub album:       Option<String>,
-    pub duration_ms: i64,
-    pub isrc:        Option<String>,
-    pub artwork_url: Option<String>,
-    pub source:      String,
-    pub position:    i64,
+/// Input shape for upserting an external track. Mirrors `ExternalTrackRecord`
+/// minus the match-state fields, which `upsert_external_tracks` never touches.
+pub struct NewExternalTrack {
+    pub provider:          String,
+    pub provider_track_id: String,
+    pub title:             String,
+    pub artist:            String,
+    pub album:             Option<String>,
+    pub duration_ms:       i64,
+    pub isrc:              Option<String>,
+    pub artwork_url:       Option<String>,
+    pub source:            String,
+    pub position:          i64,
+}
+
+/// A "this match is wrong" blacklist entry — see migration `0013` for why
+/// this is keyed by a provider-prefixed `external_id` string rather than an
+/// `external_tracks` foreign key.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+pub struct TrackRejectionRecord {
+    pub external_id: String,
+    pub hash:        String,
+    pub rejected_at: i64,
+    /// Soft-delete flag — `remove_track_rejection` flips this rather than
+    /// deleting the row, so a peer can learn the reversal happened (a hard
+    /// delete would leave no trace to sync).
+    pub active:      bool,
+    pub updated_at:  i64,
+}
+
+/// Peer-side input for `merge_external_match_state` — the slim shape a
+/// sync-layer caller actually has (`crates/sync`'s `ExternalMatchRecord`),
+/// omitting the display-only fields `ExternalTrackRecord` carries for local
+/// UI use (title, artist, album, ...) that the merge logic never reads.
+#[derive(Debug, Clone)]
+pub struct ExternalMatchPeer {
+    pub provider:          String,
+    pub provider_track_id: String,
+    pub source:            String,
+    pub matched_hash:      Option<String>,
+    pub confidence:        Option<f32>,
+    pub updated_at:        i64,
+}
+
+/// Peer-side input for `merge_external_match_state` — mirrors
+/// `crates/sync`'s `RejectionRecord`.
+#[derive(Debug, Clone)]
+pub struct RejectionPeer {
+    pub external_id: String,
+    pub hash:        String,
+    pub active:      bool,
+    pub updated_at:  i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
@@ -332,12 +380,12 @@ impl Database {
     pub async fn remove_track(&self, hash: &str) -> Result<(), StorageError> {
         sqlx::query("DELETE FROM tracks WHERE hash = ?")
             .bind(hash).execute(&self.pool).await?;
-        // Demote any Spotify track that was silently linked to this hash back
+        // Demote any external track that was silently linked to this hash back
         // to an external row, rather than leaving a dangling reference.
         sqlx::query(
-            "UPDATE spotify_tracks SET matched_hash = NULL, confidence = NULL WHERE matched_hash = ?"
+            "UPDATE external_tracks SET matched_hash = NULL, confidence = NULL, updated_at = ? WHERE matched_hash = ?"
         )
-        .bind(hash).execute(&self.pool).await?;
+        .bind(unix_now()).bind(hash).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -348,24 +396,24 @@ impl Database {
         Ok(rows.into_iter().map(|(h,)| h).collect())
     }
 
-    // ── Spotify tracks ────────────────────────────────────────────────────────
+    // ── External-provider tracks ─────────────────────────────────────────────
 
-    /// Upsert imported Spotify tracks. Never touches `matched_hash`/`confidence`
+    /// Upsert imported external tracks. Never touches `matched_hash`/`confidence`
     /// so re-importing a playlist can't clobber an existing manual link/unlink
-    /// decision made by the user. Conflict target is `(spotify_id, source)`,
-    /// not `spotify_id` alone — the same Spotify track can appear in several
-    /// playlists (or in a playlist and Liked Songs), and each occurrence needs
-    /// its own row so importing one playlist can't reassign a shared track's
-    /// `source` away from another playlist it's also in.
-    pub async fn upsert_spotify_tracks(&self, tracks: &[NewSpotifyTrack]) -> Result<(), StorageError> {
+    /// decision made by the user. Conflict target is `(provider, provider_track_id,
+    /// source)`, not `(provider, provider_track_id)` alone — the same track can
+    /// appear in several playlists (or in a playlist and Liked Songs), and each
+    /// occurrence needs its own row so importing one playlist can't reassign a
+    /// shared track's `source` away from another playlist it's also in.
+    pub async fn upsert_external_tracks(&self, tracks: &[NewExternalTrack]) -> Result<(), StorageError> {
         let now = unix_now();
         let mut tx = self.pool.begin().await?;
         for t in tracks {
             sqlx::query(
-                "INSERT INTO spotify_tracks
-                 (spotify_id, title, artist, album, duration_ms, isrc, artwork_url, source, matched_hash, confidence, imported_at, position)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
-                 ON CONFLICT(spotify_id, source) DO UPDATE SET
+                "INSERT INTO external_tracks
+                 (provider, provider_track_id, title, artist, album, duration_ms, isrc, artwork_url, source, matched_hash, confidence, imported_at, position, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+                 ON CONFLICT(provider, provider_track_id, source) DO UPDATE SET
                    title       = excluded.title,
                    artist      = excluded.artist,
                    album       = excluded.album,
@@ -374,9 +422,9 @@ impl Database {
                    artwork_url = excluded.artwork_url,
                    position    = excluded.position"
             )
-            .bind(&t.spotify_id).bind(&t.title).bind(&t.artist)
+            .bind(&t.provider).bind(&t.provider_track_id).bind(&t.title).bind(&t.artist)
             .bind(&t.album).bind(t.duration_ms).bind(&t.isrc)
-            .bind(&t.artwork_url).bind(&t.source).bind(now).bind(t.position)
+            .bind(&t.artwork_url).bind(&t.source).bind(now).bind(t.position).bind(now)
             .execute(&mut *tx).await?;
         }
         tx.commit().await?;
@@ -384,42 +432,150 @@ impl Database {
     }
 
     /// Ordered by `(source, position)` so a client-side filter by `source`
-    /// yields tracks already in that source's native (Spotify) order.
-    pub async fn get_spotify_tracks(&self) -> Result<Vec<SpotifyTrackRecord>, StorageError> {
-        Ok(sqlx::query_as::<_, SpotifyTrackRecord>(
-            "SELECT * FROM spotify_tracks ORDER BY source, position"
+    /// yields tracks already in that source's native order.
+    pub async fn get_external_tracks(&self) -> Result<Vec<ExternalTrackRecord>, StorageError> {
+        Ok(sqlx::query_as::<_, ExternalTrackRecord>(
+            "SELECT * FROM external_tracks ORDER BY source, position"
         )
         .fetch_all(&self.pool).await?)
     }
 
-    /// Set (or clear, passing `None, None`) a Spotify track's link to a local
-    /// track hash. Shared by auto-matching, manual linking, and unlinking.
-    pub async fn set_spotify_track_match(
+    /// Set (or clear, passing `None, None`) an external track's link to a
+    /// local track hash. Shared by auto-matching, manual linking, and
+    /// unlinking. Requires `source` (not just `provider`/`provider_track_id`)
+    /// since the primary key includes it — the same external track can be
+    /// imported into multiple playlists on one device, each with its own
+    /// independent link.
+    pub async fn set_external_track_match(
         &self,
-        spotify_id: &str,
-        hash:       Option<&str>,
-        confidence: Option<f32>,
+        provider:           &str,
+        provider_track_id:  &str,
+        source:             &str,
+        hash:               Option<&str>,
+        confidence:         Option<f32>,
     ) -> Result<(), StorageError> {
-        sqlx::query("UPDATE spotify_tracks SET matched_hash = ?, confidence = ? WHERE spotify_id = ?")
-            .bind(hash).bind(confidence).bind(spotify_id)
-            .execute(&self.pool).await?;
+        let now = unix_now();
+        sqlx::query(
+            "UPDATE external_tracks SET matched_hash = ?, confidence = ?, updated_at = ?
+             WHERE provider = ? AND provider_track_id = ? AND source = ?"
+        )
+        .bind(hash).bind(confidence).bind(now)
+        .bind(provider).bind(provider_track_id).bind(source)
+        .execute(&self.pool).await?;
         Ok(())
+    }
+
+    /// Full local dump of external-track match state, for a peer's
+    /// opportunistic pull over `/external_matches` (see `crates/sync`). No
+    /// incremental diffing — these tables are small and this only runs over
+    /// a LAN.
+    pub async fn get_external_match_state(
+        &self,
+    ) -> Result<(Vec<ExternalTrackRecord>, Vec<TrackRejectionRecord>), StorageError> {
+        let tracks = self.get_external_tracks().await?;
+        let rejections: Vec<TrackRejectionRecord> = sqlx::query_as(
+            "SELECT * FROM track_rejections"
+        )
+        .fetch_all(&self.pool).await?;
+        Ok((tracks, rejections))
+    }
+
+    /// Merges a peer's external-track match state into the local tables,
+    /// applying the precedence rule: a manual decision (`confidence IS NULL`)
+    /// is only ever overwritten by another manual decision; among rows of the
+    /// same provenance, newer `updated_at` wins (an exact tie keeps local, to
+    /// avoid oscillation between peers). `track_rejections` has no
+    /// provenance field, so its `active` flag uses newer-wins-tie-favors-active
+    /// only. Rows the peer knows about that don't exist locally are skipped —
+    /// this device hasn't imported that playlist yet, so there's nothing to
+    /// reconcile. Returns the number of local rows actually changed.
+    ///
+    /// Takes the lightweight `ExternalMatchPeer`/`RejectionPeer` shapes rather
+    /// than the full local record types, since a sync-layer caller only ever
+    /// has the slim wire fields (`crates/sync`'s `ExternalMatchRecord`/
+    /// `RejectionRecord`) to offer — not the display-only fields (title,
+    /// artist, ...) those wire records deliberately omit.
+    pub async fn merge_external_match_state(
+        &self,
+        peer_tracks:     &[ExternalMatchPeer],
+        peer_rejections: &[RejectionPeer],
+    ) -> Result<u32, StorageError> {
+        let mut changed = 0u32;
+        let mut tx = self.pool.begin().await?;
+
+        for peer in peer_tracks {
+            let local: Option<ExternalTrackRecord> = sqlx::query_as(
+                "SELECT * FROM external_tracks WHERE provider = ? AND provider_track_id = ? AND source = ?"
+            )
+            .bind(&peer.provider).bind(&peer.provider_track_id).bind(&peer.source)
+            .fetch_optional(&mut *tx).await?;
+
+            let Some(local) = local else { continue };
+
+            let peer_wins = match (local.confidence.is_none(), peer.confidence.is_none()) {
+                (true, false) => false,
+                (false, true) => true,
+                _ => peer.updated_at > local.updated_at,
+            };
+
+            if peer_wins && (local.matched_hash != peer.matched_hash || local.confidence != peer.confidence) {
+                sqlx::query(
+                    "UPDATE external_tracks SET matched_hash = ?, confidence = ?, updated_at = ?
+                     WHERE provider = ? AND provider_track_id = ? AND source = ?"
+                )
+                .bind(&peer.matched_hash).bind(peer.confidence).bind(peer.updated_at)
+                .bind(&peer.provider).bind(&peer.provider_track_id).bind(&peer.source)
+                .execute(&mut *tx).await?;
+                changed += 1;
+            }
+        }
+
+        for peer in peer_rejections {
+            let local: Option<TrackRejectionRecord> = sqlx::query_as(
+                "SELECT * FROM track_rejections WHERE external_id = ? AND hash = ?"
+            )
+            .bind(&peer.external_id).bind(&peer.hash)
+            .fetch_optional(&mut *tx).await?;
+
+            let Some(local) = local else { continue };
+
+            let peer_wins = match peer.updated_at.cmp(&local.updated_at) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Less => false,
+                std::cmp::Ordering::Equal => peer.active && !local.active,
+            };
+
+            if peer_wins && local.active != peer.active {
+                sqlx::query(
+                    "UPDATE track_rejections SET active = ?, updated_at = ? WHERE external_id = ? AND hash = ?"
+                )
+                .bind(peer.active).bind(peer.updated_at)
+                .bind(&peer.external_id).bind(&peer.hash)
+                .execute(&mut *tx).await?;
+                changed += 1;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(changed)
     }
 
     // ── Track rejections ─────────────────────────────────────────────────────
     // Provider-agnostic "this match is wrong" blacklist, keyed by a
     // provider-prefixed `external_id` (e.g. "spotify:<spotify_id>") rather
-    // than a spotify_tracks foreign key. See migration 0013 for rationale.
+    // than an external_tracks foreign key. See migration 0013 for rationale.
 
     /// Records that `hash` must never again be suggested/linked for
-    /// `external_id`, regardless of match confidence.
+    /// `external_id`, regardless of match confidence. Soft-delete (`active`)
+    /// rather than a hard insert-or-ignore, so `remove_track_rejection`'s
+    /// reversal has a timestamp a peer can sync and converge on.
     pub async fn add_track_rejection(&self, external_id: &str, hash: &str) -> Result<(), StorageError> {
         let now = unix_now();
         sqlx::query(
-            "INSERT INTO track_rejections (external_id, hash, rejected_at) VALUES (?, ?, ?)
-             ON CONFLICT(external_id, hash) DO NOTHING"
+            "INSERT INTO track_rejections (external_id, hash, rejected_at, active, updated_at) VALUES (?, ?, ?, 1, ?)
+             ON CONFLICT(external_id, hash) DO UPDATE SET active = 1, updated_at = excluded.updated_at"
         )
-        .bind(external_id).bind(hash).bind(now)
+        .bind(external_id).bind(hash).bind(now).bind(now)
         .execute(&self.pool).await?;
         Ok(())
     }
@@ -428,7 +584,7 @@ impl Database {
     /// these from consideration even if they'd otherwise score above threshold.
     pub async fn get_rejected_hashes(&self, external_id: &str) -> Result<Vec<String>, StorageError> {
         let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT hash FROM track_rejections WHERE external_id = ?"
+            "SELECT hash FROM track_rejections WHERE external_id = ? AND active = 1"
         )
         .bind(external_id).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|(h,)| h).collect())
@@ -437,9 +593,12 @@ impl Database {
     /// Reverses `add_track_rejection` — for undoing an accidental reject
     /// within the same session, so the pairing goes back to fully normal
     /// (not just re-linked, but eligible for auto-suggestion again too).
+    /// Soft-delete (flips `active`) rather than a hard `DELETE`, so a peer
+    /// can learn the reversal happened instead of seeing the row vanish.
     pub async fn remove_track_rejection(&self, external_id: &str, hash: &str) -> Result<(), StorageError> {
-        sqlx::query("DELETE FROM track_rejections WHERE external_id = ? AND hash = ?")
-            .bind(external_id).bind(hash)
+        let now = unix_now();
+        sqlx::query("UPDATE track_rejections SET active = 0, updated_at = ? WHERE external_id = ? AND hash = ?")
+            .bind(now).bind(external_id).bind(hash)
             .execute(&self.pool).await?;
         Ok(())
     }

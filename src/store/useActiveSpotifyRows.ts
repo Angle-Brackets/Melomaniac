@@ -16,11 +16,11 @@ export function useActiveSpotifyRows(source: string | null): SpotifyRow[] {
     return importedTracks
       .filter(r => r.source === source)
       .map((record): SpotifyRow => {
-        const review = reviewTracks[record.spotify_id]
+        const review = reviewTracks[record.provider_track_id]
         if (review) return { kind: 'review', review, record }
         const local = record.matched_hash ? tracksByHash.get(record.matched_hash) : undefined
         return local
-          ? { kind: 'local', track: local, spotifyId: record.spotify_id }
+          ? { kind: 'local', track: local, spotifyId: record.provider_track_id }
           : { kind: 'external', record }
       })
   }, [source, importedTracks, reviewTracks, tracks])
