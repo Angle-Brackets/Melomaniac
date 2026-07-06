@@ -57,3 +57,14 @@ public func meloOAuthAuthenticate(
         session.start()
     }
 }
+
+// Called once Rust has an answer (from the loopback listener or the session
+// itself), so the sheet doesn't linger open on a page that's already served
+// its purpose.
+@_cdecl("melo_oauth_dismiss")
+public func meloOAuthDismiss() {
+    DispatchQueue.main.async {
+        authSession?.cancel()
+        authSession = nil
+    }
+}

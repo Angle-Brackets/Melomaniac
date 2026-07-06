@@ -1,9 +1,19 @@
 use crate::OAuthBridge;
+use std::net::TcpListener;
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::time::Duration;
 
-const REDIRECT_SCHEME: &str = "melomaniac";
-const REDIRECT_URI: &str = "melomaniac://oauth-callback";
+const REDIRECT_PORT: u16 = 17343;
+const REDIRECT_URI: &str = "http://127.0.0.1:17343/callback";
+
+// `ASWebAuthenticationSession` requires a callback URL scheme, but Spotify's
+// 2025 redirect URI security rules no longer accept custom schemes as a
+// redirect_uri — only HTTPS or a loopback address. So the real redirect goes
+// to the loopback TCP listener in `authenticate` below, exactly like desktop;
+// this placeholder scheme is never expected to actually appear in a
+// navigated URL. It only lets the session's completion handler report the
+// user manually cancelling the sheet.
+const PLACEHOLDER_SCHEME: &str = "melomaniac";
 
 unsafe extern "C" {
     fn melo_oauth_authenticate(
@@ -11,6 +21,7 @@ unsafe extern "C" {
         scheme: *const std::ffi::c_char,
         callback: extern "C" fn(*const std::ffi::c_char, *const std::ffi::c_char),
     );
+    fn melo_oauth_dismiss();
 }
 
 /// Called from Swift so `ASWebAuthenticationSession` state messages appear in
@@ -26,9 +37,10 @@ pub extern "C" fn melo_oauth_log(msg: *const std::ffi::c_char) {
 // ever in flight, so the pending result channel is shared via a process-global.
 static PENDING: OnceLock<Mutex<Option<mpsc::Sender<Result<String, String>>>>> = OnceLock::new();
 
-// Swift hands back the full callback URL (or an error string); this strips
-// it down to just the query string so callers get the same shape as
-// desktop's `DesktopOAuthBridge`.
+// Fires only when the user cancels/dismisses the sheet manually (or, in the
+// unlikely case the placeholder scheme is somehow matched, with a URL) — the
+// success path is driven independently by the loopback listener spawned in
+// `authenticate`, whichever resolves first wins the race.
 extern "C" fn on_complete(url_ptr: *const std::ffi::c_char, err_ptr: *const std::ffi::c_char) {
     let result = if !url_ptr.is_null() {
         let full = unsafe { std::ffi::CStr::from_ptr(url_ptr) }
@@ -70,15 +82,30 @@ impl OAuthBridge for IosOAuthBridge {
     }
 
     fn authenticate(&self, auth_url: &str) -> Result<String, String> {
+        let listener = TcpListener::bind(("127.0.0.1", REDIRECT_PORT))
+            .map_err(|e| format!("failed to bind loopback callback listener: {e}"))?;
+
         let (tx, rx) = mpsc::channel();
         PENDING.get_or_init(|| Mutex::new(None));
-        *PENDING.get().unwrap().lock().unwrap() = Some(tx);
+        *PENDING.get().unwrap().lock().unwrap() = Some(tx.clone());
+
+        let listener_tx = tx.clone();
+        std::thread::spawn(move || {
+            let _ = listener_tx.send(crate::loopback::accept_and_parse(listener));
+        });
 
         let url_c = std::ffi::CString::new(auth_url).map_err(|e| e.to_string())?;
-        let scheme_c = std::ffi::CString::new(REDIRECT_SCHEME).unwrap();
+        let scheme_c = std::ffi::CString::new(PLACEHOLDER_SCHEME).unwrap();
         unsafe { melo_oauth_authenticate(url_c.as_ptr(), scheme_c.as_ptr(), on_complete) };
 
-        rx.recv_timeout(Duration::from_secs(120))
-            .map_err(|_| "timed out waiting for authorization".to_string())?
+        let result = rx
+            .recv_timeout(Duration::from_secs(120))
+            .map_err(|_| "timed out waiting for authorization".to_string())?;
+
+        // Close the sheet once we have an answer, whether it came from the
+        // loopback listener (normal success) or the session itself (cancel).
+        unsafe { melo_oauth_dismiss() };
+
+        result
     }
 }
