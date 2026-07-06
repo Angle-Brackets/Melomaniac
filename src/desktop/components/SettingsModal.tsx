@@ -32,6 +32,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
   const refreshLivePeers    = useStore(s => s.refreshLivePeers);
   const refreshKnownDevices = useStore(s => s.refreshKnownDevices);
   const openPeerManifest    = useStore(s => s.openPeerManifest);
+  const syncWithPeer        = useStore(s => s.syncWithPeer);
   const spotifyConnected    = useStore(s => s.spotifyConnected);
   const spotifyAccount      = useStore(s => s.spotifyAccount);
   const connectSpotify      = useStore(s => s.connectSpotify);
@@ -44,6 +45,16 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
   const [editingKey,  setEditingKey]  = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const editInputRef = useRef<HTMLInputElement>(null);
+  const [syncingKeys, setSyncingKeys] = useState<Set<string>>(new Set());
+
+  const runSyncWithPeer = async (publicKeyB64: string) => {
+    setSyncingKeys(prev => new Set(prev).add(publicKeyB64));
+    try {
+      await syncWithPeer(publicKeyB64);
+    } finally {
+      setSyncingKeys(prev => { const next = new Set(prev); next.delete(publicKeyB64); return next; });
+    }
+  };
 
   useEffect(() => { if (editingKey) editInputRef.current?.focus(); }, [editingKey]);
 
@@ -304,7 +315,14 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                   )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <button className="btn btn-xs btn-primary" onClick={() => openPeerManifest(peer)}>Sync</button>
+                  <button
+                    className="btn btn-xs btn-primary"
+                    disabled={syncingKeys.has(peer.public_key_b64)}
+                    onClick={() => runSyncWithPeer(peer.public_key_b64)}
+                  >
+                    {syncingKeys.has(peer.public_key_b64) ? 'Syncing…' : 'Sync Now'}
+                  </button>
+                  <button className="btn btn-xs btn-ghost text-[10px] text-mm-t2" onClick={() => openPeerManifest(peer)}>Browse</button>
                   <button
                     className="btn btn-xs btn-ghost text-[10px] text-mm-t2"
                     onClick={() => invoke('sync_remove_device', { publicKeyB64: peer.public_key_b64 }).then(refreshKnownDevices).catch(console.error)}

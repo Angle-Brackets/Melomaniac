@@ -122,8 +122,8 @@
 - [x] `PeerPlaylistsModal` — browse and download playlists from a live peer; uses `sync_fetch_peer_manifest` + `sync_playlist` / `sync_playlist_branches`
 
 #### Stubs / not yet implemented
-- [ ] `sync_with_peer` — registered as a Tauri command but the `DesktopSyncBridge` implementation returns an empty `SyncReport` (`#[allow(dead_code)]`); intended to be a full bidirectional "sync everything with this peer now" action
-- [ ] Push mechanism — sync is pull-only; each side polls the other; no active "push my local changes" path exists
+- [x] `sync_with_peer` — fully implemented on both desktop (`crates/sync/src/desktop/mod.rs`) and iOS (`crates/sync/src/ios.rs`): fetches the peer's manifest, diffs every shared playlist's branch HEADs, pulls/merges each changed branch, and aggregates the results into one `SyncReport`. Wired to a "Sync Now" button per online peer in `SettingsModal.tsx`.
+- [x] Sync direction — the mechanism is pull-based (each side downloads and merges the other's commits rather than pushing its own), but since both peers independently run the same `sync_with_peer` action, the net effect is bidirectional. There's no separate "push my changes to peer" call, but none is needed for correctness.
 - [ ] Internet/cloud fallback when no LAN peer is reachable (see Axum Self-Hosted Sync Server in P0)
 - [ ] Android sync — no `AndroidSyncBridge` implementation
 
@@ -409,12 +409,10 @@ The tree schema has an `includes` array (reserved field). After design review, p
 ### Next steps (priority order)
 
 1. **Android audio bridge** — ExoPlayer / Media3 implementation, background audio, lockscreen controls
-2. **`sync_with_peer` implementation** — complete the bidirectional full-sync command (currently a stub returning an empty `SyncReport`)
-3. **Push mechanism** — active "push my local changes to peer" path so sync is no longer poll-only
-4. **Android sync bridge** — `AndroidSyncBridge` implementation (mDNS + HTTP server)
-5. **Internet/cloud fallback** — Axum self-hosted server for sync when no LAN peer is reachable
-6. **Playlist creation on mobile** — `+` button in the Playlists tab to create a new playlist directly from the mobile UI
-7. **Track export to filesystem / iOS Files app** — export a track's CAS blob to a user-chosen location; use the iOS document picker / Files app integration
-8. **Android support** — full Android target: audio bridge, sync bridge, build pipeline, Play Store packaging
+2. **Android sync bridge** — `AndroidSyncBridge` implementation (mDNS + HTTP server)
+3. **Internet/cloud fallback** — Axum self-hosted server for sync when no LAN peer is reachable
+4. **Playlist creation on mobile** — `+` button in the Playlists tab to create a new playlist directly from the mobile UI
+5. **Track export to filesystem / iOS Files app** — export a track's CAS blob to a user-chosen location; use the iOS document picker / Files app integration
+6. **Android support** — full Android target: audio bridge, sync bridge, build pipeline, Play Store packaging
 
-*Last updated: 2026-06-16.*
+*Last updated: 2026-07-05. `sync_with_peer` (bidirectional full-sync) confirmed fully implemented on desktop + iOS and wired to a "Sync Now" button in `SettingsModal.tsx`; removed from this list.*
