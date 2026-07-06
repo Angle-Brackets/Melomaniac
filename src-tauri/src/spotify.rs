@@ -1,14 +1,13 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use melomaniac_oauth::OAuthBridge;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const CLIENT_ID: &str = "a3249b8aca7a4a499a99574751f5a9a6";
-const REDIRECT_URI: &str = "http://127.0.0.1:17342/callback";
-const REDIRECT_PORT: u16 = 17342;
 const AUTH_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 const SCOPES: &str = "playlist-read-private playlist-read-collaborative user-library-read";
@@ -17,6 +16,7 @@ const KEYRING_USER: &str = "spotify_refresh_token";
 
 pub struct SpotifyState {
     cached: Mutex<Option<CachedAccessToken>>,
+    bridge: Arc<dyn OAuthBridge>,
 }
 
 struct CachedAccessToken {
@@ -25,9 +25,10 @@ struct CachedAccessToken {
 }
 
 impl SpotifyState {
-    pub fn new() -> Self {
+    pub fn new(bridge: Arc<dyn OAuthBridge>) -> Self {
         Self {
             cached: Mutex::new(None),
+            bridge,
         }
     }
 }
@@ -51,100 +52,6 @@ fn code_challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(digest)
 }
 
-// ── Loopback OAuth callback listener ────────────────────────────────────
-
-/// Starts a one-shot HTTP listener on the fixed redirect port, waits for
-/// Spotify's browser redirect carrying `code`/`state`, and replies with a
-/// minimal HTML page telling the user they can close the tab.
-async fn wait_for_callback(expected_state: &str) -> Result<String, String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-
-    let listener = TcpListener::bind(("127.0.0.1", REDIRECT_PORT))
-        .await
-        .map_err(|e| format!("failed to bind loopback callback listener: {e}"))?;
-
-    let accept_and_parse = async {
-        loop {
-            let (mut stream, _) = listener
-                .accept()
-                .await
-                .map_err(|e| format!("callback listener accept failed: {e}"))?;
-
-            let mut buf = vec![0u8; 8192];
-            let n = stream
-                .read(&mut buf)
-                .await
-                .map_err(|e| format!("failed to read callback request: {e}"))?;
-            let request = String::from_utf8_lossy(&buf[..n]);
-
-            // Request line looks like: "GET /callback?code=...&state=... HTTP/1.1"
-            let path = request
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .unwrap_or("");
-
-            let body;
-            let result = if let Some(query) = path.split_once('?').map(|(_, q)| q) {
-                let params: std::collections::HashMap<String, String> =
-                    url::form_urlencoded::parse(query.as_bytes())
-                        .into_owned()
-                        .collect();
-
-                if let Some(err) = params.get("error") {
-                    body = format!(
-                        "<html><body><h2>Spotify authorization failed: {err}</h2>\
-                         You can close this window.</body></html>"
-                    );
-                    Some(Err(format!("Spotify returned an error: {err}")))
-                } else {
-                    match (params.get("code"), params.get("state")) {
-                        (Some(code), Some(state)) if state == expected_state => {
-                            body = "<html><body><h2>Melomaniac connected to Spotify.</h2>\
-                                    You can close this window.</body></html>"
-                                .to_string();
-                            Some(Ok(code.clone()))
-                        }
-                        (Some(_), Some(_)) => {
-                            body = "<html><body><h2>Authorization state mismatch.</h2>\
-                                    You can close this window.</body></html>"
-                                .to_string();
-                            Some(Err("state mismatch in Spotify callback".to_string()))
-                        }
-                        _ => {
-                            body = "<html><body><h2>Missing authorization code.</h2>\
-                                    You can close this window.</body></html>"
-                                .to_string();
-                            None
-                        }
-                    }
-                }
-            } else {
-                body = "<html><body><h2>Not found.</h2></body></html>".to_string();
-                None
-            };
-
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes()).await;
-            let _ = stream.shutdown().await;
-
-            if let Some(result) = result {
-                return result;
-            }
-            // Unrecognized request (e.g. favicon) — keep listening for the real callback.
-        }
-    };
-
-    tokio::time::timeout(std::time::Duration::from_secs(120), accept_and_parse)
-        .await
-        .map_err(|_| "timed out waiting for Spotify authorization".to_string())?
-}
-
 // ── Token exchange / refresh ─────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -154,12 +61,16 @@ struct TokenResponse {
     refresh_token: Option<String>,
 }
 
-async fn exchange_code(code: &str, verifier: &str) -> Result<TokenResponse, String> {
+async fn exchange_code(
+    code: &str,
+    verifier: &str,
+    redirect_uri: &str,
+) -> Result<TokenResponse, String> {
     let client = reqwest::Client::new();
     let params = [
         ("grant_type", "authorization_code"),
         ("code", code),
-        ("redirect_uri", REDIRECT_URI),
+        ("redirect_uri", redirect_uri),
         ("client_id", CLIENT_ID),
         ("code_verifier", verifier),
     ];
@@ -456,24 +367,19 @@ pub async fn spotify_debug_raw(
 
 // ── Tauri commands ────────────────────────────────────────────────────────
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[tauri::command]
-pub async fn spotify_connect(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, SpotifyState>,
-) -> Result<(), String> {
-    use tauri_plugin_shell::ShellExt;
-
+pub async fn spotify_connect(state: tauri::State<'_, SpotifyState>) -> Result<(), String> {
     let verifier = random_url_safe(64);
     let challenge = code_challenge(&verifier);
     let csrf_state = random_url_safe(16);
+    let redirect_uri = state.bridge.redirect_uri().to_string();
 
     let auth_url = url::Url::parse_with_params(
         AUTH_URL,
         &[
             ("client_id", CLIENT_ID),
             ("response_type", "code"),
-            ("redirect_uri", REDIRECT_URI),
+            ("redirect_uri", &redirect_uri),
             ("code_challenge_method", "S256"),
             ("code_challenge", &challenge),
             ("scope", SCOPES),
@@ -482,13 +388,29 @@ pub async fn spotify_connect(
     )
     .map_err(|e| format!("failed to build authorization URL: {e}"))?;
 
-    app.shell()
-        .open(auth_url.as_str(), None)
-        .map_err(|e| format!("failed to open browser: {e}"))?;
+    let bridge = Arc::clone(&state.bridge);
+    let auth_url_str = auth_url.to_string();
+    let query = tokio::task::spawn_blocking(move || bridge.authenticate(&auth_url_str))
+        .await
+        .map_err(|e| e.to_string())??;
 
-    let code = wait_for_callback(&csrf_state).await?;
-    let token_response = exchange_code(&code, &verifier).await?;
+    let params: std::collections::HashMap<String, String> =
+        url::form_urlencoded::parse(query.as_bytes())
+            .into_owned()
+            .collect();
 
+    if let Some(err) = params.get("error") {
+        return Err(format!("Spotify returned an error: {err}"));
+    }
+    let returned_state = params.get("state").ok_or("missing state in callback")?;
+    if returned_state != &csrf_state {
+        return Err("state mismatch — possible CSRF, aborting".to_string());
+    }
+    let code = params
+        .get("code")
+        .ok_or("missing authorization code in callback")?;
+
+    let token_response = exchange_code(code, &verifier, &redirect_uri).await?;
     let refresh_token = token_response
         .refresh_token
         .ok_or_else(|| "Spotify did not return a refresh token".to_string())?;
@@ -501,12 +423,6 @@ pub async fn spotify_connect(
     });
 
     Ok(())
-}
-
-#[cfg(target_os = "ios")]
-#[tauri::command]
-pub async fn spotify_connect(_state: tauri::State<'_, SpotifyState>) -> Result<(), String> {
-    Err("Spotify connect is not yet implemented on iOS".to_string())
 }
 
 #[tauri::command]

@@ -2950,6 +2950,7 @@ dependencies = [
  "discord-rich-presence",
  "keyring",
  "melomaniac-audio",
+ "melomaniac-oauth",
  "melomaniac-storage",
  "melomaniac-sync",
  "rand 0.8.6",
@@ -2982,6 +2983,14 @@ dependencies = [
  "serde_json",
  "swift-rs",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "melomaniac-oauth"
+version = "0.0.1"
+dependencies = [
+ "open",
+ "swift-rs",
 ]
 
 [[package]]
