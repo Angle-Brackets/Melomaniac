@@ -4,9 +4,9 @@
 // growing a second inline copy.
 
 import { FaSpotify } from 'react-icons/fa';
-import { FiLoader } from 'react-icons/fi';
+import { FiLoader, FiRefreshCw } from 'react-icons/fi';
 import type { SpotifyTrackRecord } from '../../store/types';
-import type { SpotifyReviewTrack } from '../../store/spotifySlice';
+import { MAX_DOWNLOAD_ATTEMPTS, type SpotifyReviewTrack } from '../../store/spotifySlice';
 import { platform } from '../../shared/platform';
 import { Icons } from '../icons';
 import { MMArt, MarqueeText } from './common';
@@ -75,9 +75,10 @@ export function ExternalTrackRow({ track, downloading, showBadge = true, onPress
 // A downloaded track whose duration didn't match Spotify's closely enough to
 // trust automatically (yt-dlp's top search hit can be a cover, extended mix,
 // etc.) — held out of the normal link flow until the user taps Keep or Discard.
-export function ReviewTrackRow({ review, onKeep, onDiscard }: {
-  review: SpotifyReviewTrack; onKeep: () => void; onDiscard: () => void;
+export function ReviewTrackRow({ review, onKeep, onDiscard, onRetry }: {
+  review: SpotifyReviewTrack; onKeep: () => void; onDiscard: () => void; onRetry: () => void;
 }) {
+  const canRetry = review.attempt < MAX_DOWNLOAD_ATTEMPTS;
   return (
     <div style={{
       minHeight: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 5px', margin: '0 10px',
@@ -94,6 +95,11 @@ export function ReviewTrackRow({ review, onKeep, onDiscard }: {
           Got {fmtDuration(review.actualMs)}, expected {fmtDuration(review.expectedMs)} — wrong track?
         </span>
       </div>
+      {canRetry && (
+        <button onClick={onRetry} title="Discard and try the next search result" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6, background: 'var(--bg-4)', border: '1px solid var(--border-2)', color: 'var(--text-1)', fontSize: 12, flexShrink: 0 }}>
+          <FiRefreshCw size={11} />
+        </button>
+      )}
       <button onClick={onKeep} style={{ padding: '5px 10px', borderRadius: 6, background: 'var(--bg-4)', border: '1px solid var(--border-2)', color: 'var(--accent-light, var(--accent))', fontSize: 12, flexShrink: 0 }}>
         Keep
       </button>

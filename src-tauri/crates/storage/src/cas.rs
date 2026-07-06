@@ -45,11 +45,25 @@ impl CasStore {
             fs::create_dir_all(parent).await?;
         }
 
-        // Atomic write: write to .tmp first, then rename into the final path.
-        // Prevents a half-written blob from being visible to concurrent readers.
-        let tmp = path.with_extension("tmp");
+        // Atomic write: write to a per-call-unique .tmp file first, then rename
+        // into the final path. Prevents a half-written blob from being visible
+        // to concurrent readers. The tmp name must be unique per call (not just
+        // per hash) — two concurrent writers of the same content (e.g. a
+        // duplicate track downloaded twice in a bulk import) would otherwise
+        // race on a shared tmp path, and the loser's rename fails with ENOENT
+        // once the winner has already moved it.
+        let tmp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
         fs::write(&tmp, data).await?;
-        fs::rename(&tmp, &path).await?;
+        if let Err(e) = fs::rename(&tmp, &path).await {
+            // Another writer for this same hash won the race and the blob now
+            // exists with identical content (same hash => same bytes) — not
+            // an error, just redundant work. Clean up our now-orphaned tmp file.
+            if path.exists() {
+                let _ = fs::remove_file(&tmp).await;
+                return Ok(hash);
+            }
+            return Err(e.into());
+        }
 
         Ok(hash)
     }

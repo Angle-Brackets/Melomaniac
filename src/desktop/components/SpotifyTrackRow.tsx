@@ -3,10 +3,10 @@
 // out once both needed the same "matched vs external" rendering instead of
 // growing a second inline copy.
 
-import { FiDownloadCloud, FiSlash, FiPlay, FiAlertTriangle, FiCheck, FiTrash2, FiLoader } from 'react-icons/fi';
+import { FiDownloadCloud, FiSlash, FiPlay, FiAlertTriangle, FiCheck, FiTrash2, FiLoader, FiRefreshCw } from 'react-icons/fi';
 import { FaSpotify } from 'react-icons/fa';
 import ScrollText from './ScrollText';
-import type { SpotifyRow } from '../../store/spotifySlice';
+import { MAX_DOWNLOAD_ATTEMPTS, type SpotifyRow } from '../../store/spotifySlice';
 
 // ── Provenance badge ──────────────────────────────────────────────────────────
 // An icon rather than a text pill — a "SPOTIFY" label on every row got noisy
@@ -84,10 +84,12 @@ interface SpotifyTrackRowProps {
   onReject:      (spotifyId: string, hash: string) => void;
   onKeepReview:    (spotifyId: string) => void;
   onDiscardReview: (spotifyId: string) => void;
+  onRetryReview:   (spotifyId: string) => void;
 }
 
-export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownloading, showBadge = true, onPlay, onGetTrack, onReject, onKeepReview, onDiscardReview }: SpotifyTrackRowProps) {
+export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownloading, showBadge = true, onPlay, onGetTrack, onReject, onKeepReview, onDiscardReview, onRetryReview }: SpotifyTrackRowProps) {
   if (row.kind === 'review') {
+    const canRetry = row.review.attempt < MAX_DOWNLOAD_ATTEMPTS;
     return (
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
@@ -101,6 +103,15 @@ export default function SpotifyTrackRow({ row, artworkUrl, isPlaying, isDownload
             Downloaded {fmtDuration(row.review.actualMs)}, expected {fmtDuration(row.review.expectedMs)} — wrong track?
           </span>
         </div>
+        {canRetry && (
+          <button
+            onClick={() => onRetryReview(row.review.spotifyId)}
+            title="Discard and try the next search result"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 5, background: 'var(--bg-4)', border: '1px solid var(--border-2)', color: 'var(--text-1)', fontSize: 10.5, cursor: 'pointer', fontFamily: "'Outfit', sans-serif", flexShrink: 0 }}
+          >
+            <FiRefreshCw size={10} />Try Another
+          </button>
+        )}
         <button
           onClick={() => onKeepReview(row.review.spotifyId)}
           title="Keep anyway"

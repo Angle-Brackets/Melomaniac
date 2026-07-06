@@ -23,6 +23,10 @@ export type SpotifyReviewTrack = {
   title:       string
   actualMs:    number
   expectedMs:  number
+  // Which ranked yt-dlp search result this download came from (1 = top hit).
+  // "Try Another" re-downloads with attempt+1 so it doesn't keep landing on
+  // the same wrong match.
+  attempt:     number
 }
 
 // Duration-mismatch tolerance for post-download review — mirrors the
@@ -30,6 +34,11 @@ export type SpotifyReviewTrack = {
 // that would have cleared the fuzzy matcher's duration gate doesn't get
 // flagged for review too.
 const REVIEW_DURATION_TOLERANCE_MS = 8_000
+
+// Caps how many alternate search results "Try Another" will work through
+// before giving up — past this, yt-dlp's ranked results are unlikely to be
+// this track at all, and the user should Keep or Discard manually instead.
+export const MAX_DOWNLOAD_ATTEMPTS = 5
 
 // A transient status message for Spotify actions (download complete, match
 // rejected, etc.), rendered bottom-center on both platforms. `action` adds a
@@ -73,9 +82,10 @@ export type SpotifySlice = {
   unlinkTrack:                   (spotifyId: string) => Promise<void>
   rejectMatch:                  (spotifyId: string, hash: string) => Promise<void>
   undoRejectMatch:              (spotifyId: string, hash: string) => Promise<void>
-  downloadAndLinkExternalTrack: (spotifyId: string) => Promise<void>
+  downloadAndLinkExternalTrack: (spotifyId: string, opts?: { skipRefresh?: boolean; attempt?: number }) => Promise<void>
   downloadAllTracks:            (source: string) => Promise<void>
   resolveReviewTrack:           (spotifyId: string, action: 'keep' | 'discard') => Promise<void>
+  retryDownload:                (spotifyId: string) => Promise<void>
   promotePlaylist:              (source: string) => Promise<void>
   showSpotifyToast:             (message: string, action?: SpotifyToast['action']) => void
 }
@@ -205,7 +215,7 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
   // Composes the existing yt-dlp download pipeline with the new link command:
   // enqueue a ytsearch1 pseudo-URL, wait for that specific job to finish, then
   // link the resulting local hash. No new download infrastructure needed.
-  downloadAndLinkExternalTrack: async (spotifyId) => {
+  downloadAndLinkExternalTrack: async (spotifyId, opts) => {
     const track = get().importedTracks.find(t => t.provider_track_id === spotifyId)
     if (!track) return
 
@@ -215,9 +225,11 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
       downloadingSpotifyIds: s.downloadingSpotifyIds.filter(id => id !== spotifyId),
     }))
 
+    const attempt = opts?.attempt ?? 1
+
     try {
-      const query = `ytsearch1:${track.artist} - ${track.title}`
-      const jobId: string = await invoke('download_enqueue', { url: query })
+      const query = `ytsearch${attempt}:${track.artist} - ${track.title}`
+      const jobId: string = await invoke('download_enqueue', { url: query, resultIndex: attempt })
 
       const done = await new Promise<{ track_hash: string; title: string; duration_ms: number }>((resolve, reject) => {
         const subs = [
@@ -251,9 +263,15 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
       // once fetched — without this, a row that already got its (blank/wrong)
       // artwork fetched right as the file finished downloading, before this
       // metadata call overwrote it with Spotify's art, would stay blank until
-      // the next app restart.
-      get().bumpArtworkVersion()
-      await get().loadLibrary()
+      // the next app restart. Batch callers (downloadAllTracks) skip this per
+      // track and do it once at the end instead — otherwise a large playlist
+      // triggers a full artwork-cache clear + full library reload per track,
+      // which compounds into an O(n^2) IPC/render storm that can crash the
+      // webview.
+      if (!opts?.skipRefresh) {
+        get().bumpArtworkVersion()
+        await get().loadLibrary()
+      }
 
       const mismatch = Math.abs(done.duration_ms - track.duration_ms) > REVIEW_DURATION_TOLERANCE_MS
       if (mismatch) {
@@ -263,6 +281,7 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
             [spotifyId]: {
               spotifyId, hash: done.track_hash, title: done.title,
               actualMs: done.duration_ms, expectedMs: track.duration_ms,
+              attempt,
             },
           },
         }))
@@ -276,17 +295,32 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
     }
   },
 
-  // Downloads/links every currently-external (unmatched) track for `source`
-  // in parallel — the "Download All Tracks" action. Skips ids already mid-
-  // download (e.g. a manual single-track download the user kicked off just
-  // before hitting "Download All") so they don't get double-enqueued.
+  // Downloads/links every currently-external (unmatched) track for `source` —
+  // the "Download All Tracks" action. Skips ids already mid-download (e.g. a
+  // manual single-track download the user kicked off just before hitting
+  // "Download All") so they don't get double-enqueued.
+  //
+  // Runs in bounded batches (matching the backend's yt-dlp process semaphore)
+  // rather than firing every track at once: an unbounded Promise.all here
+  // registered two event listeners per track and reloaded the entire library
+  // + cleared the whole artwork cache per completed track, which for a large
+  // playlist (100+ tracks) compounded into an O(n^2) IPC/render storm that
+  // could crash the app. Per-track refresh is skipped and done once at the end.
   downloadAllTracks: async (source) => {
     const reviewIds = new Set(Object.keys(get().reviewTracks))
     const ids = get().importedTracks
       .filter(t => t.source === source && !t.matched_hash && !reviewIds.has(t.provider_track_id))
       .map(t => t.provider_track_id)
       .filter(id => !get().downloadingSpotifyIds.includes(id))
-    await Promise.all(ids.map(id => get().downloadAndLinkExternalTrack(id)))
+
+    const BATCH_SIZE = 3
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = ids.slice(i, i + BATCH_SIZE)
+      await Promise.all(batch.map(id => get().downloadAndLinkExternalTrack(id, { skipRefresh: true })))
+    }
+
+    get().bumpArtworkVersion()
+    await get().loadLibrary()
   },
 
   // Resolve a duration-mismatch review: "keep" links the download anyway
@@ -308,6 +342,30 @@ export const createSpotifySlice: StateCreator<StoreState, [], [], SpotifySlice> 
       const { [spotifyId]: _removed, ...rest } = s.reviewTracks
       return { reviewTracks: rest }
     })
+  },
+
+  // Discards the current (wrong) download and re-enqueues one against the
+  // next-ranked yt-dlp search result instead of the same top hit — a plain
+  // Discard leaves the track external, and re-clicking "Get track" reissues
+  // the identical search query, so without this a bad top match is a
+  // permanent dead end rather than something the user can work around.
+  retryDownload: async (spotifyId) => {
+    const review = get().reviewTracks[spotifyId]
+    if (!review) return
+
+    if (review.attempt >= MAX_DOWNLOAD_ATTEMPTS) {
+      showSpotifyToast(`No more alternates to try for "${review.title}" — Keep or Discard instead`)
+      return
+    }
+
+    await invoke('library_remove_track', { hash: review.hash })
+
+    set(s => {
+      const { [spotifyId]: _removed, ...rest } = s.reviewTracks
+      return { reviewTracks: rest }
+    })
+
+    await get().downloadAndLinkExternalTrack(spotifyId, { attempt: review.attempt + 1 })
   },
 
   // Promotes a fully-linked virtual Spotify playlist into a real local

@@ -33,6 +33,7 @@ export default function SpotifyPlaylistView({ source, artworkUrls, onPlayTrack }
   const promotePlaylist        = useStore(s => s.promotePlaylist);
   const rejectMatch            = useStore(s => s.rejectMatch);
   const resolveReviewTrack     = useStore(s => s.resolveReviewTrack);
+  const retryDownload          = useStore(s => s.retryDownload);
 
   const playlistMeta = source === 'liked' ? null : spotifyPlaylists.find(p => `playlist:${p.id}` === source) ?? null;
   const name          = source === 'liked' ? 'Liked Songs' : playlistMeta?.name ?? 'Spotify Playlist';
@@ -174,6 +175,7 @@ export default function SpotifyPlaylistView({ source, artworkUrls, onPlayTrack }
               onReject={(id, h) => rejectMatch(id, h)}
               onKeepReview={id => resolveReviewTrack(id, 'keep')}
               onDiscardReview={id => resolveReviewTrack(id, 'discard')}
+              onRetryReview={id => retryDownload(id).catch(console.error)}
             />
           );
         })}
