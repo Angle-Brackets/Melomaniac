@@ -251,7 +251,7 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
               </div>
               {spotifyConnected ? (
                 <button
-                  className="btn btn-xs btn-ghost text-[10px] text-mm-t2 shrink-0"
+                  className="rounded-full bg-mm-4 border-[0.5px] border-mm-b2 text-mm-t2 text-xs font-semibold px-3 py-1.5 shrink-0"
                   onClick={() => disconnectSpotify().catch(console.error)}
                 >
                   Disconnect

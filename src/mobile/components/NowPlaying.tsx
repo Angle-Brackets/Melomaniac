@@ -656,10 +656,18 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
     setQueueExpanded(e => {
       const next = !e;
       localStorage.setItem('mm_queue_expanded', String(next));
-      if (!next) setListScrolled(false);
       return next;
     });
   }, []);
+
+  // Collapsing the tracklist should bring the NavBar back right away, instead
+  // of waiting on the scroll-inactivity timer below — that timer is only for
+  // hiding the bar while actively scrolling an *expanded* list.
+  useEffect(() => {
+    if (queueExpanded) return;
+    if (inactivityRef.current) { clearTimeout(inactivityRef.current); inactivityRef.current = null; }
+    setListScrolled(false);
+  }, [queueExpanded]);
 
   const programmaticScrollRef = useRef(false);
 
