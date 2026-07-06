@@ -84,6 +84,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
   const promotePlaylist              = useStore(s => s.promotePlaylist);
   const rejectMatch                  = useStore(s => s.rejectMatch);
   const resolveReviewTrack           = useStore(s => s.resolveReviewTrack);
+  const retryDownload                = useStore(s => s.retryDownload);
   const closeSpotifyPlaylist         = useStore(s => s.closeSpotifyPlaylist);
 
   const loadedHash                        = useStore(s => s.loadedTrackHash);
@@ -235,6 +236,7 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
                   review={row.review}
                   onKeep={() => resolveReviewTrack(row.review.spotifyId, 'keep')}
                   onDiscard={() => resolveReviewTrack(row.review.spotifyId, 'discard')}
+                  onRetry={() => retryDownload(row.review.spotifyId).catch(console.error)}
                 />
               );
             }

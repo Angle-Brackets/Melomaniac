@@ -101,12 +101,13 @@ pub(crate) fn parse_filepath(line: &[u8]) -> Option<String> {
 // ── Core download task ────────────────────────────────────────────────────────
 
 async fn run_download(
-    id:      String,
-    url:     String,
-    app:     AppHandle,
-    mgr:     Arc<DownloadManager>,
-    storage: Arc<StorageState>,
-    cancel:  tokio::sync::oneshot::Receiver<()>,
+    id:           String,
+    url:          String,
+    result_index: Option<u32>,
+    app:          AppHandle,
+    mgr:          Arc<DownloadManager>,
+    storage:      Arc<StorageState>,
+    cancel:       tokio::sync::oneshot::Receiver<()>,
 ) {
     let _permit = mgr.semaphore.acquire().await.unwrap();
 
@@ -115,7 +116,7 @@ async fn run_download(
         id: id.clone(), pct: 0.0, status: "downloading".into(), title: None,
     }).ok();
 
-    let result = do_download(&id, &url, &app, &mgr, &storage, cancel).await;
+    let result = do_download(&id, &url, result_index, &app, &mgr, &storage, cancel).await;
 
     mgr.cancels.lock().unwrap().remove(&id);
 
@@ -132,33 +133,47 @@ async fn run_download(
 }
 
 async fn do_download(
-    id:      &str,
-    url:     &str,
-    app:     &AppHandle,
-    mgr:     &Arc<DownloadManager>,
-    storage: &Arc<StorageState>,
+    id:           &str,
+    url:          &str,
+    result_index: Option<u32>,
+    app:          &AppHandle,
+    mgr:          &Arc<DownloadManager>,
+    storage:      &Arc<StorageState>,
     mut cancel: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(String, String, i64), String> {
     let tmp_template = format!("/tmp/melomaniac_{}.%(ext)s", id);
 
+    let mut args: Vec<String> = vec![
+        "--format".into(),         "bestaudio[ext=m4a]/bestaudio".into(),
+        "--extract-audio".into(),
+        "--audio-format".into(),   "m4a".into(),    // produces M4A/AAC — lofty can read/write these tags
+        "--audio-quality".into(),  "0".into(),      // best quality; no re-encode when source is already AAC
+        "--output".into(),         tmp_template.clone(),
+        "--newline".into(),
+        "--js-runtimes".into(),    "node,deno".into(),
+        "--embed-metadata".into(), // Write title/artist/album tags into the downloaded file
+        // Print title and final path on separate labelled lines so we can
+        // reliably parse them from the mixed stdout stream
+        "--print".into(),          "before_dl:MELO_TITLE:%(title)s".into(),
+        "--print".into(),          "after_move:MELO_PATH:%(filepath)s".into(),
+    ];
+
+    // For a `ytsearchN:query` url, yt-dlp treats the N results as a playlist
+    // and would download all of them by default — --playlist-items restricts
+    // to just the one at `result_index`, so a retry after a wrong top match
+    // can pick the next-ranked search result instead of re-downloading the
+    // same (wrong) one forever.
+    if let Some(n) = result_index {
+        args.push("--playlist-items".into());
+        args.push(n.to_string());
+    }
+
+    args.push(url.to_string());
+
     let (mut rx, _child) = app.shell()
         .sidecar("melomaniac-ytdlp")
         .map_err(|e| e.to_string())?
-        .args([
-            "--format",         "bestaudio[ext=m4a]/bestaudio",
-            "--extract-audio",
-            "--audio-format",   "m4a",    // produces M4A/AAC — lofty can read/write these tags
-            "--audio-quality",  "0",      // best quality; no re-encode when source is already AAC
-            "--output",         &tmp_template,
-            "--newline",
-            "--js-runtimes",    "node,deno",
-            "--embed-metadata", // Write title/artist/album tags into the downloaded file
-            // Print title and final path on separate labelled lines so we can
-            // reliably parse them from the mixed stdout stream
-            "--print",          "before_dl:MELO_TITLE:%(title)s",
-            "--print",          "after_move:MELO_PATH:%(filepath)s",
-            url,
-        ])
+        .args(args)
         .spawn()
         .map_err(|e| e.to_string())?;
 
@@ -327,10 +342,11 @@ mod tests {
 
 #[tauri::command]
 pub async fn download_enqueue(
-    url:     String,
-    app:     AppHandle,
-    mgr:     tauri::State<'_, Arc<DownloadManager>>,
-    storage: tauri::State<'_, StorageState>,
+    url:          String,
+    result_index: Option<u32>,
+    app:          AppHandle,
+    mgr:          tauri::State<'_, Arc<DownloadManager>>,
+    storage:      tauri::State<'_, StorageState>,
 ) -> Result<String, String> {
     let id  = uuid::Uuid::new_v4().to_string();
     let job = DownloadJob {
@@ -355,7 +371,7 @@ pub async fn download_enqueue(
 
     let id_ret = id.clone();
     tokio::spawn(async move {
-        run_download(id, url, app, mgr_arc, storage_arc, cancel_rx).await;
+        run_download(id, url, result_index, app, mgr_arc, storage_arc, cancel_rx).await;
     });
 
     Ok(id_ret)
