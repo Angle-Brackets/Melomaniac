@@ -16,3 +16,15 @@ pub trait OAuthBridge: Send + Sync {
 pub mod desktop;
 #[cfg(target_os = "ios")]
 pub mod ios;
+
+// Shared by desktop and iOS — both catch the provider's OAuth redirect via a
+// real loopback TCP listener rather than a custom URL scheme (Spotify's 2025
+// redirect URI security rules no longer accept custom schemes; loopback
+// addresses remain an explicit exception).
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "ios"
+))]
+mod loopback;

@@ -28,7 +28,14 @@ client secret.
 - `CLIENT_ID = "a3249b8aca7a4a499a99574751f5a9a6"`
 - Desktop redirect URI: `http://127.0.0.1:17342/callback` (fixed port —
   Spotify requires an exact redirect URI match, no wildcard ports)
-- iOS redirect URI (planned): `melomaniac://spotify-callback`
+- iOS redirect URI: `http://127.0.0.1:17343/callback` (loopback, same
+  mechanism as desktop, different fixed port). A custom URL scheme
+  (`melomaniac://oauth-callback`) was tried first, but Spotify's 2025
+  redirect URI security requirements no longer accept custom schemes —
+  only HTTPS or a loopback address. `ASWebAuthenticationSession` still
+  presents the login sheet on iOS, but the actual redirect is caught by a
+  real on-device TCP listener (`melomaniac-oauth` crate's `loopback`
+  module), not by the session's scheme-interception mechanism.
 - Scopes (Phase 1): `playlist-read-private playlist-read-collaborative user-library-read`
 
 ### Desktop flow
