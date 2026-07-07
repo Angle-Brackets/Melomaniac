@@ -318,6 +318,12 @@ impl Database {
         Ok(())
     }
 
+    pub async fn update_mime_type(&self, hash: &str, mime_type: &str) -> Result<(), StorageError> {
+        sqlx::query("UPDATE tracks SET mime_type = ? WHERE hash = ?")
+            .bind(mime_type).bind(hash).execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Direct title/artist/album correction, no hash change and no commit/DAG
     /// involvement — for overwriting yt-dlp's guessed tags with known-accurate
     /// metadata (e.g. from a Spotify match) right after a fresh download,

@@ -26,6 +26,27 @@ impl CasStore {
         self.blob_path(hash).exists()
     }
 
+    /// Size in bytes of the blob at `hash`, or `None` if it doesn't exist.
+    pub fn blob_size(&self, hash: &str) -> Option<u64> {
+        std::fs::metadata(self.blob_path(hash)).ok().map(|m| m.len())
+    }
+
+    /// Delete the blob at `hash`, returning its size in bytes, or `None` if it
+    /// didn't exist. Irreversible — callers must have already established the
+    /// blob is unreachable from any commit, tree, or library row.
+    pub fn delete_blob(&self, hash: &str) -> Result<Option<u64>, StorageError> {
+        let path = self.blob_path(hash);
+        match std::fs::metadata(&path) {
+            Ok(meta) => {
+                let size = meta.len();
+                std::fs::remove_file(&path)?;
+                Ok(Some(size))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Exposes the objects directory for the indexer's CAS walk.
     pub fn objects_dir(&self) -> &PathBuf {
         &self.objects_dir

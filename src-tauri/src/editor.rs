@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use melomaniac_storage::{
     editor::{read_metadata, scan_directory, write_metadata_to_file, edit_cas_track},
     read_cas_metadata, set_cas_artwork, replace_cas_artwork, set_artwork_for_track_list,
-    file_set_artwork as storage_file_set_artwork, edit_cas_tracks_bulk,
+    file_set_artwork as storage_file_set_artwork, edit_cas_tracks_bulk, replace_cas_track_audio,
     AudioMetadata, FileEntry,
 };
 
@@ -120,6 +120,26 @@ pub async fn library_edit_track(
     storage:  State<'_, StorageState>,
 ) -> Result<String, String> {
     edit_cas_track(&hash, &metadata, &storage.cas, &storage.db)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Replace a library track's underlying audio entirely — e.g. to fix a wrong
+/// download. Unlike `library_edit_track` (which only retags the same audio),
+/// this swaps in different bytes read from `new_file_path`. The old blob is
+/// left untouched in history; every playlist branch currently pointing at
+/// `old_hash` is patched to the new one via a fresh commit. Returns the new
+/// track hash.
+#[tauri::command]
+pub async fn library_replace_track_audio(
+    old_hash:      String,
+    new_file_path: String,
+    storage:       State<'_, StorageState>,
+) -> Result<String, String> {
+    let bytes = tokio::fs::read(&new_file_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    replace_cas_track_audio(&old_hash, bytes, &storage.cas, &storage.db)
         .await
         .map_err(|e| e.to_string())
 }

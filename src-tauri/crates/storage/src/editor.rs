@@ -161,6 +161,52 @@ pub async fn edit_cas_track(
     Ok(new_hash)
 }
 
+/// Replace a library track's underlying audio entirely — distinct from
+/// `edit_cas_track`, which only retags the *same* audio. For fixing a wrong
+/// download: the old blob is left untouched (so any historical commit that
+/// referenced it still resolves), and every branch currently pointing at
+/// `old_hash` is patched to the new one via a fresh commit, exactly like a
+/// metadata edit. Title/artist/album are carried over from the old record
+/// (the track's identity doesn't change); duration, mime type, and artwork
+/// are re-read from `new_bytes` since they're almost certainly different —
+/// that mismatch is usually the whole reason this is being called.
+pub async fn replace_cas_track_audio(
+    old_hash:  &str,
+    new_bytes: Vec<u8>,
+    cas:       &Arc<CasStore>,
+    db:        &Arc<Database>,
+) -> Result<String, StorageError> {
+    let track = db.get_track(old_hash).await?
+        .ok_or_else(|| StorageError::BlobNotFound(old_hash.to_string()))?;
+
+    let new_hash = CasStore::hash(&new_bytes);
+    if new_hash == old_hash {
+        return Ok(new_hash);
+    }
+
+    let mime_type = crate::ingest::detect_mime(&new_bytes);
+    let (tags, artwork_bytes) = crate::ingest::extract_tags(&new_bytes, &track.title, &mime_type);
+
+    cas.write_blob(&new_bytes).await?;
+
+    db.update_track_hash_and_metadata(
+        old_hash, &new_hash, &track.title, &track.artist, track.album.as_deref(),
+    ).await?;
+    db.update_duration(&new_hash, tags.duration_ms).await?;
+    db.update_mime_type(&new_hash, &mime_type).await?;
+
+    if let Some(art) = artwork_bytes {
+        if let Ok(artwork_hash) = cas.write_blob(&art).await {
+            db.update_artwork_hash(&new_hash, &artwork_hash).await.ok();
+        }
+    }
+
+    let commit_msg = format!("Replace audio: {}", track.title);
+    patch_trees_parallel(old_hash, &new_hash, &commit_msg, cas, db).await?;
+
+    Ok(new_hash)
+}
+
 /// Store artwork bytes as a standalone CAS blob and update the track's `artwork_hash`.
 /// Returns the new artwork hash.
 pub async fn set_cas_artwork(

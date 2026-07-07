@@ -81,6 +81,10 @@ pub async fn track_play(
         .await
         .map_err(|e| e.to_string())?;
 
+    if !storage.cas.exists(&hash) {
+        return Err("Audio file is missing on this device".into());
+    }
+
     let path = storage.cas.blob_path(&hash);
 
     // If the track isn't in the DB yet (e.g. mid-sync), play the blob with

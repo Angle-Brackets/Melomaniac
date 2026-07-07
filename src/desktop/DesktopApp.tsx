@@ -886,7 +886,7 @@ export default function DesktopApp(): JSX.Element {
       livePositionMsRef.current = 0;
       hasRecordedPlayRef.current = false;
       useStore.getState().setPlaying(true);
-      invoke('track_play', { hash: track.hash }).catch(console.error);
+      playHash(track.hash, track.title);
     };
 
     let unlisten: (() => void) | undefined;
@@ -934,7 +934,7 @@ export default function DesktopApp(): JSX.Element {
         const { loopMode: lm, loadedHash: lh, abA: a, durationMs: dur } = sr.current;
 
         if (lm === LoopMode.One) {
-          if (lh) invoke('track_play', { hash: lh }).catch(console.error);
+          if (lh) playHash(lh);
           hasRecordedPlayRef.current = false; // reset so each loop iteration counts
           useStore.getState().setPlaying(true);
           return;
@@ -1177,6 +1177,16 @@ export default function DesktopApp(): JSX.Element {
     setTimeout(() => setMeloToast(null), ms);
   };
 
+  // Every playback entry point (row click, skip, resume, Spotify view, loop)
+  // funnels through this instead of a bare `invoke` so a missing/purged blob
+  // surfaces as a toast rather than a silent console error.
+  const playHash = (hash: string, title?: string) => {
+    invoke('track_play', { hash }).catch(e => {
+      console.error('track_play failed:', e);
+      toast(title ? `Couldn't play "${title}" — ${e}` : `Couldn't play track — ${e}`, 3000);
+    });
+  };
+
   // off → fisher-yates → smart → weighted → discovery → off
   const handleShuffle = async () => {
     const applyMode = (mode: ShuffleMode, label: string) => {
@@ -1398,7 +1408,7 @@ export default function DesktopApp(): JSX.Element {
   const handleSpotifyPlayTrack = (hash: string) => {
     const track = spotifyPlaybackQueue.find(t => t.hash === hash);
     if (!track) return;
-    invoke('track_play', { hash }).catch(console.error);
+    playHash(hash, track.title);
     useStore.getState().setLoaded(hash, track.duration_ms);
     sr.current.durationMs = track.duration_ms;
     snapshotPlayingQueue(spotifyPlaybackQueue, spotifyPlaybackQueue, null, 'main', false);
@@ -1424,7 +1434,7 @@ export default function DesktopApp(): JSX.Element {
       // Different track — load and play it, and record that THIS (the view
       // this row belongs to) is now the queue that's actually playing.
       setActiveTrackId(id);
-      invoke('track_play', { hash: track.hash }).catch(console.error);
+      playHash(track.hash, track.title);
       useStore.getState().setLoaded(track.hash, track.duration_ms);
       sr.current.durationMs = track.duration_ms;
       { const ctx = resolvePlayingContext(); snapshotPlayingQueue(playQueue, activeQueue, ctx.playlistId, ctx.branchName, isShuffle); }
@@ -1444,7 +1454,7 @@ export default function DesktopApp(): JSX.Element {
       // Only follow along visually if the viewed queue is the one playing —
       // see the rationale above `isViewingPlayingContext`.
       if (isViewingPlayingContext()) setActiveTrackId(next.id);
-      invoke('track_play', { hash: next.hash }).catch(console.error);
+      playHash(next.hash, next.title);
       useStore.getState().setLoaded(next.hash, next.duration_ms);
       sr.current.durationMs = next.duration_ms;
       useStore.getState().setPlaying(true);
@@ -1463,7 +1473,7 @@ export default function DesktopApp(): JSX.Element {
     // that's actually advancing — otherwise this would jump the carousel to a
     // coincidental position in whatever unrelated playlist is being browsed.
     if (isViewingPlayingContext()) setActiveTrackId(next.id);
-    invoke('track_play', { hash: next.hash }).catch(console.error);
+    playHash(next.hash, next.title);
     useStore.getState().setLoaded(next.hash, next.duration_ms);
     sr.current.durationMs = next.duration_ms;
     useStore.getState().setPlaying(true);
@@ -1474,7 +1484,7 @@ export default function DesktopApp(): JSX.Element {
   const handleSkipPrev = () => {
     // Restart current track if more than 3 s in — reload is more reliable than seek-to-0
     if (livePositionMsRef.current > 3000 && loadedHash) {
-      invoke('track_play', { hash: loadedHash }).catch(console.error);
+      playHash(loadedHash, nowPlayingQueue.find(t => t.hash === loadedHash)?.title);
       setPositionMs(0); livePositionMsRef.current = 0; hasRecordedPlayRef.current = false;
       useStore.getState().setPlaying(true);
       return;
@@ -1492,7 +1502,7 @@ export default function DesktopApp(): JSX.Element {
     // Same rationale as handleSkipNext — don't jump the carousel unless we're
     // actually looking at the queue that's playing.
     if (isViewingPlayingContext()) setActiveTrackId(prev.id);
-    invoke('track_play', { hash: prev.hash }).catch(console.error);
+    playHash(prev.hash, prev.title);
     useStore.getState().setLoaded(prev.hash, prev.duration_ms);
     sr.current.durationMs = prev.duration_ms;
     useStore.getState().setPlaying(true);
@@ -1513,7 +1523,7 @@ export default function DesktopApp(): JSX.Element {
       return;
     }
     if (!queueTrack?.hash) return;
-    invoke('track_play', { hash: queueTrack.hash }).catch(console.error);
+    playHash(queueTrack.hash, queueTrack.title);
     useStore.getState().setLoaded(queueTrack.hash, queueTrack.duration_ms);
     sr.current.durationMs = queueTrack.duration_ms;
     { const ctx = resolvePlayingContext(); snapshotPlayingQueue(playQueue, activeQueue, ctx.playlistId, ctx.branchName, isShuffle); }
@@ -1594,6 +1604,7 @@ export default function DesktopApp(): JSX.Element {
                   setCommitRefreshKey(k => k + 1);
                 }}
                 favorites={favorites}
+                onToast={toast}
               />
             ) : railItem === 'editor' ? (
               <EditorView
