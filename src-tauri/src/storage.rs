@@ -418,6 +418,36 @@ async fn write_commit_explicit(
     Ok(commit_hash)
 }
 
+/// Strips any track entries from a branch's current HEAD whose audio blob no
+/// longer exists in CAS, auto-committing the fix so the branch never sits on
+/// a dead reference. Only ever called right after an action that can point a
+/// live HEAD at a hash that isn't guaranteed to still be present locally
+/// (reverting past a purge, or force-purging a blob a playlist still uses) —
+/// not on every tree read, since a track mid-sync-download is *also*
+/// blob-less locally and would be wrongly evicted by an unconditional check.
+/// Returns the hashes that were stripped, if any commit was written.
+async fn heal_missing_blobs(
+    storage:     &StorageState,
+    playlist_id: &str,
+    branch_name: &str,
+) -> Result<Vec<String>, String> {
+    let mut tree = load_tree(storage, playlist_id, branch_name).await?;
+    let missing: Vec<String> = tree.tracks.iter()
+        .filter(|t| !storage.cas.exists(&t.hash))
+        .map(|t| t.hash.clone())
+        .collect();
+    if missing.is_empty() {
+        return Ok(missing);
+    }
+    tree.tracks.retain(|t| storage.cas.exists(&t.hash));
+    let json = tree.to_json().map_err(|e| e.to_string())?;
+    write_commit(
+        storage, playlist_id, branch_name, &json,
+        Some("Auto-removed track(s) with missing audio".into()),
+    ).await?;
+    Ok(missing)
+}
+
 async fn head_commit(storage: &StorageState, playlist_id: &str, branch_name: &str) -> Result<String, String> {
     storage.db.get_branch(playlist_id, branch_name)
         .await.map_err(|e| e.to_string())?
@@ -635,6 +665,12 @@ pub async fn playlists_containing_tracks(
 /// Remove tracks from the library. If `cascade` is true, first strips them
 /// from every branch of every playlist that references them — one auto-commit
 /// per affected branch — before deleting the library rows.
+///
+/// Once a deleted hash is no longer live — not in the library, and not on any
+/// playlist branch's current HEAD — its audio blob is purged immediately
+/// rather than left as a permanent phantom in CAS. Older commits may still
+/// mention the hash; those just lazily resolve as missing if ever revisited,
+/// the same way a manually `rm`'d git object behaves.
 #[tauri::command]
 pub async fn library_remove_tracks_cascade(
     hashes:  Vec<String>,
@@ -663,6 +699,15 @@ pub async fn library_remove_tracks_cascade(
     for hash in &hashes {
         storage.db.remove_track(hash).await.map_err(|e| e.to_string())?;
     }
+
+    let gc = melomaniac_storage::GarbageCollector::new(&storage.cas, &storage.db);
+    let live = gc.live_hashes().await.map_err(|e| e.to_string())?;
+    for hash in &hashes {
+        if !live.contains(hash) {
+            gc.force_purge_blob(hash).map_err(|e| e.to_string())?;
+        }
+    }
+
     Ok(())
 }
 
@@ -1121,7 +1166,14 @@ pub async fn branch_revert_to(
     } else {
         message
     };
-    write_commit(&storage, &playlist_id, &branch_name, &tree_json, Some(msg)).await
+    let reverted = write_commit(&storage, &playlist_id, &branch_name, &tree_json, Some(msg)).await?;
+
+    // The reverted-to tree may reference audio purged since that commit was
+    // made — if this device no longer has it, drop it from HEAD right away
+    // rather than leaving a track that looks fine but can never play.
+    heal_missing_blobs(&storage, &playlist_id, &branch_name).await?;
+
+    Ok(reverted)
 }
 
 /// All commits reachable from any branch of a playlist, with parent lists and branch refs.
@@ -1318,6 +1370,89 @@ pub fn library_get_storage_bytes(storage: State<'_, StorageState>) -> u64 {
         }).sum()
     }
     dir_size(storage.cas.objects_dir())
+}
+
+/// Read-only preview of how many CAS blobs (audio, artwork, tree, and commit
+/// objects) are unreachable from the library or any playlist's full commit
+/// history, and how many bytes deleting them would free. Deletes nothing.
+#[tauri::command]
+pub async fn storage_gc_scan(storage: State<'_, StorageState>) -> Result<melomaniac_storage::GcReport, String> {
+    melomaniac_storage::GarbageCollector::new(&storage.cas, &storage.db)
+        .scan()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Deletes every CAS blob found unreachable by `storage_gc_scan`. Irreversible —
+/// the frontend must show the scan preview and get explicit confirmation first.
+#[tauri::command]
+pub async fn storage_gc_collect(storage: State<'_, StorageState>) -> Result<melomaniac_storage::GcReport, String> {
+    melomaniac_storage::GarbageCollector::new(&storage.cas, &storage.db)
+        .collect()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lists the largest CAS blobs (largest first), flagging which ones are
+/// `reachable` (kept alive by some playlist's commit history — normal GC
+/// will never free these). Used to track down a specific oversized blob,
+/// e.g. a bad Spotify download that was promoted into a playlist and is
+/// stuck taking up space.
+#[tauri::command]
+pub async fn storage_gc_largest_blobs(
+    storage: State<'_, StorageState>,
+    limit: usize,
+) -> Result<Vec<melomaniac_storage::BlobInfo>, String> {
+    melomaniac_storage::GarbageCollector::new(&storage.cas, &storage.db)
+        .largest_blobs(limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Lists every still-existing playlist/branch whose commit history
+/// references `hash`. Used to warn the user, before a force-purge, which
+/// historical reverts would break.
+#[tauri::command]
+pub async fn storage_gc_find_references(
+    storage: State<'_, StorageState>,
+    hash: String,
+) -> Result<Vec<melomaniac_storage::BlobReference>, String> {
+    melomaniac_storage::GarbageCollector::new(&storage.cas, &storage.db)
+        .find_references(&hash)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Force-deletes a single CAS blob, ignoring reachability entirely.
+/// Irreversible, and it silently breaks `branch_revert_to` for any historical
+/// commit that referenced this hash. The frontend must show
+/// `storage_gc_find_references` and get explicit, informed confirmation first.
+///
+/// Since this ignores reachability, `hash` may still sit at the *current*
+/// HEAD of a live playlist branch (not just buried in history) — any branch
+/// found in that state is immediately healed so it doesn't keep pointing at
+/// audio that's now gone.
+#[tauri::command]
+pub async fn storage_force_purge_blob(
+    storage: State<'_, StorageState>,
+    hash: String,
+) -> Result<Option<u64>, String> {
+    let freed = melomaniac_storage::GarbageCollector::new(&storage.cas, &storage.db)
+        .force_purge_blob(&hash)
+        .map_err(|e| e.to_string())?;
+
+    let playlists = storage.db.get_all_playlists().await.map_err(|e| e.to_string())?;
+    for playlist in &playlists {
+        let branches = storage.db.get_branches(&playlist.id).await.map_err(|e| e.to_string())?;
+        for branch in &branches {
+            let tree = load_tree(&storage, &playlist.id, &branch.name).await?;
+            if tree.tracks.iter().any(|t| t.hash == hash) {
+                heal_missing_blobs(&storage, &playlist.id, &branch.name).await?;
+            }
+        }
+    }
+
+    Ok(freed)
 }
 
 // ── Initialisation helper ─────────────────────────────────────────────────────

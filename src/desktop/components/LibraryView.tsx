@@ -6,12 +6,13 @@ import { listen } from '@tauri-apps/api/event';
 import type { Track, TrackRecord } from '../data';
 import { trackRecordToTrack } from '../data';
 import { IcoMusicLib, IcoDownload, IcoClose } from '../icons';
-import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart, FiDownloadCloud } from 'react-icons/fi';
+import { FiSearch, FiFolder, FiFilePlus, FiTrash2, FiEdit2, FiPlus, FiTag, FiPlay, FiHeart, FiDownloadCloud, FiRefreshCw, FiHardDrive } from 'react-icons/fi';
 import ScrollText from './ScrollText';
 import AddToPlaylistModal from './AddToPlaylistModal';
 import DeleteTracksModal from './DeleteTracksModal';
 import BulkEditPanel from './BulkEditPanel';
 import DownloadModal from './DownloadModal';
+import ManageStorageModal from './ManageStorageModal';
 import { SpotifyProvenanceBadge, GetTrackMenuItem, RejectSpotifyMatchMenuItem } from './SpotifyTrackRow';
 import { useStore } from '../../store';
 
@@ -73,11 +74,12 @@ interface LibraryViewProps {
   defaultPlaylistId?:        string | null;
   defaultBranchName?:        string;
   favorites?:                Set<string>;
+  onToast?:                  (msg: string) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName, favorites }: LibraryViewProps): JSX.Element {
+export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChanged, onTracksAddedToPlaylist, defaultPlaylistId, defaultBranchName, favorites, onToast }: LibraryViewProps): JSX.Element {
   const [loading,           setLoading]           = useState(true);
   const [records,           setRecords]           = useState<TrackRecord[]>([]);
   const [strayHashes,       setStrayHashes]       = useState<Set<string>>(new Set());
@@ -92,6 +94,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
   const [showAddToPlaylist, setShowAddToPlaylist] = useState(false);
   const [showBulkEdit,      setShowBulkEdit]      = useState(false);
   const [showDownload,      setShowDownload]      = useState(false);
+  const [showManageStorage, setShowManageStorage] = useState(false);
   const [contextMenu,       setContextMenu]       = useState<{ x: number; y: number; hash: string; isExternal?: boolean; spotifyId?: string } | null>(null);
   const [playingHash,       setPlayingHash]       = useState<string | null>(null);
 
@@ -208,8 +211,10 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
       setPlayingHash(hash);
     } catch (e) {
       console.error('track_play failed:', e);
+      const title = records.find(r => r.hash === hash)?.title;
+      onToast?.(title ? `Couldn't play "${title}" — ${e}` : `Couldn't play track — ${e}`);
     }
-  }, []);
+  }, [records, onToast]);
 
   // ── Column resize ─────────────────────────────────────────────────────────
 
@@ -305,6 +310,21 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
     finally { setIsImporting(false); }
   };
 
+  // Fixes a wrong download in place: swaps the audio bytes behind an existing
+  // track (keeping its identity in every playlist), rather than deleting and
+  // re-adding it. The old audio stays in history untouched; only current and
+  // future playback picks up the correction.
+  const replaceAudio = async (oldHash: string) => {
+    const path = await open({
+      multiple: false,
+      filters: [{ name: 'Audio', extensions: ['mp3', 'flac', 'ogg', 'wav', 'm4a', 'aac', 'opus'] }],
+    });
+    if (!path || typeof path !== 'string') return;
+    setIsImporting(true);
+    try { await invoke('library_replace_track_audio', { oldHash, newFilePath: path }); await load(); }
+    finally { setIsImporting(false); }
+  };
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
@@ -380,6 +400,9 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
         </button>
         <button onClick={importFolder} disabled={isImporting} style={importBtnStyle}>
           <FiFolder size={12} /> Import Folder
+        </button>
+        <button onClick={() => setShowManageStorage(true)} style={importBtnStyle}>
+          <FiHardDrive size={12} /> Manage Storage
         </button>
       </div>
 
@@ -676,6 +699,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
           onAddToPlaylist={() => { setContextMenu(null); setShowAddToPlaylist(true); }}
           onBulkEdit={() => { setContextMenu(null); setShowBulkEdit(true); }}
           onOpenInEditor={() => { setContextMenu(null); onOpenInEditor(contextMenu.hash); }}
+          onReplaceAudio={() => { const hash = contextMenu.hash; setContextMenu(null); replaceAudio(hash); }}
           onDelete={() => { setContextMenu(null); setDeleteModalHashes([...selected]); }}
           onGetTrack={contextMenu.spotifyId
             ? () => { const id = contextMenu.spotifyId!; setContextMenu(null); downloadAndLinkSpotifyTrack(id).then(load); }
@@ -691,6 +715,7 @@ export default function LibraryView({ artworkUrls, onOpenInEditor, onTracksChang
 
       {/* ── Modals ── */}
       {showDownload && <DownloadModal onClose={() => setShowDownload(false)} />}
+      {showManageStorage && <ManageStorageModal onClose={() => setShowManageStorage(false)} />}
       {showAddToPlaylist && (
         <AddToPlaylistModal
           count={selected.size}
@@ -796,12 +821,13 @@ interface ContextMenuProps {
   onAddToPlaylist: () => void;
   onBulkEdit:      () => void;
   onOpenInEditor:  () => void;
+  onReplaceAudio:  () => void;
   onDelete:        () => void;
   onGetTrack?:      () => void;
   onRejectSpotify?: () => void;
 }
 
-function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay, onAddToPlaylist, onBulkEdit, onOpenInEditor, onDelete, onGetTrack, onRejectSpotify }: ContextMenuProps) {
+function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay, onAddToPlaylist, onBulkEdit, onOpenInEditor, onReplaceAudio, onDelete, onGetTrack, onRejectSpotify }: ContextMenuProps) {
   if (isExternal) {
     return (
       <div
@@ -832,6 +858,7 @@ function ContextMenu({ x, y, singleSelected, isExternal, linkedSpotifyId, onPlay
       <MenuItem icon={<FiPlus size={11} />}   label="Add to Playlist" onClick={onAddToPlaylist} />
       <MenuItem icon={<FiTag size={11} />}    label="Bulk Edit"       onClick={onBulkEdit} />
       {singleSelected && <MenuItem icon={<FiEdit2 size={11} />} label="Open in Editor" onClick={onOpenInEditor} />}
+      {singleSelected && <MenuItem icon={<FiRefreshCw size={11} />} label="Replace Audio…" onClick={onReplaceAudio} />}
       {linkedSpotifyId && <RejectSpotifyMatchMenuItem onClick={() => onRejectSpotify?.()} />}
       <div style={{ height: 1, background: 'var(--border-1)', margin: '2px 0' }} />
       <MenuItem icon={<FiTrash2 size={11} />} label="Delete"          onClick={onDelete} danger />

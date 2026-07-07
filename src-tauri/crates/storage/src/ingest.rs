@@ -124,14 +124,14 @@ pub async fn ingest_bytes(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-struct Tags {
-    title:       String,
-    artist:      String,
-    album:       Option<String>,
-    duration_ms: i64,
+pub(crate) struct Tags {
+    pub(crate) title:       String,
+    pub(crate) artist:      String,
+    pub(crate) album:       Option<String>,
+    pub(crate) duration_ms: i64,
 }
 
-fn detect_mime(bytes: &[u8]) -> String {
+pub(crate) fn detect_mime(bytes: &[u8]) -> String {
     if bytes.starts_with(b"fLaC") { return "audio/flac".to_string(); }
     if bytes.starts_with(b"OggS") { return "audio/ogg".to_string();  }
     if bytes.len() >= 12
@@ -145,7 +145,7 @@ fn detect_mime(bytes: &[u8]) -> String {
 }
 
 /// Returns `(tags, artwork_bytes)`. Artwork is the first embedded picture, if any.
-fn extract_tags(bytes: &[u8], name_hint: &str, mime_type: &str) -> (Tags, Option<Vec<u8>>) {
+pub(crate) fn extract_tags(bytes: &[u8], name_hint: &str, mime_type: &str) -> (Tags, Option<Vec<u8>>) {
     if mime_type == "audio/mpeg" {
         if let Ok(tag) = id3::Tag::read_from2(Cursor::new(bytes)) {
             let title  = tag.title() .map(str::to_string)

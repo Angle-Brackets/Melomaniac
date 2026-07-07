@@ -33,6 +33,9 @@ export default function DeleteTracksModal({ hashes, onCancel, onConfirm }: Props
 
   const count = hashes.length;
   const playlistCount = impacts?.length ?? 0;
+  // Purged immediately unless it's staying referenced in a playlist we're
+  // not also cascading out of — mirrors the backend's live_hashes check.
+  const willPurge = impacts !== null && (playlistCount === 0 || cascade);
 
   return (
     <div style={{
@@ -55,8 +58,10 @@ export default function DeleteTracksModal({ hashes, onCancel, onConfirm }: Props
           </button>
         </div>
 
-        <span style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}>
-          The audio file stays on disk, but the library entry {count !== 1 ? 'these tracks use' : 'this track uses'} is removed.
+        <span style={{ fontSize: 12, lineHeight: 1.5, color: willPurge ? '#fca5a5' : 'var(--text-2)' }}>
+          {willPurge
+            ? `This permanently deletes the audio file${count !== 1 ? 's' : ''} from disk — this can't be undone.`
+            : `The audio file stays on disk, but the library entry ${count !== 1 ? 'these tracks use' : 'this track uses'} is removed.`}
         </span>
 
         {impacts === null && (
@@ -81,9 +86,9 @@ export default function DeleteTracksModal({ hashes, onCancel, onConfirm }: Props
               <input type="checkbox" checked={cascade} onChange={e => setCascade(e.target.checked)} />
               Also remove {count !== 1 ? 'these tracks' : 'it'} from {playlistCount === 1 ? 'that playlist' : 'those playlists'}
             </label>
-            <span style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4 }}>
+            <span style={{ fontSize: 11, lineHeight: 1.4, color: cascade ? '#fca5a5' : 'var(--text-3)' }}>
               {cascade
-                ? `Leaving ${playlistCount === 1 ? 'the playlist' : 'those playlists'} still won't delete the audio file itself — just its entry there.`
+                ? `Also permanently deletes the audio file${count !== 1 ? 's' : ''} from disk, since nothing would still reference ${count !== 1 ? 'them' : 'it'} — this can't be undone.`
                 : `Leaving this unchecked keeps ${count !== 1 ? 'these tracks' : 'it'} playable in ${playlistCount === 1 ? 'that playlist' : 'those playlists'} — the audio file is never deleted from storage, only unlisted from your library.`}
             </span>
           </div>
