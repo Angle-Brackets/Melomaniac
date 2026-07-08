@@ -1281,6 +1281,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
   const setLoaded          = useStore(s => s.setLoaded);
   const setPlaying         = useStore(s => s.setPlaying);
   const loadQueue          = useStore(s => s.loadQueue);
+  const jumpTo             = useStore(s => s.jumpTo);
   const shuffle            = useStore(s => s.shuffle);
   const toggleFavorite            = useStore(s => s.toggleFavorite);
   const setShuffle                = useStore(s => s.setShuffle);
@@ -1549,6 +1550,11 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     // Replace the entire queue with this branch's track order before starting.
     const hashes = playlistTracks.map(t => t.hash);
     loadQueue(hashes);
+    // loadQueue always resets currentIndex to 0 — without this, tapping any
+    // track but the first would leave the queue's notion of "current" pointing
+    // at track 0 while loadedTrackHash points at startIdx, so LoopMode.One
+    // (which replays currentHash(), not loadedTrackHash) would loop the wrong song.
+    jumpTo(startIdx);
     const track = playlistTracks[startIdx];
     setLoaded(track.hash, track.duration_ms);
     positionMsRef.current = 0;

@@ -37,8 +37,32 @@ type SessionState = {
   shuffleIndex?: number;
 };
 
+const LAST_TAB_KEY = 'mm_last_tab';
+const DETAIL_OPEN_KEY = 'mm_detail_open';
+
+// Cold-launch restore can race the network coming back up (iOS relaunches the
+// app before wifi/cellular reassociates), so a single failed fetch shouldn't
+// permanently drop the Spotify detail restore — retry a few times with
+// backoff before giving up silently.
+async function retryWithBackoff(fn: () => Promise<void>, maxAttempts = 4, baseDelayMs = 1000): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await fn();
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) { console.error(err); return; }
+      await new Promise(resolve => setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)));
+    }
+  }
+}
+
+type DetailState = { open: boolean; spotifySource: string | null };
+
 export default function MobileApp() {
-  const [tab, setTab] = useState<TabId>('now');
+  const [tab, setTab] = useState<TabId>(() => {
+    const saved = localStorage.getItem(LAST_TAB_KEY) as TabId | null;
+    return saved && TAB_ORDER.includes(saved) ? saved : 'now';
+  });
   // tabKey is incremented on every tab switch to force a remount, which re-triggers the CSS slide-in animation.
   const [tabKey,  setTabKey]  = useState(0);
   // tabDir drives which animation variant plays — tabs to the right of the current one slide in from the right.
@@ -59,6 +83,7 @@ export default function MobileApp() {
   const refreshSpotifyStatus = useStore(s => s.refreshSpotifyStatus);
   const fetchImportedTracks  = useStore(s => s.fetchImportedTracks);
   const activeSpotifySource  = useStore(s => s.activeSpotifySource);
+  const openSpotifyPlaylist  = useStore(s => s.openSpotifyPlaylist);
 
   const restoreSession = (raw: string | null, ptracks: PlaylistTrackRecord[], playlistId: string, branchName: string) => {
     try {
@@ -137,8 +162,18 @@ export default function MobileApp() {
       // "nothing playing" and immediately wipes SESSION_KEY from localStorage,
       // deleting it before restoreSession ever gets a chance to read it back.
       const savedSessionRaw = localStorage.getItem(SESSION_KEY);
+      let savedSession: SessionState | null = null;
+      try { savedSession = savedSessionRaw ? JSON.parse(savedSessionRaw) as SessionState : null; } catch {}
       const saved = localStorage.getItem('mm_last_playlist');
-      const targetId = (saved && playlists.find(p => p.id === saved)) ? saved : playlists[0].id;
+      // Prefer the playlist the saved session was actually PLAYING on over
+      // mm_last_playlist (last-BROWSED playlist, which can disagree with it —
+      // e.g. the user played something from playlist A then browsed over to
+      // playlist B without playing anything). Falling back to mm_last_playlist
+      // here would make restoreSession's playlistId check below fail, silently
+      // dropping the entire saved session (track/position/queue/shuffle).
+      const targetId = (savedSession && playlists.find(p => p.id === savedSession!.playlistId)) ? savedSession.playlistId
+        : (saved && playlists.find(p => p.id === saved)) ? saved
+        : playlists[0].id;
       const pl = playlists.find(p => p.id === targetId)!;
       setCurrentPlaylist(targetId);
       // Prefer the branch the saved session was actually PLAYING on over
@@ -146,8 +181,6 @@ export default function MobileApp() {
       // PlaylistDetail and can disagree with it) — otherwise this fetches
       // the wrong branch's tracks and restoreSession's hash/branch checks
       // silently fail, dropping back to the first playlist's first track.
-      let savedSession: SessionState | null = null;
-      try { savedSession = savedSessionRaw ? JSON.parse(savedSessionRaw) as SessionState : null; } catch {}
       const branchName = savedSession && savedSession.playlistId === targetId
         ? savedSession.branchName
         : useStore.getState().currentBranchName;
@@ -162,6 +195,20 @@ export default function MobileApp() {
         .catch(() => {});
       playlists.forEach(p => getPlaylistArtwork(p.id, branchByPlaylist[p.id] ?? 'main'));
     });
+    // Restore whichever playlist-detail overlay was open when the app was
+    // backgrounded/killed, so a cold relaunch lands back on the same screen
+    // instead of just the tab list underneath it.
+    try {
+      const rawDetail = localStorage.getItem(DETAIL_OPEN_KEY);
+      const detail = rawDetail ? JSON.parse(rawDetail) as DetailState : null;
+      if (detail?.open) {
+        if (detail.spotifySource) {
+          const source = detail.spotifySource;
+          retryWithBackoff(() => openSpotifyPlaylist(source));
+        }
+        handlePlaylistDetail({ skipAnimation: true });
+      }
+    } catch {}
   }, []);
 
   // Persist playlist selection so it survives app restarts
@@ -212,7 +259,10 @@ export default function MobileApp() {
     });
   }, []);
 
-  // Patch saved position every 10 s and on unload so cold-start restore seeks correctly
+  // Patch saved position every 10 s and on backgrounding so cold-start restore seeks correctly.
+  // beforeunload alone isn't enough on iOS: the OS can suspend/terminate the app without ever
+  // firing it, so visibilitychange (which iOS reliably fires the moment the app backgrounds,
+  // well before it's eligible for suspension) is the real safety net here.
   useEffect(() => {
     const patch = () => {
       const raw = localStorage.getItem(SESSION_KEY);
@@ -224,9 +274,15 @@ export default function MobileApp() {
         localStorage.setItem(SESSION_KEY, JSON.stringify(s));
       } catch {}
     };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') patch(); };
     const id = setInterval(patch, 10_000);
     window.addEventListener('beforeunload', patch);
-    return () => { clearInterval(id); window.removeEventListener('beforeunload', patch); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('beforeunload', patch);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // ── Background peer poll — drives auto-sync when a known device comes online ──
@@ -423,27 +479,41 @@ export default function MobileApp() {
     setTabDir(newIdx >= oldIdx ? 'right' : 'left');
     setTabKey(k => k + 1);
     setTab(id);
+    localStorage.setItem(LAST_TAB_KEY, id);
     // Close detail without animation when switching tabs
     detailActiveRef.current = false;
     setDetailActive(false);
     setDetailMounted(false);
+    localStorage.removeItem(DETAIL_OPEN_KEY);
   };
 
-  const handlePlaylistDetail = () => {
+  // skipAnimation is used when restoring a previously-open detail overlay at cold
+  // start — it should appear already in place, not slide in as if freshly opened.
+  const handlePlaylistDetail = (opts?: { skipAnimation?: boolean }) => {
     setDetailMounted(true);
-    // Double rAF ensures the element is painted before the transition starts
-    requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (opts?.skipAnimation) {
       detailActiveRef.current = true;
       setDetailActive(true);
-    }));
+    } else {
+      // Double rAF ensures the element is painted before the transition starts
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        detailActiveRef.current = true;
+        setDetailActive(true);
+      }));
+    }
     // Push history state so Android back / browser back triggers closeDetail
     window.history.pushState({ mm: 'detail' }, '');
+    localStorage.setItem(DETAIL_OPEN_KEY, JSON.stringify({
+      open: true,
+      spotifySource: useStore.getState().activeSpotifySource,
+    } satisfies DetailState));
   };
 
   const handlePlaylistBack = () => {
     detailActiveRef.current = false;
     setDetailActive(false);
     setTimeout(() => setDetailMounted(false), 360);
+    localStorage.removeItem(DETAIL_OPEN_KEY);
   };
 
   // ── Android / browser back button ─────────────────────────────────────────

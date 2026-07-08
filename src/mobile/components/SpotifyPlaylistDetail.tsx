@@ -88,6 +88,8 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
   const closeSpotifyPlaylist         = useStore(s => s.closeSpotifyPlaylist);
 
   const loadedHash                        = useStore(s => s.loadedTrackHash);
+  const loadQueue                         = useStore(s => s.loadQueue);
+  const jumpTo                            = useStore(s => s.jumpTo);
   const [externalSheet, setExternalSheet] = useState<{ spotifyId: string; label: string } | null>(null);
   const [rejectSheet, setRejectSheet]     = useState<{ spotifyId: string; hash: string; label: string } | null>(null);
   const [infoSheet, setInfoSheet]         = useState(false);
@@ -119,6 +121,13 @@ export function SpotifyPlaylistDetail({ onBack, onTab }: { onBack: () => void; o
   const playTrack = (hash: string) => {
     const track = rows.find((r): r is Extract<SpotifyRow, { kind: 'local' }> => r.kind === 'local' && r.track.hash === hash)?.track;
     if (!track) return;
+    // Queue the locally-matched tracks in list order and jump to the tapped one —
+    // without this the store's queue/currentIndex never reflect what's playing,
+    // so e.g. LoopMode.One (which replays via the queue, not loadedTrackHash)
+    // would silently loop the wrong track.
+    const hashes = rows.filter((r): r is Extract<SpotifyRow, { kind: 'local' }> => r.kind === 'local').map(r => r.track.hash);
+    loadQueue(hashes);
+    jumpTo(hashes.indexOf(hash));
     invoke('track_play', { hash }).catch(console.error);
     useStore.getState().setLoaded(hash, track.duration_ms);
     useStore.getState().setPlaying(true);
