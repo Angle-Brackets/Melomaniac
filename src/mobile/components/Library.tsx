@@ -125,6 +125,8 @@ function FilterPill({ label, active, count, onClick }: {
 
 const TRACK_H   = 62;
 const SECTION_H = 36;
+// How far left a track row slides to expose the "Add to Queue" affordance.
+const SWIPE_REVEAL_W = 72;
 
 function MMToast({ message }: { message: string }) {
   return (
@@ -217,11 +219,15 @@ type FlatItem =
 
 // ── TrackRow ───────────────────────────────────────────────────────────────────
 // Long-press (500 ms) opens the "Add to Playlist" action sheet.
-// In select-mode the row becomes a checkbox; long-press is disabled to avoid
-// conflicting with the selection tap target.
-function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onFavorite, selected, onSelect }: {
+// A left swipe (≥48px) reveals an "Add to Queue" affordance, mirroring the
+// swipe-to-delete pattern in PlaylistDetail.tsx's TrackRow but non-destructive,
+// so the row doesn't need a confirming tap — the reveal itself IS the button.
+// In select-mode the row becomes a checkbox; long-press/swipe are disabled to
+// avoid conflicting with the selection tap target.
+function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onFavorite, selected, onSelect, revealed, onReveal, onClose, onAddToQueue }: {
   track: TrackRecord; idx: number; playing?: boolean; spotifyLinked?: boolean;
   onLongPress?: () => void; onFavorite?: () => void; selected?: boolean; onSelect?: () => void;
+  revealed?: boolean; onReveal?: () => void; onClose?: () => void; onAddToQueue?: () => void;
 }) {
   // useTrackArtwork reads from the module-level artwork cache (artworkCache.ts)
   // via useSyncExternalStore — no fetch is started here; the cache is pre-populated
@@ -229,24 +235,64 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
   const subtext = [track.artist ?? 'Unknown artist', track.album].filter(Boolean).join(' | ');
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startXRef = useRef(0);
+  const startYRef = useRef(0);
   const startLp = () => {
     lpTimer.current = setTimeout(() => { lpTimer.current = null; onLongPress?.(); }, 500);
   };
   const cancelLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   const inSelectMode = onSelect !== undefined;
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    startXRef.current = e.clientX;
+    startYRef.current = e.clientY;
+    startLp();
+  };
+  const handlePointerUp = (e: React.PointerEvent) => {
+    cancelLp();
+    const dx = e.clientX - startXRef.current;
+    const dy = e.clientY - startYRef.current;
+    // Predominantly vertical gesture → scroll, never touch the reveal state.
+    if (Math.abs(dy) > Math.abs(dx) + 5) { if (revealed) onClose?.(); return; }
+    if (dx < -48)     { onReveal?.(); return; }
+    if (dx > 24)      { onClose?.();  return; }
+    if (revealed)     { onClose?.(); }
+  };
+
   return (
-    <div
-      onClick={inSelectMode ? onSelect : undefined}
-      onPointerDown={inSelectMode ? undefined : e => { (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId); startLp(); }}
-      onPointerUp={inSelectMode ? undefined : cancelLp}
-      onPointerCancel={inSelectMode ? undefined : cancelLp}
-      onPointerMove={inSelectMode ? undefined : e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
-      style={{
-        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
-        cursor: inSelectMode ? 'pointer' : 'default',
-        background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
-        borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
-      }}>
+    <div style={{ position: 'relative', overflow: 'hidden' }}>
+      {/* Add-to-queue action — sits at absolute right edge, exposed when row slides left */}
+      {!inSelectMode && (
+        <div style={{
+          position: 'absolute', right: 0, top: 0, bottom: 0, width: SWIPE_REVEAL_W,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--accent)',
+        }}>
+          <button
+            onClick={() => { onAddToQueue?.(); onClose?.(); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: 'var(--bg-0)' }}
+          >
+            <Icons.queue size={18} stroke="var(--bg-0)"/>
+            <span style={{ fontSize: 10, fontWeight: 600 }}>Queue</span>
+          </button>
+        </div>
+      )}
+      <div
+        onClick={inSelectMode ? onSelect : undefined}
+        onPointerDown={inSelectMode ? undefined : handlePointerDown}
+        onPointerUp={inSelectMode ? undefined : handlePointerUp}
+        onPointerCancel={inSelectMode ? undefined : cancelLp}
+        onPointerMove={inSelectMode ? undefined : e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
+        style={{
+          height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+          cursor: inSelectMode ? 'pointer' : 'default',
+          background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
+          borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
+          transform: !inSelectMode && revealed ? `translateX(-${SWIPE_REVEAL_W}px)` : undefined,
+          transition: 'transform 0.26s cubic-bezier(0.22,1,0.36,1)',
+          willChange: !inSelectMode ? 'transform' : undefined,
+        }}>
       {inSelectMode ? (
         <div style={{ width: 18, height: 18, borderRadius: 9, flexShrink: 0,
           background: selected ? 'var(--accent)' : 'transparent',
@@ -293,6 +339,7 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
       <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
         {fmtDuration(track.duration_ms)}
       </span>
+      </div>
     </div>
   );
 }
@@ -525,6 +572,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const libraryStatus   = useStore(s => s.libraryStatus);
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
   const toggleFavorite  = useStore(s => s.toggleFavorite);
+  const addToQueue      = useStore(s => s.addToQueue);
   const importedTracks              = useStore(s => s.importedTracks);
   const reviewTracks                = useStore(s => s.reviewTracks);
   const downloadingSpotifyIds       = useStore(s => s.downloadingSpotifyIds);
@@ -537,6 +585,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const [externalSheet,  setExternalSheet]  = useState<{ spotifyId: string; label: string } | null>(null);
   const [selectMode,     setSelectMode]     = useState(false);
   const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
+  const [revealedHash,   setRevealedHash]   = useState<string | null>(null);
   const [toast,          setToast]          = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef      = useRef<HTMLDivElement>(null);
@@ -753,7 +802,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       </div>
 
       {/* Virtualized track list */}
-      <div ref={el => { (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el; (ptrRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }} style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
+      <div ref={el => { (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el; (ptrRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }} onScroll={() => setRevealedHash(null)} style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
         <PullSpinner pullY={pullY} refreshing={refreshing}/>
         {libraryStatus === 'ready' && flatItems.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
@@ -781,6 +830,10 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                         onFavorite={() => toggleFavorite(item.track.hash)}
                         selected={selectMode ? selectedHashes.has(item.track.hash) : undefined}
                         onSelect={selectMode ? () => toggleSelect(item.track.hash) : undefined}
+                        revealed={revealedHash === item.track.hash}
+                        onReveal={() => setRevealedHash(item.track.hash)}
+                        onClose={() => setRevealedHash(null)}
+                        onAddToQueue={() => { addToQueue(item.track.hash); showToast(`"${item.track.title}" added to queue`); }}
                       />
                   }
                 </div>

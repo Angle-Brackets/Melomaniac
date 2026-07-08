@@ -993,6 +993,19 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeListIndex]);
 
+  // While the tracklist is maximized, follow the carousel: whatever card the user
+  // has browsed to should be scrolled into view, so finding it in the list never
+  // requires a manual scroll. Gated on queueExpanded — no point moving a
+  // collapsed (0-height) list, and it would fight the "Up next" scroll position.
+  useEffect(() => {
+    if (!queueExpanded || browseIndex < 0) return;
+    programmaticScrollRef.current = true;
+    queueVirtualizer.scrollToIndex(browseIndex, { align: 'center', behavior: 'smooth' });
+    const t = setTimeout(() => { programmaticScrollRef.current = false; }, 500);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browseIndex, queueExpanded]);
+
   // Imperative drag-to-reorder — non-passive listeners so we can preventDefault()
   // before the browser commits to scroll. Works for both touch (mobile) and mouse (desktop).
   useEffect(() => {

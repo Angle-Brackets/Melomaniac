@@ -5,6 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Tauri + React + Typescript</title>
+    <!-- Matches the window's native backgroundColor (tauri.conf.json) so there's no
+         white frame between WKWebView init and the stylesheet/applyTheme() painting
+         the real theme colour — most visible on iOS cold relaunches after an OS kill. -->
+    <style>html, body, #root { background: #0d0d0d; }</style>
   </head>
 
   <body>
