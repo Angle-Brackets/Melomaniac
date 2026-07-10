@@ -46,76 +46,55 @@ import { PairingModal } from '../components/PairingModal';
 import { PeerPlaylistsModal } from '../components/PeerPlaylistsModal';
 import StatsView from './components/StatsView';
 import { useStore } from '../store';
+import { fisherYates, pickWeighted, pickDiscovery, pickSmart, pickFavorites } from '../store/shuffleAlgorithms';
 
 export type { AppSettings };
 
 // ── Shuffle algorithms ────────────────────────────────────────────────────────
-function fisherYates<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+// Picking math lives in ../store/shuffleAlgorithms.ts, shared with mobile's queueSlice —
+// these wrappers just map Track[] <-> hash[] around the shared hash-generic functions.
 
-const ARTIST_PENALTY    = 0.25;
-const ARTIST_LOOKBEHIND = 4;
+// Desktop's Discovery tier-fallback threshold is a fixed constant (unlike mobile's
+// lookahead-sized incremental refill) — this build is always a one-shot full-list shuffle.
+const DISCOVERY_MIN_TIER = 20;
 
 function smartShuffle(tracks: Track[]): Track[] {
-  type Candidate = { track: Track; artist: string };
-  const pool: Candidate[] = tracks.map(t => ({ track: t, artist: t.artist || '?' }));
-  const result: Track[] = [];
-  const recentArtists: string[] = [];
-
-  while (pool.length > 0) {
-    const freq = new Map<string, number>();
-    for (const a of recentArtists.slice(-ARTIST_LOOKBEHIND)) {
-      freq.set(a, (freq.get(a) ?? 0) + 1);
-    }
-    const weights = pool.map(c => Math.pow(ARTIST_PENALTY, freq.get(c.artist) ?? 0));
-    const total = weights.reduce((s, w) => s + w, 0);
-    let r = Math.random() * total;
-    let idx = pool.length - 1;
-    for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break; } }
-    result.push(pool[idx].track);
-    recentArtists.push(pool[idx].artist);
-    pool.splice(idx, 1);
-  }
-  return result;
+  const byHash = new Map(tracks.map(t => [t.hash, t]));
+  const hashToArtist = new Map(tracks.map(t => [t.hash, t.artist || '?']));
+  const hashes = tracks.map(t => t.hash);
+  const picks = pickSmart(hashes, hashToArtist, [], hashes.length);
+  return picks.map(h => byHash.get(h)!);
 }
 
 function weightedShuffle(tracks: Track[], playCounts: Map<string, number>): Track[] {
-  const pool = [...tracks];
-  const result: Track[] = [];
-  while (pool.length > 0) {
-    const weights = pool.map(t => 1 / ((playCounts.get(t.hash) ?? 0) + 1));
-    const total = weights.reduce((s, w) => s + w, 0);
-    let r = Math.random() * total;
-    let idx = pool.length - 1;
-    for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break; } }
-    result.push(pool[idx]);
-    pool.splice(idx, 1);
-  }
-  return result;
+  const byHash = new Map(tracks.map(t => [t.hash, t]));
+  const hashes = tracks.map(t => t.hash);
+  const picks = pickWeighted(hashes, playCounts, hashes.length);
+  return picks.map(h => byHash.get(h)!);
 }
 
 function discoveryShuffle(tracks: Track[], playCounts: Map<string, number>): Track[] {
   if (tracks.length === 0) return [];
-  const minPlays = Math.min(...tracks.map(t => playCounts.get(t.hash) ?? 0));
-  const tier = tracks.filter(t => (playCounts.get(t.hash) ?? 0) === minPlays);
-  const pool = tier.length >= Math.min(20, tracks.length) ? [...tier] : [...tracks];
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool;
+  const byHash = new Map(tracks.map(t => [t.hash, t]));
+  const hashes = tracks.map(t => t.hash);
+  const picks = pickDiscovery(hashes, playCounts, hashes.length, DISCOVERY_MIN_TIER);
+  return picks.map(h => byHash.get(h)!);
 }
 
-function buildShuffledQueue(tracks: Track[], mode: ShuffleMode, playCounts?: Map<string, number>): Track[] {
+function favoritesShuffle(tracks: Track[], playCounts: Map<string, number>, favorites: Set<string>): Track[] {
+  const byHash = new Map(tracks.map(t => [t.hash, t]));
+  const hashes = tracks.map(t => t.hash);
+  const picks = pickFavorites(hashes, playCounts, favorites, hashes.length);
+  return picks.map(h => byHash.get(h)!);
+}
+
+function buildShuffledQueue(
+  tracks: Track[], mode: ShuffleMode, playCounts?: Map<string, number>, favorites?: Set<string>,
+): Track[] {
   if (mode === 'smart') return smartShuffle(tracks);
   if (mode === 'weighted') return weightedShuffle(tracks, playCounts ?? new Map());
   if (mode === 'discovery') return discoveryShuffle(tracks, playCounts ?? new Map());
+  if (mode === 'favorites') return favoritesShuffle(tracks, playCounts ?? new Map(), favorites ?? new Set());
   return fisherYates(tracks);
 }
 
@@ -327,7 +306,7 @@ export default function DesktopApp(): JSX.Element {
   const sr = useRef({
     loopMode, playQueue, activeQueue, loadedHash, manualQueue,
     abA, abB, durationMs, positionMs, activeTrackId,
-    isShuffle, shuffleMode: settings.shuffleMode,
+    isShuffle, shuffleMode: settings.shuffleMode, favorites,
     // The queue/context the CURRENTLY LOADED track actually belongs to — deliberately
     // NOT synced every render like the fields above. `playQueue`/`activeQueue` track
     // whatever's being VIEWED (they're derived from activePlaylistId, which changes
@@ -356,6 +335,7 @@ export default function DesktopApp(): JSX.Element {
   sr.current.activeTrackId  = activeTrackId;
   sr.current.isShuffle      = isShuffle;
   sr.current.shuffleMode    = settings.shuffleMode;
+  sr.current.favorites      = favorites;
   // The `spotify:` sentinel isn't a real playlist context (its queue falls back
   // to the library, same as browsing nothing) — mirrors `resolvePlayingContext` below.
   sr.current.viewedPlaylistId = activePlaylistId && !activePlaylistId.startsWith('spotify:') ? activePlaylistId : null;
@@ -565,9 +545,9 @@ export default function DesktopApp(): JSX.Element {
         const restored = r.shuffledHashes
           .filter(h => validSet.has(h))
           .map(h => trackOrder.find(t => t.hash === h)!);
-        restoredQueue = restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current);
+        restoredQueue = restored.length > 0 ? restored : buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current, favorites);
       } else {
-        restoredQueue = buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current);
+        restoredQueue = buildShuffledQueue(trackOrder, r.shuffleMode, playCountsRef.current, favorites);
       }
       setShuffledQueue(restoredQueue);
       snapshotPlayingQueue(restoredQueue, trackOrder, null, 'main', true);
@@ -713,7 +693,7 @@ export default function DesktopApp(): JSX.Element {
         }
         // Branch switch within same playlist — rebuild shuffled queue from new tracks
         if (!playlistChanged && newTracks.length > 0) {
-          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode, playCountsRef.current) : null);
+          setShuffledQueue(q => q ? buildShuffledQueue(newTracks, sr.current.shuffleMode, playCountsRef.current, favorites) : null);
         }
         // Returning to the actively-playing (shuffled) playlist — re-key the
         // provisional restore above (which used the last snapshot's Track
@@ -774,9 +754,9 @@ export default function DesktopApp(): JSX.Element {
         const restored = r.shuffledHashes
           .filter(h => validSet.has(h))
           .map(h => playlistTracks.find(t => t.hash === h)!);
-        restoredQueue = restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current);
+        restoredQueue = restored.length > 0 ? restored : buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current, favorites);
       } else {
-        restoredQueue = buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current);
+        restoredQueue = buildShuffledQueue(playlistTracks, r.shuffleMode, playCountsRef.current, favorites);
       }
       setShuffledQueue(restoredQueue);
       snapshotPlayingQueue(restoredQueue, playlistTracks, activePlaylistId, activeBranch, true);
@@ -955,7 +935,8 @@ export default function DesktopApp(): JSX.Element {
         // looking at a different playlist/the Spotify view would advance into an
         // unrelated queue, or wrap/reshuffle based on the wrong shuffle toggle.
         const { manualQueue: mq, playingQueue: pq, playingActiveQueue: aq,
-                playingIsShuffle: shuffle, shuffleMode: sm, activeTrackId: atid } = sr.current;
+                playingIsShuffle: shuffle, shuffleMode: sm, activeTrackId: atid,
+                favorites: favs } = sr.current;
 
         if (mq.length > 0) {
           const [next, ...rest] = mq;
@@ -971,7 +952,7 @@ export default function DesktopApp(): JSX.Element {
         if (nextIdx >= pq.length) {
           // End of queue — reshuffle or wrap
           if (shuffle && aq.length > 0) {
-            const newQ = buildShuffledQueue(aq, sm, playCountsRef.current);
+            const newQ = buildShuffledQueue(aq, sm, playCountsRef.current, favs);
             // Avoid immediately repeating the just-finished track at position 0.
             if (newQ.length > 1 && newQ[0].hash === lh) [newQ[0], newQ[1]] = [newQ[1], newQ[0]];
             // Canonical playing order always gets the reshuffle, regardless of
@@ -1187,11 +1168,11 @@ export default function DesktopApp(): JSX.Element {
     });
   };
 
-  // off → fisher-yates → smart → weighted → discovery → off
+  // off → fisher-yates → smart → weighted → discovery → favorites → off
   const handleShuffle = async () => {
     const applyMode = (mode: ShuffleMode, label: string) => {
       updateSetting('shuffleMode', mode);
-      const newQ = buildShuffledQueue(activeQueue, mode, playCountsRef.current);
+      const newQ = buildShuffledQueue(activeQueue, mode, playCountsRef.current, favorites);
       sr.current.isShuffle = true;
       setShuffledQueue(newQ);
       setIsShuffle(true);
@@ -1219,6 +1200,8 @@ export default function DesktopApp(): JSX.Element {
       applyMode('weighted', 'Weighted');
     } else if (settings.shuffleMode === 'weighted') {
       applyMode('discovery', 'Discovery');
+    } else if (settings.shuffleMode === 'discovery') {
+      applyMode('favorites', 'Favorites');
     } else {
       sr.current.isShuffle = false;
       setShuffledQueue(null);

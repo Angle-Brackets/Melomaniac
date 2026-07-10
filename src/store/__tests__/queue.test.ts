@@ -219,6 +219,118 @@ describe('ShuffleMode.Smart', () => {
   })
 })
 
+// ── ShuffleMode.Favorites (favorited + play-count biased) ────────────────────
+
+describe('ShuffleMode.Favorites', () => {
+  it('all produced hashes belong to the queue', () => {
+    store.getState().setShuffle(ShuffleMode.Favorites)
+    store.getState().loadQueue(HASHES)
+    store.getState().shuffledQueue.forEach(h => expect(HASHES).toContain(h))
+  })
+
+  it('produces a full permutation with no duplicates', () => {
+    store.getState().setShuffle(ShuffleMode.Favorites)
+    store.getState().loadQueue(HASHES)
+    const batch = store.getState().shuffledQueue.slice(0, HASHES.length)
+    expect([...batch].sort()).toEqual([...HASHES].sort())
+  })
+
+  it('strongly favors a favorited track over non-favorited ones at the front of the queue', () => {
+    const tracks = makeTracks([
+      { hash: 'fav', artist: 'A' },
+      { hash: 'x1', artist: 'B' },
+      { hash: 'x2', artist: 'C' },
+      { hash: 'x3', artist: 'D' },
+      { hash: 'x4', artist: 'E' },
+    ]).map(t => ({ ...t, favorited: t.hash === 'fav' }))
+    store.setState({ tracks })
+    store.getState().loadQueue(tracks.map(t => t.hash))
+
+    let firstIsFav = 0
+    const trials = 100
+    for (let i = 0; i < trials; i++) {
+      store.setState({ shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0, shuffle: ShuffleMode.Favorites })
+      store.getState().refillShuffleQueue()
+      if (store.getState().shuffledQueue[0] === 'fav') firstIsFav++
+    }
+    // Unbiased random would land 'fav' first ~20% of the time — FAVORITE_BONUS should push this well above that.
+    expect(firstIsFav / trials).toBeGreaterThan(0.5)
+  })
+})
+
+// ── Manual queue (Play Next / Add to Queue) ───────────────────────────────────
+
+describe('manual queue', () => {
+  it('addToQueue ("Play Next") prepends and is consumed first by advance/currentHash', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().addToQueue('z')
+    expect(store.getState().manualQueue).toEqual(['z'])
+    store.getState().advance()
+    expect(store.getState().currentHash()).toBe('z')
+    // The linear index didn't move — the manual pick is layered on top of it.
+    expect(store.getState().currentIndex).toBe(0)
+  })
+
+  it('appendToQueue ("Add to Queue") preserves insertion order behind existing manual entries', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().addToQueue('first')
+    store.getState().appendToQueue('second')
+    store.getState().appendToQueue('third')
+    expect(store.getState().manualQueue).toEqual(['first', 'second', 'third'])
+  })
+
+  it('advance() falls back to the normal queue once manualQueue is drained', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().addToQueue('z')
+    store.getState().advance() // consumes 'z'
+    expect(store.getState().currentHash()).toBe('z')
+    store.getState().advance() // manualQueue now empty — resumes linear advance
+    expect(store.getState().currentHash()).toBe('b')
+    expect(store.getState().currentIndex).toBe(1)
+  })
+
+  it('removeUpcomingTrack filters manualQueue as well as the natural queue', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().addToQueue('z')
+    store.getState().removeUpcomingTrack('z')
+    expect(store.getState().manualQueue).toEqual([])
+  })
+
+  it('removeFromManualQueue removes by index', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().appendToQueue('x')
+    store.getState().appendToQueue('y')
+    store.getState().removeFromManualQueue(0)
+    expect(store.getState().manualQueue).toEqual(['y'])
+  })
+
+  it('clearManualQueue empties it', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().appendToQueue('x')
+    store.getState().clearManualQueue()
+    expect(store.getState().manualQueue).toEqual([])
+  })
+
+  it('loadQueue resets manualQueue and activeManualHash', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().addToQueue('z')
+    store.getState().advance()
+    expect(store.getState().currentHash()).toBe('z')
+    store.getState().loadQueue(['p', 'q'])
+    expect(store.getState().manualQueue).toEqual([])
+    expect(store.getState().currentHash()).toBe('p')
+  })
+
+  it('retreat() clears activeManualHash instead of un-consuming the manual queue', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().addToQueue('z')
+    store.getState().advance()
+    expect(store.getState().currentHash()).toBe('z')
+    store.getState().retreat()
+    expect(store.getState().currentHash()).toBe('a')
+  })
+})
+
 // ── setShuffle ────────────────────────────────────────────────────────────────
 
 describe('setShuffle', () => {

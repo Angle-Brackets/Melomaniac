@@ -1262,7 +1262,7 @@ function ActionTile({ Icon, label, badge, onPress }: {
   );
 }
 
-const SHUFFLE_CYCLE = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery] as const;
+const SHUFFLE_CYCLE = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery, ShuffleMode.Favorites] as const;
 
 // ── Main PlaylistDetail component ────────────────────────────────────────────
 // `onBack`  — navigates up to the playlist library list.
@@ -1603,7 +1603,7 @@ export function PlaylistDetail({ onBack, onTab }: { onBack: () => void; onTab: (
     : playlistTracks;
 
   const shuffleActive = shuffle !== ShuffleMode.Off;
-  const ShuffleIcon   = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : Icons.shuffle;
+  const ShuffleIcon   = shuffle === ShuffleMode.Random ? Icons.shuffleRandom : shuffle === ShuffleMode.Favorites ? Icons.heartFill : Icons.shuffle;
   const ghostTrack    = draggingIdx !== null ? filteredTracks[draggingIdx] ?? null : null;
 
   return (

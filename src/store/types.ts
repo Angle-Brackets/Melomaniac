@@ -7,6 +7,7 @@ export enum ShuffleMode {
   Smart     = 'Smart',     // weighted selection that penalises same-artist back-to-back picks
   Weighted  = 'Weighted',  // inversely weighted by play count — less-heard tracks surface more often
   Discovery = 'Discovery', // extreme bias toward unheard tracks; falls back to least-played when exhausted
+  Favorites = 'Favorites', // biased toward favorited + most-played tracks; favorited status outweighs play count
 }
 
 export enum RepeatMode {

@@ -3,9 +3,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { RepeatMode, ShuffleMode } from './types'
 import type { TrackStats } from './types'
 import type { StoreState } from './index'
+import { fisherYates, pickWeighted, pickDiscovery, pickSmart, pickFavorites } from './shuffleAlgorithms'
 
 // Start topping up before the queue fully drains so the UI always has upcoming tracks to display
 const REFILL_THRESHOLD = 5
+// How many recent artists to seed pickSmart's lookbehind with, taken from the tail of shuffleHistory
+const ARTIST_LOOKBEHIND = 4
 
 export type QueueSlice = {
   queueTracks: string[]  // hashes in original load order
@@ -16,26 +19,25 @@ export type QueueSlice = {
   shuffleHistory: string[] // recently played hashes used to avoid immediate repeats on refill
   shuffleIndex: number    // current position within shuffledQueue
   lookahead: number       // how many tracks to pre-generate per refill (default 20)
-  trackPlayCounts: Map<string, number> // hash → play_count; populated on demand for Weighted/Discovery
+  trackPlayCounts: Map<string, number> // hash → play_count; populated on demand for Weighted/Discovery/Favorites
+  manualQueue: string[]        // FIFO priority queue — consumed by advance() before the normal linear/shuffle order
+  activeManualHash: string | null // set when advance() just pulled a track from manualQueue; overrides currentHash()
 
   // Selector: encapsulates the shuffle/linear branch so callers don't duplicate it
   currentHash: () => string | null
   loadQueue: (hashes: string[]) => void
   advance: () => void
-  retreat: () => void // shifts index only — does not pop shuffleHistory
+  retreat: () => void // shifts index only — does not pop shuffleHistory or un-consume manualQueue
   jumpTo: (index: number) => void
   setShuffle: (mode: ShuffleMode) => void
   setRepeat: (mode: RepeatMode) => void
   refillShuffleQueue: () => void
   removeUpcomingTrack: (hash: string) => void
-  addToQueue: (hash: string) => void
+  addToQueue: (hash: string) => void       // "Play Next" — prepend to manualQueue
+  appendToQueue: (hash: string) => void    // "Add to Queue" — append to manualQueue
+  removeFromManualQueue: (index: number) => void
+  clearManualQueue: () => void
 }
-
-// How many recent artists to consider when penalising same-artist picks
-const ARTIST_LOOKBEHIND = 4
-// Weight multiplier per additional occurrence of the same artist in the lookbehind window.
-// 0.25^1 = 25% weight (75% penalty), 0.25^2 = 6.25% weight (94% penalty), etc.
-const ARTIST_PENALTY = 0.25
 
 export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (set, get) => ({
   queueTracks: [],
@@ -47,20 +49,34 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   shuffleIndex: 0,
   lookahead: 20,
   trackPlayCounts: new Map(),
+  manualQueue: [],
+  activeManualHash: null,
 
   currentHash: () => {
-    const { queueTracks, currentIndex, shuffle, shuffledQueue, shuffleIndex } = get()
+    const { queueTracks, currentIndex, shuffle, shuffledQueue, shuffleIndex, activeManualHash } = get()
+    if (activeManualHash) return activeManualHash
     if (shuffle !== ShuffleMode.Off) return shuffledQueue[shuffleIndex] ?? null
     return queueTracks[currentIndex] ?? null
   },
 
   loadQueue: (hashes) => {
-    set({ queueTracks: hashes, currentIndex: 0, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
+    set({
+      queueTracks: hashes, currentIndex: 0,
+      shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0,
+      manualQueue: [], activeManualHash: null,
+    })
     if (get().shuffle !== ShuffleMode.Off) get().refillShuffleQueue()
   },
 
   advance: () => {
-    const { queueTracks, currentIndex, shuffle, repeat, shuffledQueue, shuffleIndex } = get()
+    const { manualQueue, queueTracks, currentIndex, shuffle, repeat, shuffledQueue, shuffleIndex } = get()
+
+    if (manualQueue.length > 0) {
+      const [next, ...rest] = manualQueue
+      set({ manualQueue: rest, activeManualHash: next })
+      return
+    }
+    set({ activeManualHash: null })
 
     if (shuffle !== ShuffleMode.Off) {
       const next = shuffleIndex + 1
@@ -80,6 +96,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
 
   retreat: () => {
     const { currentIndex, shuffle, shuffleIndex } = get()
+    set({ activeManualHash: null })
     if (shuffle !== ShuffleMode.Off) {
       set({ shuffleIndex: Math.max(0, shuffleIndex - 1) })
     } else {
@@ -89,13 +106,13 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
 
   jumpTo: (index) => {
     const { queueTracks } = get()
-    if (index >= 0 && index < queueTracks.length) set({ currentIndex: index })
+    if (index >= 0 && index < queueTracks.length) set({ currentIndex: index, activeManualHash: null })
   },
 
   setShuffle: async (mode) => {
     const playing = get().currentHash()
     set({ shuffle: mode, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
-    if (mode === ShuffleMode.Weighted || mode === ShuffleMode.Discovery) {
+    if (mode === ShuffleMode.Weighted || mode === ShuffleMode.Discovery || mode === ShuffleMode.Favorites) {
       try {
         const stats = await invoke<[string, TrackStats][]>('library_get_all_track_stats')
         set({ trackPlayCounts: new Map(stats.map(([h, s]) => [h, s.play_count])) })
@@ -119,32 +136,36 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   setRepeat: (mode) => set({ repeat: mode }),
 
   removeUpcomingTrack: (hash) => {
-    const { shuffle, shuffledQueue, shuffleIndex, queueTracks, currentIndex } = get()
+    const { shuffle, shuffledQueue, shuffleIndex, queueTracks, currentIndex, manualQueue } = get()
+    const nextManualQueue = manualQueue.filter(h => h !== hash)
     if (shuffle !== ShuffleMode.Off) {
       const before = shuffledQueue.slice(0, shuffleIndex + 1)
       const after  = shuffledQueue.slice(shuffleIndex + 1).filter(h => h !== hash)
-      set({ shuffledQueue: [...before, ...after] })
+      set({ shuffledQueue: [...before, ...after], manualQueue: nextManualQueue })
     } else {
       const before = queueTracks.slice(0, currentIndex + 1)
       const after  = queueTracks.slice(currentIndex + 1).filter(h => h !== hash)
-      set({ queueTracks: [...before, ...after] })
+      set({ queueTracks: [...before, ...after], manualQueue: nextManualQueue })
     }
   },
 
-  // Inserts immediately after the currently playing track — the added song is
-  // the very next thing to play, ahead of whatever was already upcoming.
+  // "Play Next" — the added song is the very next thing to play, ahead of the manual
+  // queue's existing entries and the natural upcoming queue.
   addToQueue: (hash) => {
-    const { shuffle, shuffledQueue, shuffleIndex, queueTracks, currentIndex } = get()
-    if (shuffle !== ShuffleMode.Off) {
-      const before = shuffledQueue.slice(0, shuffleIndex + 1)
-      const after  = shuffledQueue.slice(shuffleIndex + 1)
-      set({ shuffledQueue: [...before, hash, ...after] })
-    } else {
-      const before = queueTracks.slice(0, currentIndex + 1)
-      const after  = queueTracks.slice(currentIndex + 1)
-      set({ queueTracks: [...before, hash, ...after] })
-    }
+    set({ manualQueue: [hash, ...get().manualQueue] })
   },
+
+  // "Add to Queue" — appended after whatever's already manually queued, still ahead of
+  // the natural upcoming queue.
+  appendToQueue: (hash) => {
+    set({ manualQueue: [...get().manualQueue, hash] })
+  },
+
+  removeFromManualQueue: (index) => {
+    set({ manualQueue: get().manualQueue.filter((_, i) => i !== index) })
+  },
+
+  clearManualQueue: () => set({ manualQueue: [] }),
 
   refillShuffleQueue: () => {
     const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks, trackPlayCounts } = get()
@@ -155,81 +176,23 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
     let candidates = queueTracks.filter(h => !recentSet.has(h))
     if (candidates.length === 0) candidates = [...queueTracks]
 
+    const count = Math.min(lookahead, candidates.length)
     let picks: string[]
 
     if (shuffle === ShuffleMode.Weighted) {
-      // weight = 1 / (play_count + 1): unheard tracks get weight 1, heard once get 0.5, etc.
-      const pool = [...candidates]
-      picks = []
-      const count = Math.min(lookahead, pool.length)
-      for (let i = 0; i < count; i++) {
-        const weights = pool.map(h => 1 / ((trackPlayCounts.get(h) ?? 0) + 1))
-        const total = weights.reduce((s, w) => s + w, 0)
-        let r = Math.random() * total
-        let idx = pool.length - 1
-        for (let j = 0; j < pool.length; j++) { r -= weights[j]; if (r <= 0) { idx = j; break } }
-        picks.push(pool[idx])
-        pool.splice(idx, 1)
-      }
+      picks = pickWeighted(candidates, trackPlayCounts, count)
     } else if (shuffle === ShuffleMode.Discovery) {
-      // Tier candidates by play count; pick from the lowest-play tier first.
-      const minPlays = Math.min(...candidates.map(h => trackPlayCounts.get(h) ?? 0))
-      const tier = candidates.filter(h => (trackPlayCounts.get(h) ?? 0) === minPlays)
-      const pool = tier.length >= Math.min(lookahead, candidates.length) ? tier : candidates
-      picks = [...pool]
-      for (let i = picks.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        ;[picks[i], picks[j]] = [picks[j], picks[i]]
-      }
-      picks = picks.slice(0, lookahead)
+      picks = pickDiscovery(candidates, trackPlayCounts, count)
+    } else if (shuffle === ShuffleMode.Favorites) {
+      const favorited = new Set(tracks.filter(t => t.favorited).map(t => t.hash))
+      picks = pickFavorites(candidates, trackPlayCounts, favorited, count)
     } else if (shuffle === ShuffleMode.Random) {
-      // Fisher-Yates: uniform random permutation, no repeats within a full cycle
-      picks = [...candidates]
-      for (let i = picks.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        ;[picks[i], picks[j]] = [picks[j], picks[i]]
-      }
+      picks = fisherYates(candidates)
     } else {
       // Smart: weighted selection without replacement that spreads artists across the queue.
-      // Each candidate's weight is penalised by how recently its artist was heard.
-      // weight = ARTIST_PENALTY ^ (# times artist appears in lookbehind window)
-      // e.g. heard once → ×0.25, twice → ×0.0625 — same-artist back-to-back is very unlikely.
       const hashToArtist = new Map(tracks.map(t => [t.hash, t.artist]))
-
-      type Candidate = { hash: string; artist: string }
-      const pool: Candidate[] = candidates.map(h => ({
-        hash: h,
-        artist: hashToArtist.get(h) ?? '',
-      }))
-
-      // Seed context with the tail of history so the first pick respects what was just heard
-      const recentArtists = shuffleHistory
-        .slice(-ARTIST_LOOKBEHIND)
-        .map(h => hashToArtist.get(h) ?? '')
-
-      picks = []
-      const count = Math.min(lookahead, pool.length)
-
-      for (let i = 0; i < count; i++) {
-        const freq = new Map<string, number>()
-        for (const a of recentArtists.slice(-ARTIST_LOOKBEHIND)) {
-          freq.set(a, (freq.get(a) ?? 0) + 1)
-        }
-
-        const weights = pool.map(c => Math.pow(ARTIST_PENALTY, freq.get(c.artist) ?? 0))
-        const total   = weights.reduce((s, w) => s + w, 0)
-
-        let r = Math.random() * total
-        let idx = pool.length - 1
-        for (let j = 0; j < pool.length; j++) {
-          r -= weights[j]
-          if (r <= 0) { idx = j; break }
-        }
-
-        picks.push(pool[idx].hash)
-        recentArtists.push(pool[idx].artist)
-        pool.splice(idx, 1)
-      }
+      const seedRecentArtists = shuffleHistory.slice(-ARTIST_LOOKBEHIND).map(h => hashToArtist.get(h) ?? '')
+      picks = pickSmart(candidates, hashToArtist, seedRecentArtists, count)
     }
 
     set({
