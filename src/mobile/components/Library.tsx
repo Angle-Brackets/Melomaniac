@@ -285,9 +285,10 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
         onPointerCancel={inSelectMode ? undefined : cancelLp}
         onPointerMove={inSelectMode ? undefined : e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
         style={{
+          position: 'relative', zIndex: 1,
           height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
           cursor: inSelectMode ? 'pointer' : 'default',
-          background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'transparent',
+          background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'var(--bg-1)',
           borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
           transform: !inSelectMode && revealed ? `translateX(-${SWIPE_REVEAL_W}px)` : undefined,
           transition: 'transform 0.26s cubic-bezier(0.22,1,0.36,1)',
