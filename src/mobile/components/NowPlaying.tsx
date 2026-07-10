@@ -40,31 +40,57 @@ const CoverflowCard = React.memo(function CoverflowCard({ track, size, glow, pri
 });
 
 
-function SwipeToRemove({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) {
+const SWIPE_ADD_FRACTION    = 1 / 3;
+const SWIPE_REMOVE_FRACTION = 2 / 3;
+
+// Two-stage swipe on an upcoming-queue row: a partial swipe (>= 1/3 of the row's own
+// width) bumps the track to the front of the queue ("Play Next"); a full swipe (>= 2/3)
+// removes it from the queue outright. Thresholds are fractions of the measured row width
+// (not fixed pixels) so they hold across screen sizes.
+function SwipeQueueRow({ children, onAddNext, onRemove }: {
+  children: React.ReactNode;
+  onAddNext: () => void;
+  onRemove: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [dx, setDx] = useState(0);
   const [snapping, setSnapping] = useState(false);
   const startXRef = useRef(0);
+  const widthRef  = useRef(0);
+
+  const frac = widthRef.current > 0 ? dx / widthRef.current : 0;
+  const inRemoveZone = frac >= SWIPE_REMOVE_FRACTION;
+  const inAddZone    = frac >= SWIPE_ADD_FRACTION;
 
   return (
     <div
+      ref={containerRef}
       style={{ position: 'relative', overflow: 'hidden' }}
-      onTouchStart={e => { startXRef.current = e.touches[0].clientX; setSnapping(false); }}
+      onTouchStart={e => {
+        startXRef.current = e.touches[0].clientX;
+        widthRef.current  = containerRef.current?.clientWidth ?? 0;
+        setSnapping(false);
+      }}
       onTouchMove={e => {
         const d = e.touches[0].clientX - startXRef.current;
-        if (d > 0) setDx(Math.min(d, 120));
+        if (d > 0) setDx(Math.min(d, widthRef.current));
       }}
       onTouchEnd={() => {
-        if (dx > 80) onRemove();
+        if (inRemoveZone) onRemove();
+        else if (inAddZone) onAddNext();
         setSnapping(true);
         setDx(0);
       }}
     >
       <div style={{
         position: 'absolute', left: 0, top: 0, bottom: 0, width: '100%',
-        background: '#ef4444', display: 'flex', alignItems: 'center', paddingLeft: 16,
-        opacity: Math.min(1, dx / 60),
+        background: inRemoveZone ? '#ef4444' : 'var(--accent)',
+        display: 'flex', alignItems: 'center', paddingLeft: 16,
+        opacity: inAddZone ? 1 : Math.min(1, frac / SWIPE_ADD_FRACTION),
       }}>
-        <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>Remove</span>
+        <span style={{ color: '#fff', fontSize: 12, fontWeight: 700 }}>
+          {inRemoveZone ? 'Remove' : 'Play Next'}
+        </span>
       </div>
       <div style={{
         transform: `translateX(${dx}px)`,
@@ -73,6 +99,23 @@ function SwipeToRemove({ children, onRemove }: { children: React.ReactNode; onRe
       }}>
         {children}
       </div>
+    </div>
+  );
+}
+
+function NowPlayingToast({ message }: { message: string }) {
+  return (
+    <div style={{
+      position: 'absolute', bottom: 'calc(var(--tab-h) + 14px)', left: '50%', transform: 'translateX(-50%)',
+      background: 'var(--bg-3)', border: '0.5px solid var(--border-2)',
+      borderRadius: 20, padding: '8px 18px',
+      fontSize: 12, color: 'var(--accent-light, var(--accent))',
+      fontFamily: "'JetBrains Mono', monospace",
+      boxShadow: '0 4px 20px rgba(0,0,0,0.55)',
+      pointerEvents: 'none', zIndex: 200, whiteSpace: 'nowrap',
+      animation: 'mmFadeSlide 0.2s ease',
+    }}>
+      {message}
     </div>
   );
 }
@@ -105,15 +148,16 @@ const QUEUE_ROW_H    = 52;
 const QUEUE_LIST_H   = 252;
 const QUEUE_HEADER_H = 62; // pill (10px) + header row (padding 5+8 + minH 36) + 1px border
 
-// removable rows (strictly upcoming tracks) get a swipe-right-to-remove gesture on the
+// removable rows (strictly upcoming tracks) get the two-stage swipe gesture on the
 // content area — the drag handle is kept outside the swipe surface so the two gestures
 // never fight over the same touch (see the touchstart HANDLE_PX gating in the effect below).
-function QueueRow({ track, isActive, isPlaying, onClick, removable, onRemove }: {
+function QueueRow({ track, isActive, isPlaying, onClick, removable, onAddNext, onRemove }: {
   track: TrackRecord;
   isActive: boolean;
   isPlaying: boolean;
   onClick: () => void;
   removable?: boolean;
+  onAddNext?: () => void;
   onRemove?: () => void;
 }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
@@ -150,7 +194,9 @@ function QueueRow({ track, isActive, isPlaying, onClick, removable, onRemove }: 
   return (
     <div style={{ height: QUEUE_ROW_H, display: 'flex', alignItems: 'center' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {removable && onRemove ? <SwipeToRemove onRemove={onRemove}>{content}</SwipeToRemove> : content}
+        {removable && onAddNext && onRemove
+          ? <SwipeQueueRow onAddNext={onAddNext} onRemove={onRemove}>{content}</SwipeQueueRow>
+          : content}
       </div>
       {/* drag handle — touch-action:none so browser won't intercept as scroll */}
       <div style={{
@@ -621,6 +667,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const shuffleIndex          = useStore(s => s.shuffleIndex);
   const manualQueue           = useStore(s => s.manualQueue);
   const removeUpcomingTrack   = useStore(s => s.removeUpcomingTrack);
+  const addToQueue            = useStore(s => s.addToQueue);
   const toggleFavorite        = useStore(s => s.toggleFavorite);
   const playlists          = useStore(s => s.playlists);
   const currentPlaylistId  = useStore(s => s.currentPlaylistId);
@@ -652,6 +699,15 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // listScrolled temporarily hides the tab bar so the queue list gets extra height.
   const [listScrolled, setListScrolled] = useState(false);
   const inactivityRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Toast (queue add/remove confirmations) ──────────────────────────────────
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = useCallback((msg: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), 2200);
+  }, []);
 
   // ── Drag-to-reorder state ──────────────────────────────────────────────────
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
@@ -1428,7 +1484,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                           isPlaying={isPlaying}
                           onClick={() => { if (draggingIdx === null) { jumpTo(vItem.index); playTrack(track); } }}
                           removable={shuffle === ShuffleMode.Off && vItem.index > activeListIndex}
-                          onRemove={() => removeUpcomingTrack(track.hash)}
+                          onAddNext={() => { addToQueue(track.hash); showToast(`"${track.title}" will play next`); }}
+                          onRemove={() => { removeUpcomingTrack(track.hash); showToast(`Removed "${track.title}" from queue`); }}
                         />
                       </div>
                     );
@@ -1494,9 +1551,12 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                   <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', marginTop: 14, marginBottom: 2 }}>Coming Up</div>
                   {comingUp.map((t, i) => (
                     <div key={t.hash} style={{ animation: `mmFadeSlide ${TRANSITION_MED} both`, animationDelay: `${i * QUEUE_STAGGER_MS}ms` }}>
-                      <SwipeToRemove onRemove={() => removeUpcomingTrack(t.hash)}>
+                      <SwipeQueueRow
+                        onAddNext={() => { addToQueue(t.hash); showToast(`"${t.title}" will play next`); }}
+                        onRemove={() => { removeUpcomingTrack(t.hash); showToast(`Removed "${t.title}" from queue`); }}
+                      >
                         <QueueSheetRow track={t}/>
-                      </SwipeToRemove>
+                      </SwipeQueueRow>
                     </div>
                   ))}
                 </>
@@ -1618,6 +1678,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
           </MMSheet>
         </div>
       )}
+
+      {toast && <NowPlayingToast message={toast}/>}
     </div>
   );
 }
