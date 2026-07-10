@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
+import { FiAlertTriangle } from 'react-icons/fi';
 import { useStore } from '../../store';
 import type { TrackRecord, SpotifyTrackRecord } from '../../store/types';
 import { Icons } from '../icons';
@@ -125,8 +126,6 @@ function FilterPill({ label, active, count, onClick }: {
 
 const TRACK_H   = 62;
 const SECTION_H = 36;
-// How far left a track row slides to expose the "Add to Queue" affordance.
-const SWIPE_REVEAL_W = 72;
 
 function MMToast({ message }: { message: string }) {
   return (
@@ -212,6 +211,152 @@ function AddToPlaylistSheet({ hashes, onClose, onSuccess }: {
   );
 }
 
+interface PlaylistImpact {
+  playlist_id:   string;
+  playlist_name: string;
+  branch_count:  number;
+}
+
+const sheetBtnBase: React.CSSProperties = { width: '100%', padding: '12px', borderRadius: 99, fontSize: 14, fontWeight: 500, cursor: 'pointer', border: 'none' };
+
+// Long-press action-sheet: a menu step (Add to Playlist / Delete from Library),
+// then either drills into the existing AddToPlaylistSheet or into a delete-confirm
+// step that mirrors desktop's DeleteTracksModal.tsx exactly — same backend calls
+// (playlists_containing_tracks preview, library_remove_tracks_cascade), same
+// cascade/willPurge messaging — so the "recovery and error handling" behaves
+// identically across platforms.
+function TrackActionsSheet({ hashes, label, initialStep = 'menu', onClose, onAddSuccess, onDeleted }: {
+  hashes: string[];
+  label: string;
+  initialStep?: 'menu' | 'playlist';
+  onClose: () => void;
+  onAddSuccess: (msg: string) => void;
+  onDeleted: (hashes: string[]) => void;
+}) {
+  const [step, setStep] = useState<'menu' | 'playlist' | 'delete'>(initialStep);
+  const [impacts, setImpacts] = useState<PlaylistImpact[] | null>(null);
+  const [cascade, setCascade] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [errMsg, setErrMsg] = useState('');
+
+  useEffect(() => {
+    if (step !== 'delete') return;
+    let alive = true;
+    setImpacts(null);
+    invoke<PlaylistImpact[]>('playlists_containing_tracks', { hashes })
+      .then(res => { if (alive) setImpacts(res); })
+      .catch(() => { if (alive) setImpacts([]); });
+    return () => { alive = false; };
+  }, [step, hashes]);
+
+  const count = hashes.length;
+  const playlistCount = impacts?.length ?? 0;
+  // Purged immediately unless it's staying referenced in a playlist we're
+  // not also cascading out of — mirrors the backend's live_hashes check.
+  const willPurge = impacts !== null && (playlistCount === 0 || cascade);
+
+  const confirmDelete = async () => {
+    setDeleting(true); setErrMsg('');
+    try {
+      await invoke('library_remove_tracks_cascade', { hashes, cascade });
+      onDeleted(hashes);
+    } catch (e) {
+      setDeleting(false);
+      setErrMsg(String(e));
+    }
+  };
+
+  if (step === 'delete') return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+      <div onClick={() => !deleting && onClose()} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>
+      <MMSheet title="Delete from Library" subtitle={label} height="56%" onClose={deleting ? undefined : onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ fontSize: 13, lineHeight: 1.5, margin: 0, color: willPurge ? '#f87171' : 'var(--text-2)' }}>
+            {willPurge
+              ? `This permanently deletes the audio file${count !== 1 ? 's' : ''} from disk — this can't be undone.`
+              : `The audio file stays on disk, but the library entry ${count !== 1 ? 'these tracks use' : 'this track uses'} is removed.`}
+          </p>
+
+          {impacts === null && (
+            <span style={{ fontSize: 12, color: 'var(--text-3)', fontStyle: 'italic' }}>Checking playlists…</span>
+          )}
+
+          {impacts !== null && playlistCount > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 12, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <FiAlertTriangle size={14} style={{ color: '#f0b04a', flexShrink: 0, marginTop: 1 }} />
+                <span style={{ fontSize: 12, color: 'var(--text-1)', lineHeight: 1.5 }}>
+                  Also in <strong>{playlistCount}</strong> playlist{playlistCount !== 1 ? 's' : ''}:{' '}
+                  <span style={{ color: 'var(--text-2)' }}>{impacts.map(i => i.playlist_name).join(', ')}</span>
+                </span>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-1)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={cascade} onChange={e => setCascade(e.target.checked)} />
+                Also remove {count !== 1 ? 'these tracks' : 'it'} from {playlistCount === 1 ? 'that playlist' : 'those playlists'}
+              </label>
+              <span style={{ fontSize: 11, lineHeight: 1.4, color: cascade ? '#f87171' : 'var(--text-3)' }}>
+                {cascade
+                  ? `Also permanently deletes the audio file${count !== 1 ? 's' : ''} from disk, since nothing would still reference ${count !== 1 ? 'them' : 'it'} — this can't be undone.`
+                  : `Leaving this unchecked keeps ${count !== 1 ? 'these tracks' : 'it'} playable in ${playlistCount === 1 ? 'that playlist' : 'those playlists'} — the audio file is never deleted from storage, only unlisted from your library.`}
+              </span>
+            </div>
+          )}
+
+          {errMsg && <div style={{ color: '#f87171', fontSize: 12 }}>{errMsg}</div>}
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            <button
+              onClick={confirmDelete}
+              disabled={deleting || impacts === null}
+              style={{ ...sheetBtnBase, background: '#dc2626', color: '#fff', opacity: (deleting || impacts === null) ? 0.5 : 1 }}
+            >
+              {deleting ? 'Deleting…' : `Delete ${count} track${count !== 1 ? 's' : ''}`}
+            </button>
+            <button
+              onClick={() => setStep('menu')}
+              disabled={deleting}
+              style={{ ...sheetBtnBase, background: 'var(--bg-3)', color: 'var(--text-1)' }}
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      </MMSheet>
+    </div>
+  );
+
+  if (step === 'playlist') return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
+      <MMSheet title="Add to Playlist" subtitle={label} height="62%" onClose={onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
+        <AddToPlaylistSheet hashes={hashes} label={label} onClose={onClose} onSuccess={onAddSuccess}/>
+      </MMSheet>
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
+      <MMSheet title="Track" subtitle={label} height="30%" onClose={onClose} animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            onClick={() => setStep('playlist')}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, ...sheetBtnBase, background: 'var(--bg-3)', border: '0.5px solid var(--border-1)', color: 'var(--text-0)' }}
+          >
+            <Icons.plus size={16} stroke="var(--text-0)"/> Add to Playlist
+          </button>
+          <button
+            onClick={() => setStep('delete')}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, ...sheetBtnBase, background: 'transparent', border: '0.5px solid #f87171', color: '#f87171' }}
+          >
+            <Icons.trash size={16} stroke="#f87171"/> Delete from Library
+          </button>
+        </div>
+      </MMSheet>
+    </div>
+  );
+}
+
 type FlatItem =
   | { kind: 'section'; label: string; trailing?: string }
   | { kind: 'track';   track: TrackRecord; idx: number; playing: boolean }
@@ -219,15 +364,11 @@ type FlatItem =
 
 // ── TrackRow ───────────────────────────────────────────────────────────────────
 // Long-press (500 ms) opens the "Add to Playlist" action sheet.
-// A left swipe (≥48px) reveals an "Add to Queue" affordance, mirroring the
-// swipe-to-delete pattern in PlaylistDetail.tsx's TrackRow but non-destructive,
-// so the row doesn't need a confirming tap — the reveal itself IS the button.
-// In select-mode the row becomes a checkbox; long-press/swipe are disabled to
-// avoid conflicting with the selection tap target.
-function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onFavorite, selected, onSelect, revealed, onReveal, onClose, onAddToQueue }: {
+// In select-mode the row becomes a checkbox; long-press is disabled to avoid
+// conflicting with the selection tap target.
+function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onFavorite, selected, onSelect }: {
   track: TrackRecord; idx: number; playing?: boolean; spotifyLinked?: boolean;
   onLongPress?: () => void; onFavorite?: () => void; selected?: boolean; onSelect?: () => void;
-  revealed?: boolean; onReveal?: () => void; onClose?: () => void; onAddToQueue?: () => void;
 }) {
   // useTrackArtwork reads from the module-level artwork cache (artworkCache.ts)
   // via useSyncExternalStore — no fetch is started here; the cache is pre-populated
@@ -235,65 +376,25 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
   const artworkUrl = useTrackArtwork(track.hash, track.artwork_hash);
   const subtext = [track.artist ?? 'Unknown artist', track.album].filter(Boolean).join(' | ');
   const lpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startXRef = useRef(0);
-  const startYRef = useRef(0);
   const startLp = () => {
     lpTimer.current = setTimeout(() => { lpTimer.current = null; onLongPress?.(); }, 500);
   };
   const cancelLp = () => { if (lpTimer.current) { clearTimeout(lpTimer.current); lpTimer.current = null; } };
   const inSelectMode = onSelect !== undefined;
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-    startXRef.current = e.clientX;
-    startYRef.current = e.clientY;
-    startLp();
-  };
-  const handlePointerUp = (e: React.PointerEvent) => {
-    cancelLp();
-    const dx = e.clientX - startXRef.current;
-    const dy = e.clientY - startYRef.current;
-    // Predominantly vertical gesture → scroll, never touch the reveal state.
-    if (Math.abs(dy) > Math.abs(dx) + 5) { if (revealed) onClose?.(); return; }
-    if (dx < -48)     { onReveal?.(); return; }
-    if (dx > 24)      { onClose?.();  return; }
-    if (revealed)     { onClose?.(); }
-  };
-
   return (
-    <div style={{ position: 'relative', overflow: 'hidden' }}>
-      {/* Add-to-queue action — sits at absolute right edge, exposed when row slides left */}
-      {!inSelectMode && (
-        <div style={{
-          position: 'absolute', right: 0, top: 0, bottom: 0, width: SWIPE_REVEAL_W,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'var(--accent)',
-        }}>
-          <button
-            onClick={() => { onAddToQueue?.(); onClose?.(); }}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, color: 'var(--bg-0)' }}
-          >
-            <Icons.queue size={18} stroke="var(--bg-0)"/>
-            <span style={{ fontSize: 10, fontWeight: 600 }}>Queue</span>
-          </button>
-        </div>
-      )}
-      <div
-        onClick={inSelectMode ? onSelect : undefined}
-        onPointerDown={inSelectMode ? undefined : handlePointerDown}
-        onPointerUp={inSelectMode ? undefined : handlePointerUp}
-        onPointerCancel={inSelectMode ? undefined : cancelLp}
-        onPointerMove={inSelectMode ? undefined : e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
-        style={{
-          position: 'relative', zIndex: 1,
-          height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
-          cursor: inSelectMode ? 'pointer' : 'default',
-          background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'var(--bg-1)',
-          borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
-          transform: !inSelectMode && revealed ? `translateX(-${SWIPE_REVEAL_W}px)` : undefined,
-          transition: 'transform 0.26s cubic-bezier(0.22,1,0.36,1)',
-          willChange: !inSelectMode ? 'transform' : undefined,
-        }}>
+    <div
+      onClick={inSelectMode ? onSelect : undefined}
+      onPointerDown={inSelectMode ? undefined : startLp}
+      onPointerUp={inSelectMode ? undefined : cancelLp}
+      onPointerCancel={inSelectMode ? undefined : cancelLp}
+      onPointerMove={inSelectMode ? undefined : e => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 6) cancelLp(); }}
+      style={{
+        height: TRACK_H, display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+        cursor: inSelectMode ? 'pointer' : 'default',
+        background: selected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : playing ? 'oklch(0.62 0.15 28 / 0.08)' : 'var(--bg-1)',
+        borderLeft: playing ? '2px solid var(--accent)' : '2px solid transparent',
+      }}>
       {inSelectMode ? (
         <div style={{ width: 18, height: 18, borderRadius: 9, flexShrink: 0,
           background: selected ? 'var(--accent)' : 'transparent',
@@ -340,7 +441,6 @@ function TrackRow({ track, idx, playing = false, spotifyLinked, onLongPress, onF
       <span style={{ fontSize: 11, color: 'var(--text-2)', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
         {fmtDuration(track.duration_ms)}
       </span>
-      </div>
     </div>
   );
 }
@@ -573,7 +673,8 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const libraryStatus   = useStore(s => s.libraryStatus);
   const loadedTrackHash = useStore(s => s.loadedTrackHash);
   const toggleFavorite  = useStore(s => s.toggleFavorite);
-  const addToQueue      = useStore(s => s.addToQueue);
+  const removeTracks    = useStore(s => s.removeTracks);
+  const demoteMatchedHashes = useStore(s => s.demoteMatchedHashes);
   const importedTracks              = useStore(s => s.importedTracks);
   const reviewTracks                = useStore(s => s.reviewTracks);
   const downloadingSpotifyIds       = useStore(s => s.downloadingSpotifyIds);
@@ -582,11 +683,10 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
   const [filter,         setFilter]         = useState<FilterId>('all');
   const [query,          setQuery]          = useState('');
   const [sortCriteria,   setSortCriteria]   = useState<SortCriterion[]>(loadCriteria);
-  const [actionSheet,    setActionSheet]    = useState<{ hashes: string[]; label: string } | null>(null);
+  const [actionSheet,    setActionSheet]    = useState<{ hashes: string[]; label: string; initialStep?: 'menu' | 'playlist' } | null>(null);
   const [externalSheet,  setExternalSheet]  = useState<{ spotifyId: string; label: string } | null>(null);
   const [selectMode,     setSelectMode]     = useState(false);
   const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
-  const [revealedHash,   setRevealedHash]   = useState<string | null>(null);
   const [toast,          setToast]          = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listRef      = useRef<HTMLDivElement>(null);
@@ -803,7 +903,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       </div>
 
       {/* Virtualized track list */}
-      <div ref={el => { (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el; (ptrRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }} onScroll={() => setRevealedHash(null)} style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
+      <div ref={el => { (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el; (ptrRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }} style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', paddingBottom: selectMode ? 'calc(56px + var(--tab-h))' : 'var(--tab-h)' }} className="mm-scroll">
         <PullSpinner pullY={pullY} refreshing={refreshing}/>
         {libraryStatus === 'ready' && flatItems.length === 0 ? (
           <div style={{ padding: '48px 22px', textAlign: 'center', color: 'var(--text-3)', fontSize: 14 }}>
@@ -831,10 +931,6 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
                         onFavorite={() => toggleFavorite(item.track.hash)}
                         selected={selectMode ? selectedHashes.has(item.track.hash) : undefined}
                         onSelect={selectMode ? () => toggleSelect(item.track.hash) : undefined}
-                        revealed={revealedHash === item.track.hash}
-                        onReveal={() => setRevealedHash(item.track.hash)}
-                        onClose={() => setRevealedHash(null)}
-                        onAddToQueue={() => { addToQueue(item.track.hash); showToast(`"${item.track.title}" added to queue`); }}
                       />
                   }
                 </div>
@@ -852,7 +948,7 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
           </span>
           {selectedHashes.size > 0 && (
             <button
-              onClick={() => setActionSheet({ hashes: [...selectedHashes], label: `${selectedHashes.size} track${selectedHashes.size !== 1 ? 's' : ''}` })}
+              onClick={() => setActionSheet({ hashes: [...selectedHashes], label: `${selectedHashes.size} track${selectedHashes.size !== 1 ? 's' : ''}`, initialStep: 'playlist' })}
               style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--accent)', border: 'none', borderRadius: 20, padding: '7px 14px', cursor: 'pointer', color: 'var(--bg-0)', fontSize: 13, fontWeight: 600 }}
             >
               Add to Playlist <Icons.chevRight size={13} stroke="var(--bg-0)"/>
@@ -867,23 +963,20 @@ export function Library({ onTab }: { onTab: (id: TabId) => void; onPlaylistDetai
       {toast && <MMToast message={toast}/>}
 
       {actionSheet && (
-        <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
-          <div onClick={() => setActionSheet(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }}/>
-          <MMSheet
-            title="Add to Playlist"
-            subtitle={actionSheet.label}
-            height="62%"
-            animStyle={{ animation: 'mmSheetUp 0.3s cubic-bezier(0.22,1,0.36,1) both' }}
-            onClose={() => setActionSheet(null)}
-          >
-            <AddToPlaylistSheet
-              hashes={actionSheet.hashes}
-              label={actionSheet.label}
-              onClose={() => setActionSheet(null)}
-              onSuccess={msg => { setActionSheet(null); showToast(msg); exitSelectMode(); }}
-            />
-          </MMSheet>
-        </div>
+        <TrackActionsSheet
+          hashes={actionSheet.hashes}
+          label={actionSheet.label}
+          initialStep={actionSheet.initialStep}
+          onClose={() => setActionSheet(null)}
+          onAddSuccess={msg => { setActionSheet(null); showToast(msg); exitSelectMode(); }}
+          onDeleted={hashes => {
+            setActionSheet(null);
+            removeTracks(hashes);
+            demoteMatchedHashes(hashes);
+            showToast(`Deleted ${hashes.length} track${hashes.length !== 1 ? 's' : ''}`);
+            exitSelectMode();
+          }}
+        />
       )}
 
       {externalSheet && (
