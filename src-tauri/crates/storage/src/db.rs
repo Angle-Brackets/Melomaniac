@@ -1169,6 +1169,45 @@ impl Database {
         }).collect())
     }
 
+    /// Return per-day, per-track play counts and listen time within an optional
+    /// time range, plus per-track skip totals for the same range. `start_ts`/
+    /// `end_ts` are unix seconds (inclusive); `None` on either side means
+    /// unbounded on that side (both `None` ⇒ all-time). Day boundaries use the
+    /// local timezone so they line up with what the user actually experiences
+    /// as "today". Callers derive both range-total aggregates (for a stats
+    /// table) and a day-bucketed series (for a chart) from the same rows.
+    pub async fn get_listen_stats_range(
+        &self,
+        start_ts: Option<i64>,
+        end_ts:   Option<i64>,
+    ) -> Result<(Vec<DailyTrackStat>, Vec<(String, i64)>), StorageError> {
+        let daily: Vec<(String, String, i64, i64)> = sqlx::query_as(
+            "SELECT hash,
+                    date(played_at, 'unixepoch', 'localtime') AS day,
+                    COUNT(*)                          AS play_count,
+                    COALESCE(SUM(duration_ms), 0)     AS listen_ms
+             FROM plays
+             WHERE (?1 IS NULL OR played_at >= ?1) AND (?2 IS NULL OR played_at <= ?2)
+             GROUP BY hash, day
+             ORDER BY day ASC"
+        )
+        .bind(start_ts).bind(end_ts).fetch_all(&self.pool).await?;
+
+        let skips: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT hash, COUNT(*) AS skip_count
+             FROM skips
+             WHERE (?1 IS NULL OR skipped_at >= ?1) AND (?2 IS NULL OR skipped_at <= ?2)
+             GROUP BY hash"
+        )
+        .bind(start_ts).bind(end_ts).fetch_all(&self.pool).await?;
+
+        let daily_stats = daily.into_iter()
+            .map(|(hash, date, play_count, listen_ms)| DailyTrackStat { hash, date, play_count, listen_ms })
+            .collect();
+
+        Ok((daily_stats, skips))
+    }
+
     pub async fn get_top_tracks(&self, limit: i64) -> Result<Vec<(String, TrackStats)>, StorageError> {
         // A single query with sub-selects avoids N+1 stats lookups.
         let rows: Vec<(String, i64, i64, i64)> = sqlx::query_as(
@@ -1208,6 +1247,17 @@ pub struct TrackStats {
     pub play_count:      i64,
     pub skip_count:      i64,
     pub total_listen_ms: i64,
+}
+
+/// One track's play activity on one calendar day (local time), used to build
+/// both range-total table stats and a day-bucketed chart series.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DailyTrackStat {
+    pub hash:       String,
+    /// `"YYYY-MM-DD"`, local time.
+    pub date:       String,
+    pub play_count: i64,
+    pub listen_ms:  i64,
 }
 
 // ── Artwork library entry ─────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ pub mod ingest;
 pub mod tree;
 
 pub use cas::CasStore;
-pub use db::{ArtworkLibraryEntry, BranchRecord, CommitRecord, Database, ExternalMatchPeer, ExternalTrackRecord, NewExternalTrack, PlaylistRecord, RejectionPeer, TrackRecord, TrackRejectionRecord, TrackStats};
+pub use db::{ArtworkLibraryEntry, BranchRecord, CommitRecord, Database, DailyTrackStat, ExternalMatchPeer, ExternalTrackRecord, NewExternalTrack, PlaylistRecord, RejectionPeer, TrackRecord, TrackRejectionRecord, TrackStats};
 pub use editor::{AudioMetadata, FileEntry, read_cas_metadata, set_cas_artwork, replace_cas_artwork, replace_cas_track_audio, set_artwork_for_track_list, file_set_artwork, edit_cas_tracks_bulk};
 pub use gc::{BlobInfo, BlobReference, GarbageCollector, GcReport};
 pub use indexer::{IndexerReport, Indexer};

@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use melomaniac_storage::{
-    ArtworkLibraryEntry, BranchRecord, CasStore, CommitRecord, Database, Indexer,
+    ArtworkLibraryEntry, BranchRecord, CasStore, CommitRecord, Database, DailyTrackStat, Indexer,
     PlaylistMeta, PlaylistRecord, TrackRecord, TrackStats, TreeBlob,
 };
 use serde::Serialize;
@@ -1582,6 +1582,18 @@ pub async fn library_get_all_track_stats(
     storage: State<'_, StorageState>,
 ) -> Result<Vec<(String, TrackStats)>, String> {
     storage.db.get_all_track_stats().await.map_err(|e| e.to_string())
+}
+
+/// Return day-bucketed play stats and range skip totals for the Listening
+/// Stats dashboard. `start_ts`/`end_ts` are unix seconds; `None` on either
+/// side is unbounded (both `None` ⇒ all-time).
+#[tauri::command]
+pub async fn library_get_listen_stats_range(
+    start_ts: Option<i64>,
+    end_ts:   Option<i64>,
+    storage:  State<'_, StorageState>,
+) -> Result<(Vec<DailyTrackStat>, Vec<(String, i64)>), String> {
+    storage.db.get_listen_stats_range(start_ts, end_ts).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
