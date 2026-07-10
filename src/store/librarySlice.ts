@@ -10,6 +10,8 @@ export type LibrarySlice = {
   toggleFavorite: (hash: string) => void
   // Avoids a DB round-trip: makes synced tracks visible to the player before loadLibrary() completes.
   hydrateTracksFromPlaylist: (playlistTracks: TrackRecord[]) => void
+  // Pure local-state mutator — callers invoke the backend delete themselves, then call this.
+  removeTracks: (hashes: string[]) => void
 }
 
 export const createLibrarySlice: StateCreator<LibrarySlice> = (set, get) => ({
@@ -37,6 +39,11 @@ export const createLibrarySlice: StateCreator<LibrarySlice> = (set, get) => ({
       }
     }
     if (changed) set({ tracks: [...existing.values()] })
+  },
+
+  removeTracks: (hashes) => {
+    const hashSet = new Set(hashes)
+    set({ tracks: get().tracks.filter(t => !hashSet.has(t.hash)) })
   },
 
   toggleFavorite: (hash) => {

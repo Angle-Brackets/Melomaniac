@@ -105,14 +105,19 @@ const QUEUE_ROW_H    = 52;
 const QUEUE_LIST_H   = 252;
 const QUEUE_HEADER_H = 62; // pill (10px) + header row (padding 5+8 + minH 36) + 1px border
 
-function QueueRow({ track, isActive, isPlaying, onClick }: {
+// removable rows (strictly upcoming tracks) get a swipe-right-to-remove gesture on the
+// content area — the drag handle is kept outside the swipe surface so the two gestures
+// never fight over the same touch (see the touchstart HANDLE_PX gating in the effect below).
+function QueueRow({ track, isActive, isPlaying, onClick, removable, onRemove }: {
   track: TrackRecord;
   isActive: boolean;
   isPlaying: boolean;
   onClick: () => void;
+  removable?: boolean;
+  onRemove?: () => void;
 }) {
   const artUrl = useTrackArtwork(track.hash, track.artwork_hash);
-  return (
+  const content = (
     <div
       onClick={onClick}
       style={{
@@ -139,6 +144,13 @@ function QueueRow({ track, isActive, isPlaying, onClick }: {
           fontSize: 11, color: 'var(--text-2)', marginTop: 1,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>{track.artist}</div>}
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ height: QUEUE_ROW_H, display: 'flex', alignItems: 'center' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {removable && onRemove ? <SwipeToRemove onRemove={onRemove}>{content}</SwipeToRemove> : content}
       </div>
       {/* drag handle — touch-action:none so browser won't intercept as scroll */}
       <div style={{
@@ -1415,6 +1427,8 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                           isActive={track.hash === loadedTrackHash}
                           isPlaying={isPlaying}
                           onClick={() => { if (draggingIdx === null) { jumpTo(vItem.index); playTrack(track); } }}
+                          removable={shuffle === ShuffleMode.Off && vItem.index > activeListIndex}
+                          onRemove={() => removeUpcomingTrack(track.hash)}
                         />
                       </div>
                     );
