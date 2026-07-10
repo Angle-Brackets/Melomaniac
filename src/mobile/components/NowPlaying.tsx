@@ -209,13 +209,14 @@ const RADIAL_R = 62;          // px from button center to icon bubble center
 const LONG_PRESS_MS = 320;    // ms hold before menu opens
 const DEAD_ZONE_PX = 22;      // px from center — keep current mode highlighted
 
-// Full circle, 5 modes evenly spaced at 72° each. 0° = top, clockwise.
+// Full circle, 6 modes evenly spaced at 60° each. 0° = top, clockwise.
 const SHUFFLE_OPTS = [
   { mode: ShuffleMode.Off,       label: 'Off',       angleDeg:   0 },
-  { mode: ShuffleMode.Random,    label: 'Random',    angleDeg:  72 },
-  { mode: ShuffleMode.Smart,     label: 'Smart',     angleDeg: 144 },
-  { mode: ShuffleMode.Weighted,  label: 'Weighted',  angleDeg: 216 },
-  { mode: ShuffleMode.Discovery, label: 'Discovery', angleDeg: 288 },
+  { mode: ShuffleMode.Random,    label: 'Random',    angleDeg:  60 },
+  { mode: ShuffleMode.Smart,     label: 'Smart',     angleDeg: 120 },
+  { mode: ShuffleMode.Weighted,  label: 'Weighted',  angleDeg: 180 },
+  { mode: ShuffleMode.Discovery, label: 'Discovery', angleDeg: 240 },
+  { mode: ShuffleMode.Favorites, label: 'Favorites', angleDeg: 300 },
 ] as const;
 
 function ShuffleModeIcon({ mode, size }: { mode: ShuffleMode; size: number }): React.ReactElement {
@@ -225,6 +226,7 @@ function ShuffleModeIcon({ mode, size }: { mode: ShuffleMode; size: number }): R
     case ShuffleMode.Smart:     return <Icons.shuffle size={size}/>;
     case ShuffleMode.Weighted:  return <Icons.shuffleWeighted size={size}/>;
     case ShuffleMode.Discovery: return <Icons.shuffleDiscovery size={size}/>;
+    case ShuffleMode.Favorites: return <Icons.heartFill size={size}/>;
   }
 }
 
@@ -250,6 +252,7 @@ function ShuffleRadialMenu({ mode, onSelect, onTap, size }: {
     mode === ShuffleMode.Random    ? Icons.shuffleRandom :
     mode === ShuffleMode.Weighted  ? Icons.shuffleWeighted :
     mode === ShuffleMode.Discovery ? Icons.shuffleDiscovery :
+    mode === ShuffleMode.Favorites ? Icons.heartFill :
     Icons.shuffle;
 
   const openMenu = () => {
@@ -604,6 +607,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   const setRepeat          = useStore(s => s.setRepeat);
   const shuffledQueue      = useStore(s => s.shuffledQueue);
   const shuffleIndex          = useStore(s => s.shuffleIndex);
+  const manualQueue           = useStore(s => s.manualQueue);
   const removeUpcomingTrack   = useStore(s => s.removeUpcomingTrack);
   const toggleFavorite        = useStore(s => s.toggleFavorite);
   const playlists          = useStore(s => s.playlists);
@@ -857,7 +861,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   // currentIndex only changes via advance/retreat/explicit play so auto-advance stays correct.
 
   const handleShuffle = () => {
-    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery] as const;
+    const cycle = [ShuffleMode.Off, ShuffleMode.Smart, ShuffleMode.Random, ShuffleMode.Weighted, ShuffleMode.Discovery, ShuffleMode.Favorites] as const;
     setShuffle(cycle[(cycle.indexOf(shuffle) + 1) % cycle.length]);
   };
 
@@ -967,9 +971,11 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
   );
   const accent = accent1;
   const { slots: haloSlots, activeSlot: haloActive } = useGlowFade([accent1, accent2]);
-  const nextTrack: TrackRecord | null = shuffle !== ShuffleMode.Off
-    ? (shuffledQueue[shuffleIndex + 1] ? tracks.find(t => t.hash === shuffledQueue[shuffleIndex + 1]) ?? null : null)
-    : (queueRecords[activeListIndex + 1] ?? null);
+  const nextTrack: TrackRecord | null = manualQueue.length > 0
+    ? (tracks.find(t => t.hash === manualQueue[0]) ?? null)
+    : shuffle !== ShuffleMode.Off
+      ? (shuffledQueue[shuffleIndex + 1] ? tracks.find(t => t.hash === shuffledQueue[shuffleIndex + 1]) ?? null : null)
+      : (queueRecords[activeListIndex + 1] ?? null);
 
   const coverflowItems = queueRecords.length > 0
     ? queueRecords
@@ -1370,7 +1376,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                       )}
                     </div>
                     <span style={{ fontSize: 10.5, color: 'var(--text-3)', fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>
-                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : shuffle === ShuffleMode.Weighted ? ' · weighted' : shuffle === ShuffleMode.Discovery ? ' · discovery' : ''}
+                      {currentPlaylist?.name ?? 'Library'} · {queueRecords.length} tracks{shuffle === ShuffleMode.Smart ? ' · smart' : shuffle === ShuffleMode.Random ? ' · random' : shuffle === ShuffleMode.Weighted ? ' · weighted' : shuffle === ShuffleMode.Discovery ? ' · discovery' : shuffle === ShuffleMode.Favorites ? ' · favorites' : ''}
                     </span>
                   </div>
                 </div>
@@ -1448,11 +1454,15 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
       {/* Queue sheet */}
       {showQueue && (() => {
         const nowPlaying = currentTrack;
-        const comingUp = shuffle !== ShuffleMode.Off
+        const manualUpcoming = manualQueue
+          .map(h => tracks.find(t => t.hash === h))
+          .filter((t): t is TrackRecord => t !== undefined);
+        const naturalUpcoming = shuffle !== ShuffleMode.Off
           ? shuffledQueue.slice(shuffleIndex + 1, shuffleIndex + 11)
               .map(h => tracks.find(t => t.hash === h))
               .filter((t): t is TrackRecord => t !== undefined)
           : queueRecords.slice(currentIndex + 1, currentIndex + 11);
+        const comingUp = [...manualUpcoming, ...naturalUpcoming].slice(0, 10);
         return (
           <div style={{ position: 'absolute', inset: 0, zIndex: 60 }}>
             <div onClick={() => setShowQueue(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}/>

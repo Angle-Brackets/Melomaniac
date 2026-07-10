@@ -69,6 +69,7 @@ function ShuffleIcon({ isShuffle, mode, size = 16 }: { isShuffle: boolean; mode:
   if (!isShuffle || mode === 'fisher-yates') return <IcoShuffle size={size} />;
   if (mode === 'weighted')  return <IcoDumbbell size={size} />;
   if (mode === 'discovery') return <IcoDiscovery size={size} />;
+  if (mode === 'favorites') return <IcoHeart size={size} />;
   return <FiLayers size={size} />;
 }
 
@@ -77,7 +78,8 @@ function shuffleLabel(isShuffle: boolean, mode: ShuffleMode) {
   if (mode === 'fisher-yates') return 'True Shuffle — click for Smart';
   if (mode === 'smart')        return 'Smart Shuffle — click for Weighted';
   if (mode === 'weighted')     return 'Weighted Shuffle — click for Discovery';
-  return 'Discovery Shuffle — click to turn off';
+  if (mode === 'discovery')    return 'Discovery Shuffle — click for Favorites';
+  return 'Favorites Shuffle — click to turn off';
 }
 
 function Tip({ tip, children }: { tip: string; children: React.ReactNode }) {

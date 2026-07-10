@@ -1,7 +1,7 @@
 import type { ThemeName } from '../shared/themes';
 export type { ThemeName };
 
-export type ShuffleMode = 'fisher-yates' | 'smart' | 'weighted' | 'discovery';
+export type ShuffleMode = 'fisher-yates' | 'smart' | 'weighted' | 'discovery' | 'favorites';
 
 export enum LoopMode {
   Off = 'off',
