@@ -184,6 +184,14 @@ export type TrackStats = {
   total_listen_ms: number
 }
 
+/** One track's play activity on one calendar day (local time). */
+export type DailyTrackStat = {
+  hash:       string
+  date:       string // "YYYY-MM-DD"
+  play_count: number
+  listen_ms:  number
+}
+
 export type BranchInfo = {
   name:         string
   track_count:  number
