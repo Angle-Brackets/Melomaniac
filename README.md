@@ -43,6 +43,7 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
   - **Smart** — artist-spread weighted, avoids consecutive same-artist tracks
   - **Weighted** — play-count weighted; tracks you listen to less often come up more
   - **Discovery** — deprioritises recently played tracks to surface forgotten songs
+  - **Favorites** — favorited tracks are weighted heavily without excluding the rest of the library
 - **AB loop** with per-track A/B timestamps persisted across restarts
 - Queue management with drag-to-reorder
 - Discord Rich Presence (desktop)
@@ -51,7 +52,9 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 - **Content-addressed storage** — files stored by BLAKE3 hash; zero duplication
 - **yt-dlp ingestion** — paste any URL, audio downloads to CAS with metadata; background queue with progress ring
 - **Metadata editor** — read/write MP3/FLAC/OGG tags via `lofty`; bulk edit; artwork library
-- Listening statistics — play counts, skip counts, per-track history
+- **Manage Storage** — CAS garbage collection reclaims space from orphaned blobs; **Replace Audio** swaps a track's underlying file without losing its history, stats, or artwork
+- **Cascade-delete confirmation** — deleting a track shows every playlist that references it, with an explicit option to remove it from those playlists too
+- **Listening Stats dashboard** (desktop) — per-track stacked-area chart of listen time with a selectable timeframe (Last 7/30 Days, This Year, All Time, custom range), plus a data table with visibility toggles, color-coded swatches, and inline Plays/Skips bars
 
 ### Spotify Import
 - **Connect your Spotify account** (OAuth 2.0 PKCE, no client secret) — works identically on desktop and iOS
@@ -98,6 +101,8 @@ macOS: if you see "unidentified developer", right-click → Open the first time 
 - Shuffle and heart icons are **theme-colored**; loop icon uses the CSS accent color — none are tied to album art palette
 - Player tab glow in the bottom nav respects the current theme color
 - Inline queue panel has rounded top corners; artist text in Now Playing is always white for readability
+- **Two-stage queue swipe** on Now Playing's Tracklist and Coming Up list — partial swipe bumps a track to play next, a full swipe removes it from the queue, each with a toast confirmation
+- **Long-press action sheet** for Delete from Library, mirroring desktop's playlist-impact preview and cascade-delete flow
 - Swipe-to-delete with vertical-scroll cancel guard
 - Pull-to-refresh, swipe-back gesture
 - In-app browser (SFSafariViewController)
