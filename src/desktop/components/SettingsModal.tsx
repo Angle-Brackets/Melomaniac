@@ -22,11 +22,14 @@ interface SettingsModalProps {
   updateReady?: boolean;
   onInstallUpdate?: () => void;
   onRelaunch?: () => void;
+  isCheckingUpdate?: boolean;
+  updateCheckResult?: 'up-to-date' | 'error' | null;
+  onCheckForUpdate?: () => void;
 }
 
 const DENSITIES = [Density.Compact, Density.Normal, Density.Relaxed] as const;
 
-export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing, pendingUpdate, isInstalling, updateProgress, updateReady, onInstallUpdate, onRelaunch }: SettingsModalProps) {
+export default function SettingsModal({ settings, updateSetting, onClose, onReset, onPairDevice, closing, pendingUpdate, isInstalling, updateProgress, updateReady, onInstallUpdate, onRelaunch, isCheckingUpdate, updateCheckResult, onCheckForUpdate }: SettingsModalProps) {
   const livePeers           = useStore(s => s.livePeers);
   const knownDevices        = useStore(s => s.knownDevices);
   const refreshLivePeers    = useStore(s => s.refreshLivePeers);
@@ -409,6 +412,19 @@ export default function SettingsModal({ settings, updateSetting, onClose, onRese
                     Update to v{pendingUpdate.version}
                   </button>
                 )
+              )}
+              {!updateReady && !pendingUpdate && (
+                <div className="flex items-center gap-2">
+                  {updateCheckResult === 'up-to-date' && (
+                    <span className="font-mono text-[10px] text-mm-t2">Up to date</span>
+                  )}
+                  {updateCheckResult === 'error' && (
+                    <span className="font-mono text-[10px] text-error">Check failed</span>
+                  )}
+                  <button onClick={onCheckForUpdate} disabled={isCheckingUpdate} className="btn btn-ghost btn-xs">
+                    {isCheckingUpdate ? 'Checking…' : 'Check for Updates'}
+                  </button>
+                </div>
               )}
               <button onClick={onReset} className="btn btn-ghost btn-xs">Reset to defaults</button>
             </div>

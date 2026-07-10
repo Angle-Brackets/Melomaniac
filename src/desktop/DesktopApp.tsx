@@ -239,6 +239,8 @@ export default function DesktopApp(): JSX.Element {
   const [isInstalling, setIsInstalling] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<number | null>(null);
   const [updateReady, setUpdateReady] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateCheckResult, setUpdateCheckResult] = useState<'up-to-date' | 'error' | null>(null);
 
   const activePlaylist = playlistRecords.find(p => p.id === activePlaylistId) ?? null;
   // Override description with the branch-specific value from the tree blob.
@@ -834,16 +836,25 @@ export default function DesktopApp(): JSX.Element {
     return () => clearInterval(interval);
   }, [showStats]);
 
-  // ── Update check — runs once on startup, skipped in dev builds ──────────
+  // ── Update check — runs once on startup, skipped in dev builds; also
+  // callable manually from Settings' "Check for Updates" button. ──────────
+  const runUpdateCheck = useCallback(() => {
+    setIsCheckingUpdate(true);
+    setUpdateCheckResult(null);
+    checkForUpdate()
+      .then(update => {
+        if (update?.available) { setPendingUpdate(update); setUpdateCheckResult(null); }
+        else { setUpdateCheckResult('up-to-date'); }
+      })
+      .catch(err => { console.warn('[updater] check failed:', err); setUpdateCheckResult('error'); })
+      .finally(() => setIsCheckingUpdate(false));
+  }, []);
+
   useEffect(() => {
     if (import.meta.env.DEV) return;
-    const timer = setTimeout(() => {
-      checkForUpdate()
-        .then(update => { if (update?.available) setPendingUpdate(update); })
-        .catch(() => {});
-    }, 8000);
+    const timer = setTimeout(runUpdateCheck, 8000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [runUpdateCheck]);
 
   // ── Audio event listener ─────────────────────────────────────────────────
   useEffect(() => {
@@ -2108,6 +2119,9 @@ export default function DesktopApp(): JSX.Element {
             updateReady={updateReady}
             updateProgress={updateProgress}
             onRelaunch={() => relaunch()}
+            isCheckingUpdate={isCheckingUpdate}
+            updateCheckResult={updateCheckResult}
+            onCheckForUpdate={runUpdateCheck}
           />
         )}
 
