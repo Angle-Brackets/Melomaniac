@@ -22,6 +22,11 @@ export type QueueSlice = {
   shuffledQueue: string[] // pre-computed upcoming hashes; consumed by both shuffle modes
   shuffleHistory: string[] // recently played hashes used to avoid immediate repeats on refill
   shuffleIndex: number    // current position within shuffledQueue
+  // Hashes swiped out of the queue while shuffled. shuffledQueue is only a rolling
+  // lookahead window, so a removed track that hasn't been drawn yet wouldn't be pruned
+  // by shuffledQueue alone — this also keeps refillShuffleQueue from drawing it again.
+  // Forgotten on the next setShuffle()/loadQueue(), same lifetime as the Off-mode prune.
+  excludedHashes: Set<string>
   lookahead: number       // how many tracks to pre-generate per refill (default 20)
   trackPlayCounts: Map<string, number> // hash → play_count; populated on demand for Weighted/Discovery/Favorites
   manualQueue: string[]        // FIFO priority queue — consumed by advance() before the normal linear/shuffle order
@@ -52,6 +57,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   shuffledQueue: [],
   shuffleHistory: [],
   shuffleIndex: 0,
+  excludedHashes: new Set(),
   lookahead: 20,
   trackPlayCounts: new Map(),
   manualQueue: [],
@@ -67,7 +73,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   loadQueue: (hashes) => {
     set({
       queueTracks: hashes, originalQueueTracks: hashes, currentIndex: 0,
-      shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0,
+      shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0, excludedHashes: new Set(),
       manualQueue: [], activeManualHash: null,
     })
     if (get().shuffle !== ShuffleMode.Off) get().refillShuffleQueue()
@@ -120,7 +126,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
     // A mode switch is a natural reset point: forget any tracks swiped out of the
     // queue this session so they're eligible again, whether the new mode is linear
     // (queueTracks below) or shuffled (refillShuffleQueue always reads originalQueueTracks).
-    set({ shuffle: mode, queueTracks: originalQueueTracks, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
+    set({ shuffle: mode, queueTracks: originalQueueTracks, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0, excludedHashes: new Set() })
     if (mode === ShuffleMode.Off) {
       const idx = playing ? originalQueueTracks.indexOf(playing) : -1
       set({ currentIndex: idx >= 0 ? idx : 0 })
@@ -154,7 +160,12 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
     if (shuffle !== ShuffleMode.Off) {
       const before = shuffledQueue.slice(0, shuffleIndex + 1)
       const after  = shuffledQueue.slice(shuffleIndex + 1).filter(h => h !== hash)
-      set({ shuffledQueue: [...before, ...after], manualQueue: nextManualQueue })
+      // shuffledQueue is only a rolling lookahead window — also exclude the hash from
+      // future refills so a track further out than the current window stays gone too.
+      set({
+        shuffledQueue: [...before, ...after], manualQueue: nextManualQueue,
+        excludedHashes: new Set(get().excludedHashes).add(hash),
+      })
     } else {
       const before = queueTracks.slice(0, currentIndex + 1)
       const after  = queueTracks.slice(currentIndex + 1).filter(h => h !== hash)
@@ -181,13 +192,14 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   clearManualQueue: () => set({ manualQueue: [] }),
 
   refillShuffleQueue: () => {
-    const { originalQueueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks, trackPlayCounts } = get()
+    const { originalQueueTracks, shuffle, shuffledQueue, shuffleHistory, excludedHashes, lookahead, tracks, trackPlayCounts } = get()
     if (originalQueueTracks.length === 0) return
 
-    // Exclude recently played tracks; if history has consumed everything, start a fresh cycle
+    // Exclude recently played tracks and swiped-out tracks; if history has consumed
+    // everything, start a fresh cycle (but keep respecting swipe-outs).
     const recentSet = new Set(shuffleHistory.slice(-lookahead))
-    let candidates = originalQueueTracks.filter(h => !recentSet.has(h))
-    if (candidates.length === 0) candidates = [...originalQueueTracks]
+    let candidates = originalQueueTracks.filter(h => !recentSet.has(h) && !excludedHashes.has(h))
+    if (candidates.length === 0) candidates = originalQueueTracks.filter(h => !excludedHashes.has(h))
 
     const count = Math.min(lookahead, candidates.length)
     let picks: string[]
