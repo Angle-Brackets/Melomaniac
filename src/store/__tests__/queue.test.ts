@@ -331,6 +331,42 @@ describe('manual queue', () => {
   })
 })
 
+// ── shuffle swipe-out (originalQueueTracks / excludedHashes) ────────────────────
+
+describe('shuffle swipe-out', () => {
+  it('a track swiped out while Off becomes eligible again after switching to a shuffle mode', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().removeUpcomingTrack('c')
+    expect(store.getState().queueTracks).not.toContain('c')
+    store.getState().setShuffle(ShuffleMode.Random)
+    expect(store.getState().shuffledQueue).toContain('c')
+  })
+
+  it('removeUpcomingTrack while shuffled excludes a track not yet drawn from future refills', () => {
+    const many = Array.from({ length: 25 }, (_, i) => `t${i}`)
+    store.getState().loadQueue(many)
+    store.getState().setShuffle(ShuffleMode.Smart) // Smart respects the lookahead count, unlike Random
+    const notYetDrawn = many.find(h => !store.getState().shuffledQueue.includes(h))
+    expect(notYetDrawn).toBeDefined()
+
+    store.getState().removeUpcomingTrack(notYetDrawn!)
+    expect(store.getState().excludedHashes.has(notYetDrawn!)).toBe(true)
+
+    // Drain through several refill cycles — the excluded hash must never be drawn.
+    for (let i = 0; i < 80; i++) store.getState().advance()
+    expect(store.getState().shuffledQueue).not.toContain(notYetDrawn)
+  })
+
+  it('excludedHashes is forgotten on the next setShuffle() mode switch', () => {
+    store.getState().loadQueue(HASHES)
+    store.getState().setShuffle(ShuffleMode.Random)
+    store.getState().removeUpcomingTrack('c')
+    expect(store.getState().excludedHashes.size).toBeGreaterThan(0)
+    store.getState().setShuffle(ShuffleMode.Smart)
+    expect(store.getState().excludedHashes.size).toBe(0)
+  })
+})
+
 // ── setShuffle ────────────────────────────────────────────────────────────────
 
 describe('setShuffle', () => {

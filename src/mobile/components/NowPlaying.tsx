@@ -148,9 +148,10 @@ const QUEUE_ROW_H    = 52;
 const QUEUE_LIST_H   = 252;
 const QUEUE_HEADER_H = 62; // pill (10px) + header row (padding 5+8 + minH 36) + 1px border
 
-// removable rows (strictly upcoming tracks) get the two-stage swipe gesture on the
-// content area — the drag handle is kept outside the swipe surface so the two gestures
-// never fight over the same touch (see the touchstart HANDLE_PX gating in the effect below).
+// removable rows (any track except the one currently loaded, or — in linear mode —
+// any track strictly upcoming of it) get the two-stage swipe gesture on the content
+// area — the drag handle is kept outside the swipe surface so the two gestures never
+// fight over the same touch (see the touchstart HANDLE_PX gating in the effect below).
 function QueueRow({ track, isActive, isPlaying, onClick, removable, onAddNext, onRemove }: {
   track: TrackRecord;
   isActive: boolean;
@@ -1483,7 +1484,7 @@ export function NowPlaying({ onTab }: { onTab: (id: TabId) => void }) {
                           isActive={track.hash === loadedTrackHash}
                           isPlaying={isPlaying}
                           onClick={() => { if (draggingIdx === null) { jumpTo(vItem.index); playTrack(track); } }}
-                          removable={shuffle === ShuffleMode.Off && vItem.index > activeListIndex}
+                          removable={track.hash !== loadedTrackHash && (shuffle !== ShuffleMode.Off || vItem.index > activeListIndex)}
                           onAddNext={() => { addToQueue(track.hash); showToast(`"${track.title}" will play next`); }}
                           onRemove={() => { removeUpcomingTrack(track.hash); showToast(`Removed "${track.title}" from queue`); }}
                         />
