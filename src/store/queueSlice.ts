@@ -11,7 +11,11 @@ const REFILL_THRESHOLD = 5
 const ARTIST_LOOKBEHIND = 4
 
 export type QueueSlice = {
-  queueTracks: string[]  // hashes in original load order
+  queueTracks: string[]  // hashes in the current session's linear order — can be pruned by removeUpcomingTrack
+  // Full unpruned load order. The shuffle candidate pool always draws from this, and any
+  // shuffle-mode switch resets queueTracks back to it, so a swiped-out track only stays
+  // gone until the next mode change instead of vanishing from the queue permanently.
+  originalQueueTracks: string[]
   currentIndex: number   // position in queueTracks when shuffle is Off
   shuffle: ShuffleMode
   repeat: RepeatMode
@@ -41,6 +45,7 @@ export type QueueSlice = {
 
 export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (set, get) => ({
   queueTracks: [],
+  originalQueueTracks: [],
   currentIndex: 0,
   shuffle: ShuffleMode.Off,
   repeat: RepeatMode.None,
@@ -61,7 +66,7 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
 
   loadQueue: (hashes) => {
     set({
-      queueTracks: hashes, currentIndex: 0,
+      queueTracks: hashes, originalQueueTracks: hashes, currentIndex: 0,
       shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0,
       manualQueue: [], activeManualHash: null,
     })
@@ -111,7 +116,15 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
 
   setShuffle: async (mode) => {
     const playing = get().currentHash()
-    set({ shuffle: mode, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
+    const originalQueueTracks = get().originalQueueTracks
+    // A mode switch is a natural reset point: forget any tracks swiped out of the
+    // queue this session so they're eligible again, whether the new mode is linear
+    // (queueTracks below) or shuffled (refillShuffleQueue always reads originalQueueTracks).
+    set({ shuffle: mode, queueTracks: originalQueueTracks, shuffledQueue: [], shuffleHistory: [], shuffleIndex: 0 })
+    if (mode === ShuffleMode.Off) {
+      const idx = playing ? originalQueueTracks.indexOf(playing) : -1
+      set({ currentIndex: idx >= 0 ? idx : 0 })
+    }
     if (mode === ShuffleMode.Weighted || mode === ShuffleMode.Discovery || mode === ShuffleMode.Favorites) {
       try {
         const stats = await invoke<[string, TrackStats][]>('library_get_all_track_stats')
@@ -168,13 +181,13 @@ export const createQueueSlice: StateCreator<StoreState, [], [], QueueSlice> = (s
   clearManualQueue: () => set({ manualQueue: [] }),
 
   refillShuffleQueue: () => {
-    const { queueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks, trackPlayCounts } = get()
-    if (queueTracks.length === 0) return
+    const { originalQueueTracks, shuffle, shuffledQueue, shuffleHistory, lookahead, tracks, trackPlayCounts } = get()
+    if (originalQueueTracks.length === 0) return
 
     // Exclude recently played tracks; if history has consumed everything, start a fresh cycle
     const recentSet = new Set(shuffleHistory.slice(-lookahead))
-    let candidates = queueTracks.filter(h => !recentSet.has(h))
-    if (candidates.length === 0) candidates = [...queueTracks]
+    let candidates = originalQueueTracks.filter(h => !recentSet.has(h))
+    if (candidates.length === 0) candidates = [...originalQueueTracks]
 
     const count = Math.min(lookahead, candidates.length)
     let picks: string[]
